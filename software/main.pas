@@ -128,6 +128,8 @@ type
     MenuCompareChip: TMenuItem;
     MenuCompareFiles: TMenuItem;
     MenuCompareChips: TMenuItem;
+    MenuAbout: TMenuItem;
+    MenuCredits: TMenuItem;
     MenuOpenProject: TMenuItem;
     MenuSaveProject: TMenuItem;
     MenuProdConfig: TMenuItem;
@@ -225,6 +227,9 @@ type
     procedure MenuCompareChipClick(Sender: TObject);
     procedure MenuCompareFilesClick(Sender: TObject);
     procedure MenuCompareChipsClick(Sender: TObject);
+    procedure MenuAboutClick(Sender: TObject);
+    procedure MenuCreditsClick(Sender: TObject);
+    procedure VersionCopyClick(Sender: TObject);
     procedure MenuOpenProjectClick(Sender: TObject);
     procedure MenuSaveProjectClick(Sender: TObject);
     procedure MenuProdConfigClick(Sender: TObject);
@@ -844,6 +849,18 @@ begin
   MainForm.MPHexEditorEx.Color := SurfaceColor;
   MainForm.MPHexEditorEx.Font.Color := TextColor;
 
+  //สีของไบต์ที่ต่างกันตอนเทียบข้อมูล ต้องเด่นพอให้เห็นทันทีในตาราง
+  if Dark then
+  begin
+    MainForm.MPHexEditorEx.Colors.ChangedText := TColor($8080FF);        //#FF8080
+    MainForm.MPHexEditorEx.Colors.ChangedBackground := TColor($1F1A3A);  //#3A1A1F
+  end
+  else
+  begin
+    MainForm.MPHexEditorEx.Colors.ChangedText := TColor($1E26B3);        //#B3261E
+    MainForm.MPHexEditorEx.Colors.ChangedBackground := TColor($DEE1FF);  //#FFE1DE
+  end;
+
   //ป้ายบางตัวใน main.lfm ปิด ParentFont ไว้ จึงต้องตั้งสีให้ทีละตัว
   for i := 0 to MainForm.ComponentCount - 1 do
   begin
@@ -1296,6 +1313,7 @@ procedure ReadFlash25(var RomStream: TMemoryStream; StartAddress, ChipSize: card
 //ตัวช่วยของงานเทียบข้อมูล ตัวจริงอยู่ท้ายไฟล์ แต่มีผู้เรียกอยู่ก่อนหน้านั้น
 function ReportDiff(const A, B: array of byte; Size: integer): integer; forward;
 function UIChipSize: cardinal; forward;
+procedure ShowDiffInEditor(const A, B: array of byte; Size: integer); forward;
 function ReadCurrentChip(Stream: TMemoryStream; Size: cardinal): boolean; forward;
 
 //ตรวจว่าชิปที่เสียบอยู่ตรงกับที่เลือกไว้จริงหรือไม่
@@ -4201,7 +4219,7 @@ begin
     S1.Position := 0;  S1.ReadBuffer(A[0], Size);
     S2.Position := 0;  S2.ReadBuffer(B[0], Size);
 
-    ReportDiff(A, B, Size);
+    if ReportDiff(A, B, Size) > 0 then ShowDiffInEditor(A, B, Size);
   finally
     S1.Free;
     S2.Free;
@@ -4259,7 +4277,7 @@ try
   S1.Position := 0;  S1.ReadBuffer(A[0], Size);
   S2.Position := 0;  S2.ReadBuffer(B[0], Size);
 
-  ReportDiff(A, B, Size);
+  if ReportDiff(A, B, Size) > 0 then ShowDiffInEditor(A, B, Size);
 
 finally
   ExitProgMode25;
@@ -4708,6 +4726,46 @@ begin
   Result := DiffCount;
 end;
 
+//แสดงผลต่างในตารางกลาง
+//โหลดข้อมูลฝั่ง B ลงตาราง แล้วทำเครื่องหมายไบต์ที่ต่างจากฝั่ง A ว่า "เปลี่ยนแล้ว"
+//MPHexEditor จะระบายสีไบต์ที่มีเครื่องหมายนี้ด้วย ChangedText/ChangedBackground
+//ทำเครื่องหมายตรง ๆ ผ่าน ByteChanged ไม่เขียนทับข้อมูลทีละไบต์ เพราะการเขียน
+//ไม่ได้ตั้งบิตนี้ให้ แถมยังสร้างรายการ undo ทีละไบต์จนช้า
+procedure ShowDiffInEditor(const A, B: array of byte; Size: integer);
+var
+  S: TMemoryStream;
+  i, FirstDiff: integer;
+begin
+  S := TMemoryStream.Create;
+  try
+    S.WriteBuffer(B[0], Size);
+    S.Position := 0;
+    MainForm.MPHexEditorEx.LoadFromStream(S);
+  finally
+    S.Free;
+  end;
+
+  FirstDiff := -1;
+
+  for i := 0 to Size - 1 do
+    if A[i] <> B[i] then
+    begin
+      if FirstDiff < 0 then FirstDiff := i;
+      MainForm.MPHexEditorEx.ByteChanged[i] := True;
+    end;
+
+  //พาเคอร์เซอร์ไปจุดแรกที่ต่างกัน จะได้ไม่ต้องไล่หาเอง
+  if FirstDiff >= 0 then
+  begin
+    MainForm.MPHexEditorEx.SelStart := FirstDiff;
+    MainForm.MPHexEditorEx.SelEnd := FirstDiff;
+  end;
+
+  MainForm.MPHexEditorEx.Invalidate;
+  MainForm.MPHexEditorExChange(MainForm);
+  LogPrint(STR_DIFF_IN_EDITOR);
+end;
+
 //ขนาดชิปที่ตั้งไว้บนหน้าจอ อ่านสด ไม่ผ่าน OpUI ซึ่งมีค่าเฉพาะหลังเริ่มงานแล้ว
 function UIChipSize: cardinal;
 begin
@@ -4825,7 +4883,7 @@ try
   ChipData.Position := 0;   ChipData.ReadBuffer(A[0], Size);
   BufStream.Position := 0;  BufStream.ReadBuffer(B[0], Size);
 
-  ReportDiff(A, B, Size);
+  if ReportDiff(A, B, Size) > 0 then ShowDiffInEditor(A, B, Size);
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 
 finally
@@ -4864,6 +4922,202 @@ end;
 procedure TMainForm.BzHelpMenuItemClick(Sender: TObject);
 begin
      ExecuteProcess('cmd.exe', '/c start https://github.com/therealdreg/asprogrammer-dregmod', []);
+end;
+
+//นับจำนวนชิปในไฟล์ฐานข้อมูล ใช้โชว์ในหน้าต่างข้อมูลรุ่น
+function CountChips(XMLfile: TXMLDocument): integer;
+var
+  Node: TDOMNode;
+  j, i: integer;
+begin
+  Result := 0;
+  if XMLfile = nil then Exit;
+
+  Node := XMLfile.DocumentElement.FirstChild;
+  while Assigned(Node) do
+  begin
+    with Node.ChildNodes do
+    try
+      for j := 0 to Count - 1 do
+        for i := 0 to Item[j].ChildNodes.Count - 1 do
+          if Item[j].ChildNodes.Item[i].HasAttributes then
+            if Item[j].ChildNodes.Item[i].Attributes.GetNamedItem('size') <> nil then
+              Inc(Result);
+    finally
+      Free;
+    end;
+    Node := Node.NextSibling;
+  end;
+end;
+
+//หน้าต่างข้อมูลรุ่น สร้างด้วยโค้ดและใส่ข้อความไว้ใน memo
+//ผู้ใช้จะได้เลือกคัดลอกไปแปะตอนแจ้งปัญหาได้เลย
+procedure ShowVersionDialog(ShowCredits: boolean);
+var
+  F: TForm;
+  M: TMemo;
+  BtnClose, BtnCopy: TButton;
+  s: TStringList;
+  ExeName: string;
+begin
+  s := TStringList.Create;
+  try
+    ExeName := Application.ExeName;
+
+    if ShowCredits then
+    begin
+      s.Add('AsProgrammer ProX is built on the work of:');
+      s.Add('');
+      s.Add('  nofeletru');
+      s.Add('    AsProgrammer / UsbAsp-flash, the original program');
+      s.Add('    https://github.com/nofeletru/UsbAsp-flash');
+      s.Add('');
+      s.Add('  Dreg  @therealdreg');
+      s.Add('    the dregmod fork and its Buzzpirat / Bus Pirate support');
+      s.Add('    https://github.com/therealdreg/asprogrammer-dregmod');
+      s.Add('');
+      s.Add('  Ian Lesnet');
+      s.Add('    creator of the Bus Pirate');
+      s.Add('    https://buspirate.com/');
+      s.Add('');
+      s.Add('  Floyd77');
+      s.Add('    the method for adding an unknown chip to the database');
+      s.Add('');
+      s.Add('  the flashrom project');
+      s.Add('    chip data in chiplist-flashrom.xml, GPL-2.0-or-later');
+      s.Add('    https://github.com/flashrom/flashrom');
+      s.Add('');
+      s.Add('  David Sanchez and Mecanico');
+      s.Add('    the wiring photographs');
+      s.Add('');
+      s.Add('  Markus Stephany');
+      s.Add('    MPHexEditor, the hex editor component');
+      s.Add('');
+      s.Add('Licence: MIT, see the LICENSE file next to the program.');
+      s.Add('Copyright (c) 2015 nofeletru and contributors.');
+    end
+    else
+    begin
+      s.Add('AsProgrammer ProX');
+      s.Add('Version 4.0.0.0');
+      s.Add('');
+      s.Add('Serial flash and EEPROM programmer for SPI, I2C and MicroWire.');
+      s.Add('https://github.com/patnawa/AsProgrammer-ProX');
+      s.Add('');
+      s.Add('--- Build ---');
+      s.Add('Executable   ' + ExeName);
+      if FileExists(ExeName) then
+        s.Add('Built        ' + FormatDateTime('yyyy-mm-dd hh:nn',
+                                 FileDateToDateTime(FileAge(ExeName))));
+      s.Add('Compiler     Free Pascal ' + {$I %FPCVERSION%});
+      s.Add('Target       ' + {$I %FPCTARGETCPU%} + '-' + {$I %FPCTARGETOS%});
+      s.Add('Widgetset    LCL');
+      s.Add('');
+      s.Add('--- Chip database ---');
+      s.Add('chiplist.xml           ' + IntToStr(CountChips(ChipListFile)) + ' chips');
+      if ChipListFile2 <> nil then
+        s.Add('chiplist-flashrom.xml  ' + IntToStr(CountChips(ChipListFile2)) +
+              ' chips  (GPL-2.0-or-later)')
+      else
+        s.Add('chiplist-flashrom.xml  not loaded');
+      s.Add('Unknown chips are still usable through SFDP auto-detect.');
+      s.Add('');
+      s.Add('--- Programmers ---');
+      s.Add('CH341a, CH347, FT232H, UsbAsp, AVRISP(LUFA), Arduino,');
+      s.Add('Buzzpirat / Bus Pirate');
+      s.Add('');
+      s.Add('--- Protocols ---');
+      s.Add('SPI 25 / 45 / 95 series, I2C 24 series, MicroWire 93 series,');
+      s.Add('KB9012 EC');
+      s.Add('');
+      s.Add('--- This session ---');
+      if ProgrammerPresent then
+        s.Add('Programmer   ' + AsProgrammer.Programmer.HardwareName + ' connected')
+      else
+        s.Add('Programmer   none detected');
+      if CurrentICParam.Name <> '' then
+        s.Add('Chip         ' + CurrentICParam.Name + '  ' + CurrentICParam.ID)
+      else
+        s.Add('Chip         none selected');
+      s.Add('Language     ' + CurrentLang);
+      s.Add('');
+      s.Add('Licence: MIT. See Version -> Credits for the people this is built on.');
+    end;
+
+    F := TForm.CreateNew(nil);
+    try
+      if ShowCredits then F.Caption := 'Credits' else F.Caption := 'Version';
+      F.BorderStyle := bsSizeable;
+      F.Position := poMainFormCenter;
+      F.ClientWidth := 560;
+      F.ClientHeight := 460;
+
+      M := TMemo.Create(F);
+      M.Parent := F;
+      M.Align := alClient;
+      M.BorderSpacing.Around := 8;
+      M.BorderSpacing.Bottom := 44;
+      M.ReadOnly := True;
+      M.ScrollBars := ssAutoBoth;
+      M.WordWrap := False;
+      M.Font.Name := 'Consolas';
+      M.Font.Size := 9;
+      M.Lines.Assign(s);
+
+      BtnCopy := TButton.Create(F);
+      BtnCopy.Parent := F;
+      BtnCopy.Caption := 'Copy';
+      BtnCopy.Width := 90;
+      BtnCopy.Anchors := [akRight, akBottom];
+      BtnCopy.AnchorSideRight.Control := F;
+      BtnCopy.AnchorSideRight.Side := asrRight;
+      BtnCopy.AnchorSideBottom.Control := F;
+      BtnCopy.AnchorSideBottom.Side := asrBottom;
+      BtnCopy.BorderSpacing.Right := 106;
+      BtnCopy.BorderSpacing.Bottom := 8;
+      BtnCopy.OnClick := @MainForm.VersionCopyClick;
+      BtnCopy.Tag := PtrInt(M);
+
+      BtnClose := TButton.Create(F);
+      BtnClose.Parent := F;
+      BtnClose.Caption := 'Close';
+      BtnClose.Width := 90;
+      BtnClose.Anchors := [akRight, akBottom];
+      BtnClose.AnchorSideRight.Control := F;
+      BtnClose.AnchorSideRight.Side := asrRight;
+      BtnClose.AnchorSideBottom.Control := F;
+      BtnClose.AnchorSideBottom.Side := asrBottom;
+      BtnClose.BorderSpacing.Right := 8;
+      BtnClose.BorderSpacing.Bottom := 8;
+      BtnClose.ModalResult := mrOk;
+      BtnClose.Default := True;
+      BtnClose.Cancel := True;
+
+      F.ShowModal;
+    finally
+      F.Free;
+    end;
+  finally
+    s.Free;
+  end;
+end;
+
+procedure TMainForm.VersionCopyClick(Sender: TObject);
+begin
+  if Sender is TButton then
+    TMemo(Pointer(TButton(Sender).Tag)).SelectAll;
+  if Sender is TButton then
+    TMemo(Pointer(TButton(Sender).Tag)).CopyToClipboard;
+end;
+
+procedure TMainForm.MenuAboutClick(Sender: TObject);
+begin
+  ShowVersionDialog(False);
+end;
+
+procedure TMainForm.MenuCreditsClick(Sender: TObject);
+begin
+  ShowVersionDialog(True);
 end;
 
 procedure TMainForm.CreditsMenuItemClick(Sender: TObject);

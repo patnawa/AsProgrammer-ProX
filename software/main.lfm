@@ -1258,8 +1258,15 @@ object MainForm: TMainForm
       OnClick = ListcomportsMenuItemClick
     end
 	object CreditsMenuItem: TMenuItem
-      Caption = 'Credits'
-      OnClick = CreditsMenuItemClick
+      Caption = 'Version'
+      object MenuAbout: TMenuItem
+        Caption = 'About AsProgrammer ProX...'
+        OnClick = MenuAboutClick
+      end
+      object MenuCredits: TMenuItem
+        Caption = 'Credits...'
+        OnClick = MenuCreditsClick
+      end
     end
   end
   object ImageList: TImageList
