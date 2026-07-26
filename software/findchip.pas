@@ -28,7 +28,10 @@ type
   end;
 
   procedure FindChip(XMLfile: TXMLDocument; chipname: string; chipid: string = '');
-  procedure SelectChip(XMLfile: TXMLDocument; chipname: string);
+
+  //คืน True เมื่อเจอชิปชื่อนี้ในไฟล์และตั้งค่าให้แล้ว
+  //ต้องรู้ผลเพราะรายชื่อชิปอาจมาจากไฟล์มากกว่าหนึ่งไฟล์
+  function SelectChip(XMLfile: TXMLDocument; chipname: string): boolean;
 
   //เหมือน FindChip แต่ใส่ผลลงในลิสต์ที่ส่งมา ไม่ยุ่งกับหน้าต่างค้นหาและ log
   //ใช้ตอนตรวจหาชิปอัตโนมัติ ซึ่งต้องนับจำนวนผลก่อนจะตัดสินใจ
@@ -147,12 +150,14 @@ begin
   end;
 end;
 
-procedure SelectChip(XMLfile: TXMLDocument; chipname: string);
+function SelectChip(XMLfile: TXMLDocument; chipname: string): boolean;
 var
   Node, ChipNode: TDOMNode;
   j, i: integer;
   cs: string;
 begin
+  Result := False;
+
   if XMLfile <> nil then
   begin
     Node := XMLfile.DocumentElement.FirstChild;
@@ -294,6 +299,7 @@ begin
                 else
                   MainForm.ComboChipSize.Text := 'Chip size';
 
+                Result := True;
               end;
            end;
          end;
@@ -313,6 +319,7 @@ procedure TChipSearchForm.EditSearchChange(Sender: TObject);
 begin
   ListBoxChips.Clear;
   FindChip(chiplistfile, EditSearch.Text);
+  FindChip(ChipListFile2, EditSearch.Text);
 end;
 
 procedure TChipSearchForm.ChipSearchSelectButtonClick(Sender: TObject);
@@ -329,7 +336,9 @@ begin
   begin
     chipname := ListBoxChips.Items[ListBoxChips.ItemIndex];
     chipname := copy(chipname, 1, pos(' (', chipname)-1); //ตัดชื่อผู้ผลิตออก
-    SelectChip(chiplistfile, chipname);
+    //หาในไฟล์หลักก่อน ถ้าไม่เจอค่อยหาในไฟล์เสริม
+    if not SelectChip(chiplistfile, chipname) then
+      SelectChip(ChipListFile2, chipname);
   end;
 end;
 

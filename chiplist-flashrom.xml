@@ -1,0 +1,271 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  chiplist-flashrom.xml
+
+  ตารางชิปเพิ่มเติม แปลงมาจากตารางชิปของโครงการ flashrom โดยอัตโนมัติ
+  ด้วย tools/import_flashchips.py
+
+  ไฟล์นี้เป็นงานดัดแปลงจาก flashrom จึงอยู่ภายใต้สัญญาอนุญาต
+  GPL-2.0-or-later ไม่ใช่ MIT แบบโค้ดส่วนอื่นของโปรแกรม
+
+  SPDX-License-Identifier: GPL-2.0-or-later
+  SPDX-FileCopyrightText: 2000 Silicon Integrated System Corporation
+  SPDX-FileCopyrightText: 2000 Ronald G. Minnich
+  SPDX-FileCopyrightText: 2004 Tyan Corp
+  SPDX-FileCopyrightText: 2005-2008 coresystems GmbH
+  SPDX-FileCopyrightText: 2006-2009 Carl-Daniel Hailfinger
+  SPDX-FileCopyrightText: 2009 Sean Nelson
+  SPDX-FileCopyrightText: ผู้ร่วมพัฒนา flashrom ท่านอื่น ๆ
+
+  ต้นทาง: https://github.com/flashrom/flashrom
+-->
+<chiplist>
+  <SPI>
+    <AMIC>
+      <A25LQ64 id="374017" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+    </AMIC>
+    <ATMEL>
+      <AT25DF011_1.8V id="1F4200" page="256" size="131072" sector="4096" sectorcmd="20"/>
+      <AT25DF021A_1.8V id="1F4301" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <AT25DF041A id="1F4401" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <AT25DF081_1.8V id="1F4502" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <AT25DF081A id="1F4501" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <AT25DF161 id="1F4602" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <AT25DF321A id="1F4701" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <AT25DL081_1.8V id="1F4502" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <AT25DL161_1.8V id="1F4603" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <AT25DQ161 id="1F8600" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <AT25F1024_A id="1F0060" page="256" size="131072" sector="32768" sectorcmd="52"/>
+      <AT25F2048 id="1F0063" page="256" size="262144" sector="65536" sectorcmd="52"/>
+      <AT25F4096 id="1F0064" page="256" size="524288" sector="65536" sectorcmd="52"/>
+      <AT25F512 id="1F0060" page="256" size="65536" sector="32768" sectorcmd="52"/>
+      <AT25F512A id="1F0065" page="128" size="65536" sector="32768" sectorcmd="52"/>
+      <AT25FS010 id="1F6601" page="256" size="131072" sector="4096" sectorcmd="20"/>
+      <AT25FS040 id="1F6604" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <AT25SF041 id="1F8401" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <AT25SF081 id="1F8501" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <AT25SF128A_1.8V id="1F8901" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <AT25SF161 id="1F8601" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <AT25SF321 id="1F8701" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <AT25SL128A_1.8V id="1F4218" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <AT26DF081A id="1F4501" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <AT26DF161A id="1F4601" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <AT45CS1282 id="1F2920" page="1056" size="17301504"/>
+      <AT45DB011D id="1F2200" page="256" size="131072"/>
+      <AT45DB081D id="1F2500" page="256" size="1048576"/>
+      <AT45DB321C id="1F2700" page="528" size="4325376"/>
+      <AT45DB321E id="1F2700" page="512" size="4194304"/>
+      <AT45DB642D id="1F2800" page="1024" size="8388608"/>
+      <AT45DB641E id="1F2800" page="256" size="8388608"/>
+    </ATMEL>
+    <BOYA_BOHONG>
+      <BY25D20 id="684012" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <BY25D40 id="684013" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <B.25D16A id="684015" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <B.25Q128AS id="684018" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+    </BOYA_BOHONG>
+    <EON>
+      <EN25S10_1.8V id="1C3811" page="256" size="131072" sector="4096" sectorcmd="20"/>
+      <EN25S16_1.8V id="1C3815" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <EN25S20_1.8V id="1C3812" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <EN25S32_1.8V id="1C3816" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <EN25S64_1.8V id="1C3817" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <EN25S80_1.8V id="1C3814" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+    </EON>
+    <FUDAN>
+      <FM25W128_1.8V id="A12818" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <FM25F005 id="A13110" page="256" size="65536" sector="4096" sectorcmd="20"/>
+      <FM25F01 id="A13111" page="256" size="131072" sector="4096" sectorcmd="20"/>
+      <FM25F02_A id="A13112" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <FM25F04_A id="A13113" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <FM25Q08 id="A14014" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <FM25Q16 id="A14015" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <FM25Q64 id="A14017" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <FM25Q128 id="A14018" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+    </FUDAN>
+    <GIGADEVICE>
+      <GD25LF128E_1.8V id="C86318" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <GD25LF256F_1.8V id="C86319" page="256" size="33554432" sector="4096" sectorcmd="21"/>
+      <GD25LF512MF_1.8V id="C8631A" page="256" size="67108864" sector="4096" sectorcmd="21"/>
+      <GD25LQ16_1.8V id="C86015" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <GD25LQ32_1.8V id="C86016" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <GD25LQ40_1.8V id="C86013" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <GD25LQ80_1.8V id="C86014" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <GD25LB256E_GD25LR256E_1.8V id="C86719" page="256" size="33554432" sector="4096" sectorcmd="21"/>
+      <GD25LB512MF_GD25LR512MF_1.8V id="C8601A" page="256" size="67108864" sector="4096" sectorcmd="21"/>
+      <GD25LB512ME_GD25LR512ME_1.8V id="C8671A" page="256" size="67108864" sector="4096" sectorcmd="21"/>
+      <GD25B512MF_GD25R512MF id="C8401A" page="256" size="67108864" sector="4096" sectorcmd="21"/>
+      <GD25VQ16C id="C84215" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <GD25VQ21B id="C84212" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <GD25VQ40C id="C84213" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <GD25VQ41B id="C84213" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <GD25VQ80C id="C84214" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <GD25F64F id="C84317" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <GD25F128F id="C84318" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <GD25F256F id="C84319" page="256" size="33554432" sector="4096" sectorcmd="21"/>
+      <GD25WQ80E_1.8V id="C86514" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+    </GIGADEVICE>
+    <INTEL>
+      <_25F160S33T8 id="898915" page="256" size="2097152" sector="65536" sectorcmd="40"/>
+      <_25F320S33T8 id="898916" page="256" size="4194304" sector="65536" sectorcmd="40"/>
+      <_25F640S33T8 id="898917" page="256" size="8388608" sector="65536" sectorcmd="40"/>
+    </INTEL>
+    <ISSI>
+      <IS25LP016 id="9D6015" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <IS25LP032 id="9D6016" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <IS25LP064 id="9D6017" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <IS25LP128 id="9D6018" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <IS25LP256 id="9D6019" page="256" size="33554432" sector="4096" sectorcmd="21"/>
+      <IS25LQ016 id="9D1445" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <IS25WP016_1.8V id="9D7015" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <IS25LQ032 id="9D4016" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <IS25WP020_1.8V id="9D7012" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <IS25WP032_1.8V id="9D7016" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <IS25WP040_1.8V id="9D7013" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <IS25WP064_1.8V id="9D7017" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <IS25WP080_1.8V id="9D7014" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <IS25WP128_1.8V id="9D7018" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <IS25WP256_1.8V id="9D7019" page="256" size="33554432" sector="4096" sectorcmd="21"/>
+      <IS25WQ040_1.8V id="9D1253" page="256" size="524288" sector="4096" sectorcmd="20"/>
+    </ISSI>
+    <MACRONIX>
+      <MX23L12854 id="C20518" page="256" size="16777216"/>
+      <MX23L1654 id="C20515" page="256" size="2097152"/>
+      <MX23L3254 id="C20516" page="256" size="4194304"/>
+      <MX23L6454 id="C20517" page="256" size="8388608"/>
+      <MX25LM51245G id="C2853A" page="256" size="67108864" sector="4096" sectorcmd="21"/>
+      <MX25L3255E id="C29E16" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <MX25L6495F id="C29517" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <MX25V1635F id="C22315" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <MX66L1G45G id="C2201B" page="256" size="134217728" sector="4096" sectorcmd="21"/>
+      <MX66L2G45G id="C2201C" page="256" size="268435456" sector="4096" sectorcmd="21"/>
+      <MX66U2G45G_1.8V id="C2253C" page="256" size="268435456" sector="4096" sectorcmd="21"/>
+      <MX77L25650F id="C27519" page="256" size="33554432" sector="4096" sectorcmd="20"/>
+      <MX77U25650F_1.8V id="C27539" page="256" size="33554432" sector="4096" sectorcmd="20"/>
+      <MX77U51250F_1.8V id="C2753A" page="256" size="67108864" sector="4096" sectorcmd="20"/>
+    </MACRONIX>
+    <MICRON>
+      <MT25QU01G_1.8V id="20BB21" page="256" size="134217728" sector="4096" sectorcmd="21"/>
+      <MT25QU02G_1.8V id="20BB22" page="256" size="268435456" sector="4096" sectorcmd="21"/>
+      <MT25QU128_1.8V id="20BB18" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <MT25QU512_1.8V id="20BB20" page="256" size="67108864" sector="4096" sectorcmd="21"/>
+      <MT35XU02G_1.8V id="2C5B1C" page="256" size="268435456" sector="4096" sectorcmd="21"/>
+    </MICRON>
+    <MICRON_NUMONYX_ST>
+      <M25P05 id="000005" page="256" size="65536" sector="32768" sectorcmd="D8"/>
+      <M25P10 id="000010" page="256" size="131072" sector="32768" sectorcmd="D8"/>
+      <M25P20-old id="000011" page="256" size="262144" sector="65536" sectorcmd="D8"/>
+      <M25P40-old id="000012" page="256" size="524288" sector="65536" sectorcmd="D8"/>
+      <N25Q00A..1G_1.8V id="20BB21" page="256" size="134217728" sector="4096" sectorcmd="21"/>
+      <N25Q016_1.8V id="20BB15" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <N25Q032..1E_1.8V id="20BB16" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <N25Q064..1E_1.8V id="20BB17" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <N25Q128..1E_1.8V id="20BB18" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <N25Q512..1G_1.8V id="20BB20" page="256" size="67108864" sector="4096" sectorcmd="21"/>
+    </MICRON_NUMONYX_ST>
+    <PMC>
+      <Pm25LV010 id="9D007C" page="256" size="131072" sector="4096" sectorcmd="D7"/>
+      <Pm25LV512_A id="9D007B" page="256" size="65536" sector="4096" sectorcmd="D7"/>
+    </PMC>
+    <PUYA>
+      <P25Q06H id="854010" page="256" size="65536" sector="256" sectorcmd="81"/>
+      <P25Q11H id="854011" page="256" size="131072" sector="256" sectorcmd="81"/>
+      <P25Q21H id="854012" page="256" size="262144" sector="256" sectorcmd="81"/>
+    </PUYA>
+    <SANYO>
+      <LE25FU106B id="62001D" page="256" size="131072" sector="2048" sectorcmd="D7"/>
+      <LE25FU206 id="620044" page="256" size="262144" sector="4096" sectorcmd="D7"/>
+      <LE25FU206A id="620612" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <LE25FU406B id="62001E" page="256" size="524288" sector="4096" sectorcmd="D7"/>
+      <LE25FU406C_LE25U40CMC id="620613" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <LE25FW106 id="620015" page="256" size="131072" sector="2048" sectorcmd="D7"/>
+      <LE25FW203A id="621600" page="256" size="262144" sector="256" sectorcmd="DB"/>
+      <LE25FW403A id="621100" page="256" size="524288" sector="256" sectorcmd="DB"/>
+      <LE25FW406A id="62001A" page="256" size="524288" sector="4096" sectorcmd="D7"/>
+      <LE25FW418A id="620010" page="256" size="524288" sector="4096" sectorcmd="D7"/>
+      <LE25FW806 id="620026" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <LE25FW808 id="620020" page="256" size="1048576" sector="8192" sectorcmd="D7"/>
+    </SANYO>
+    <SPANSION>
+      <S25FL128L id="016018" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <S25FL204K id="014013" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <S25FL208K id="014014" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <S25FL256L id="016019" page="256" size="33554432" sector="4096" sectorcmd="21"/>
+    </SPANSION>
+    <SST>
+      <SST25LF020A id="BF0043" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <SST25LF040A id="BF0044" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <SST25LF080_A id="BF0080" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <SST25VF010_A id="BF0049" page="256" size="131072" sector="4096" sectorcmd="20"/>
+      <SST25VF020 id="BF0043" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <SST25VF040 id="BF0044" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <SST25VF040B.REMS id="BF008D" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <SST25VF512_A id="BF0048" page="256" size="65536" sector="4096" sectorcmd="20"/>
+      <SST25WF010_1.8V id="BF2502" page="256" size="131072" sector="4096" sectorcmd="20"/>
+      <SST25WF020_1.8V id="BF2503" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <SST25WF020A_1.8V id="621612" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <SST25WF040_1.8V id="BF2504" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <SST25WF040B_1.8V id="621613" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <SST25WF080_1.8V id="BF2505" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <SST25WF080B_1.8V id="621614" page="256" size="1048576" sector="4096" sectorcmd="20"/>
+      <SST25WF512_1.8V id="BF2501" page="256" size="65536" sector="4096" sectorcmd="20"/>
+      <SST26VF016B_A id="BF2641" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <SST26VF032B_A id="BF2642" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <SST26VF064B_A id="BF2643" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+    </SST>
+    <ST>
+      <M95320 id="200000" page="32" size="4096"/>
+      <M95M02 id="200012" page="256" size="262144"/>
+    </ST>
+    <WINBOND>
+      <W25Q128.JW.DTR_1.8V id="EF8018" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <W25Q16JV_M id="EF7015" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <W25Q20.W_1.8V id="EF5012" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <W25Q512JV_M id="EF7020" page="256" size="67108864" sector="4096" sectorcmd="21"/>
+      <W25Q256JW_1.8V id="EF6019" page="256" size="33554432" sector="4096" sectorcmd="21"/>
+      <W25R256JW_1.8V id="EF6019" page="256" size="33554432" sector="4096" sectorcmd="20"/>
+      <W25R512NW_W74M51NW_1.8V id="EF6020" page="256" size="67108864" sector="4096" sectorcmd="21"/>
+      <W25Q256JW_DTR_1.8V id="EF8019" page="256" size="33554432" sector="4096" sectorcmd="21"/>
+      <W25Q32JV_M id="EF7016" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <W25Q32JW...M_1.8V id="EF8016" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <W25Q40BW_1.8V id="EF5013" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <W25Q512JV id="EF4020" page="256" size="67108864" sector="4096" sectorcmd="21"/>
+      <W25Q01JV id="EF4021" page="256" size="134217728" sector="4096" sectorcmd="21"/>
+      <W25Q512NW-IM_1.8V id="EF8020" page="256" size="67108864" sector="4096" sectorcmd="21"/>
+      <W25Q64JV-.M id="EF7017" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <W35T02NW_1.8V id="EF5B1C" page="256" size="268435456" sector="4096" sectorcmd="21"/>
+      <W77Q16JW_1.8V id="EF8A16" page="256" size="2097152" sector="4096" sectorcmd="20"/>
+      <W77Q32JW_1.8V id="EF8A16" page="256" size="4194304" sector="4096" sectorcmd="20"/>
+      <W77Q64JV id="EF4A17" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <W77Q128JV id="EF4A18" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <W77Q64JW_1.8V id="EF8A17" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <W77Q128JW_1.8V id="EF8A18" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <W77Q25NWS_1.8V id="EF8A19" page="256" size="33554432" sector="4096" sectorcmd="20"/>
+      <W77Q51NWD_1.8V id="EF8A1A" page="256" size="67108864" sector="4096" sectorcmd="20"/>
+      <W77Q01NWQ_1.8V id="EF8A1B" page="256" size="134217728" sector="4096" sectorcmd="20"/>
+      <W77T25NWS_1.8V id="EF8E19" page="256" size="33554432" sector="4096" sectorcmd="20"/>
+      <W77T51NWD_1.8V id="EF8E1A" page="256" size="67108864" sector="4096" sectorcmd="20"/>
+      <W77T01NWQ_1.8V id="EF8E1B" page="256" size="134217728" sector="4096" sectorcmd="20"/>
+      <W77Q64NW_1.8V id="EF8A17" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <W77Q12NW_1.8V id="EF8A18" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <W77T64NW_1.8V id="EF8E17" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <W77T12NW_1.8V id="EF8E18" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+    </WINBOND>
+    <XMC>
+      <XM25QH64A id="207017" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <XM25QH128A id="207018" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <XM25RH128C id="204318" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+      <XM25RU256C_1.8V id="204419" page="256" size="33554432" sector="4096" sectorcmd="20"/>
+    </XMC>
+    <XTX>
+      <XT25F02E id="0B4012" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <XT25F64B id="0B4017" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+      <XT25F128B id="0B4018" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+    </XTX>
+    <ZETTA>
+      <ZD25D20 id="BA2012" page="256" size="262144" sector="4096" sectorcmd="20"/>
+      <ZD25D40 id="BA2013" page="256" size="524288" sector="4096" sectorcmd="20"/>
+      <ZD25LQ128_1.8V id="BA0017" page="256" size="16777216" sector="4096" sectorcmd="20"/>
+    </ZETTA>
+  </SPI>
+</chiplist>

@@ -118,6 +118,16 @@ icons/modern/         toolbar icon set (falls back to built-in icons if absent)
 | `spicmd` | Command set: `25`, `45`, `95`, `KB` |
 | `script` | Script file in `scripts/` for chips needing a custom sequence |
 
+A second, optional list is loaded from `chiplist-flashrom.xml` if it sits next to the program. It
+holds 204 further SPI chips converted from the [flashrom](https://github.com/flashrom/flashrom)
+project's tables by `tools/import_flashchips.py`, and both files are merged into one chip menu and
+searched together.
+
+> **That file is GPL-2.0-or-later, not MIT.** It is a derived work of flashrom's chip tables, so it
+> keeps flashrom's licence and copyright notices. It is kept as a separate data file, read at run
+> time and never linked, so the program itself stays MIT. Delete the file if you would rather ship
+> MIT-only, and everything still works — the built-in list and SFDP detection cover the rest.
+
 Unknown ids can be looked up in
 [flashrom's `flashchips.h`](https://chromium.googlesource.com/chromiumos/third_party/flashrom/+/798d2adc9527f724bc5096a646cf99efdbb6b59e/flashchips.h).
 Winbond ids are prefixed `EF`, so `0x6019` becomes `EF6019`. Append `_1.8V` to the name for 1.8 V

@@ -296,6 +296,9 @@ const
   SPI_CMD_95             = 3;
 
   ChipListFileName       = 'chiplist.xml';
+  //ตารางชิปเพิ่มเติมที่แปลงมาจาก flashrom ไฟล์นี้เป็น GPL ไม่ใช่ MIT
+  //จึงแยกไว้ต่างหาก ถ้าไม่มีไฟล์ก็ทำงานได้ตามปกติ
+  ChipListFile2Name      = 'chiplist-flashrom.xml';
   SettingsFileName       = 'settings.xml';
   ScriptsPath            = 'scripts'+DirectorySeparator;
 
@@ -319,6 +322,7 @@ type
 var
   MainForm: TMainForm;
   ChipListFile: TXMLDocument;
+  ChipListFile2: TXMLDocument;
   SettingsFile: TXMLDocument;
   CurrentICParam: TCurrentICParam;
   ScriptEngine: TPasCalc;
@@ -498,6 +502,7 @@ var
   RootNode: TDOMNode;
 begin
   ChipListFile := nil;
+  ChipListFile2 := nil;
   SettingsFile := nil;
   if FileExists(ChipListFileName) then
   begin
@@ -508,6 +513,20 @@ begin
       begin
         ShowMessage(E.Message);
         ChipListFile := nil;
+      end;
+    end;
+  end;
+
+  //ไฟล์เสริม มีก็ใช้ ไม่มีก็ข้ามไปเงียบ ๆ
+  if FileExists(ChipListFile2Name) then
+  begin
+    try
+      ReadXMLFile(ChipListFile2, ChipListFile2Name);
+    except
+      on E: EXMLReadError do
+      begin
+        ShowMessage(E.Message);
+        ChipListFile2 := nil;
       end;
     end;
   end;
@@ -2778,10 +2797,18 @@ begin
   end;
 end;
 
+//เลือกชิปตามชื่อ โดยหาในไฟล์หลักก่อน แล้วค่อยหาในไฟล์เสริม
+function SelectChipAny(const AName: string): boolean;
+begin
+  Result := findchip.SelectChip(ChipListFile, AName);
+  if not Result then
+    Result := findchip.SelectChip(ChipListFile2, AName);
+end;
+
 procedure TMainForm.ChipClick(Sender: TObject);
 begin
   if Sender is TMenuItem then
-    findchip.SelectChip(chiplistfile, TMenuItem(Sender).Caption);
+    SelectChipAny(TMenuItem(Sender).Caption);
 end;
 
 procedure TMainForm.MPHexEditorExChange(Sender: TObject);
@@ -3638,24 +3665,27 @@ begin
 
     Matches := TStringList.Create;
     try
-      if FileExists(ChipListFileName) then
-      begin
-        XMLfile := nil;
-        try
-          ReadXMLFile(XMLfile, ChipListFileName);
-        except
-          on E: EXMLReadError do ShowMessage(E.Message);
-        end;
+      //ไล่จาก 9F ก่อน แล้วค่อยลองโอปโค้ดเก่ากว่าถ้ายังไม่เจอ
+      //ค้นทั้งไฟล์หลักและไฟล์เสริมพร้อมกัน
+      FindChipInto(ChipListFile, '', IDstr9FH, Matches);
+      FindChipInto(ChipListFile2, '', IDstr9FH, Matches);
 
-        if XMLfile <> nil then
-        begin
-          //ไล่จาก 9F ก่อน แล้วค่อยลองโอปโค้ดเก่ากว่าถ้ายังไม่เจอ
-          FindChipInto(XMLfile, '', IDstr9FH, Matches);
-          if Matches.Count = 0 then FindChipInto(XMLfile, '', IDstr90H, Matches);
-          if Matches.Count = 0 then FindChipInto(XMLfile, '', IDstrABH, Matches);
-          if Matches.Count = 0 then FindChipInto(XMLfile, '', IDstr15H, Matches);
-          XMLfile.Free;
-        end;
+      if Matches.Count = 0 then
+      begin
+        FindChipInto(ChipListFile, '', IDstr90H, Matches);
+        FindChipInto(ChipListFile2, '', IDstr90H, Matches);
+      end;
+
+      if Matches.Count = 0 then
+      begin
+        FindChipInto(ChipListFile, '', IDstrABH, Matches);
+        FindChipInto(ChipListFile2, '', IDstrABH, Matches);
+      end;
+
+      if Matches.Count = 0 then
+      begin
+        FindChipInto(ChipListFile, '', IDstr15H, Matches);
+        FindChipInto(ChipListFile2, '', IDstr15H, Matches);
       end;
 
       if Matches.Count = 1 then
@@ -3663,7 +3693,7 @@ begin
         //ตรงตัวเดียว เลือกให้เลย ไม่ต้องให้ผู้ใช้มากดซ้ำ
         ChipName := Matches[0];
         ChipName := Copy(ChipName, 1, Pos(' (', ChipName) - 1);
-        SelectChip(ChipListFile, ChipName);
+        SelectChipAny(ChipName);
         LogPrint(STR_DETECT_ONE + ChipName);
       end
       else if Matches.Count > 1 then
@@ -4287,6 +4317,7 @@ procedure LoadChipList(XMLfile: TXMLDocument);
 var
   Node: TDOMNode;
   j, i: integer;
+  SectionItem, VendorItem: TMenuItem;
 begin
   if XMLfile <> nil then
   begin
@@ -4302,19 +4333,30 @@ begin
        continue;
      end;
 
-     MainForm.MenuChip.Add(NewItem(UTF16ToUTF8(Node.NodeName), 0, False, True, nil, 0, '')); //หมวด (SPI, I2C...)
+     //ถ้าเมนูหมวดนี้มีอยู่แล้วก็ใช้ของเดิม เพราะรายชื่อชิปมาจากหลายไฟล์
+     //และต้องรวมเข้าไปในต้นไม้เมนูเดียวกัน ไม่ใช่สร้างหมวดซ้ำ
+     SectionItem := MainForm.MenuChip.Find(UTF16ToUTF8(Node.NodeName));
+     if SectionItem = nil then
+     begin
+       MainForm.MenuChip.Add(NewItem(UTF16ToUTF8(Node.NodeName), 0, False, True, nil, 0, '')); //หมวด (SPI, I2C...)
+       SectionItem := MainForm.MenuChip.Find(UTF16ToUTF8(Node.NodeName));
+     end;
 
      // ใช้พรอเพอร์ตี ChildNodes
      with Node.ChildNodes do
      try
        for j := 0 to (Count - 1) do
        begin
-         MainForm.MenuChip.Find(UTF16ToUTF8(Node.NodeName)).Add(NewItem(UTF16ToUTF8(Item[j].NodeName) ,0, False, True, nil, 0, '')); //หมวดผู้ผลิต
+         VendorItem := SectionItem.Find(UTF16ToUTF8(Item[j].NodeName));
+         if VendorItem = nil then
+         begin
+           SectionItem.Add(NewItem(UTF16ToUTF8(Item[j].NodeName) ,0, False, True, nil, 0, '')); //หมวดผู้ผลิต
+           VendorItem := SectionItem.Find(UTF16ToUTF8(Item[j].NodeName));
+         end;
 
          for i := 0 to (Item[j].ChildNodes.Count - 1) do
-           MainForm.MenuChip.Find(UTF16ToUTF8(Node.NodeName)).
-             Find(UTF16ToUTF8(Item[j].NodeName)).
-               Add(NewItem(UTF16ToUTF8(Item[j].ChildNodes.Item[i].NodeName), 0, False, True, @MainForm.ChipClick, 0, '' )); //ชิป
+           VendorItem.Add(NewItem(UTF16ToUTF8(Item[j].ChildNodes.Item[i].NodeName),
+                                  0, False, True, @MainForm.ChipClick, 0, '' )); //ชิป
        end;
      finally
        Free;
@@ -4341,6 +4383,7 @@ begin
   SelectHW(CHW_BUZZPIRAT); // ทางลัดแบบหยาบ ๆ ของ dreg
 
   LoadChipList(ChipListFile);
+  LoadChipList(ChipListFile2);
   RomF := TMemoryStream.Create;
   ScriptEngine := TPasCalc.Create;
   ScriptsFunc.SetScriptFunctions(ScriptEngine);
@@ -4362,6 +4405,7 @@ begin
   RomF.Free;
   SaveOptions(SettingsFile);
   ChipListFile.Free;
+  ChipListFile2.Free;
   SettingsFile.Free;
   ScriptEngine.Free;
 end;
