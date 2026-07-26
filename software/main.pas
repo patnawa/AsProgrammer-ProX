@@ -255,6 +255,7 @@ type
     procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
     procedure FormDestroy(Sender: TObject);
     procedure ChipClick(Sender: TObject);
+    procedure ComboChipSizeChange(Sender: TObject);
     procedure ChangeLang(Sender: TObject);
     procedure ComboItem1Click(Sender: TObject);
     procedure MenuArduinoCOMPortClick(Sender: TObject);
@@ -1160,6 +1161,7 @@ end;
 procedure UpdateChipInfo;
 var
   s, v: string;
+  UISize: int64;
 begin
   s := '';
 
@@ -1192,11 +1194,21 @@ begin
     s := s + CurrentICParam.Note;
   end;
 
+  //ผู้ใช้อาจไม่ได้เลือกจากรายการ แต่พิมพ์ขนาดลงช่อง Size เอง
+  //กรณีนี้โปรแกรมทำงานได้จริง ไฟดวง Chip จึงต้องติดเหมือนกัน
+  if IsNumber(MainForm.ComboChipSize.Text) then
+    UISize := StrToInt64Def(MainForm.ComboChipSize.Text, 0)
+  else
+    UISize := 0;
+
+  if (s = '') and (UISize > 0) then
+    s := 'Size    ' + IntToStr(UISize div 1024) + ' KB';
+
   if s = '' then s := STR_NO_CHIP_SELECTED;
 
   MainForm.LabelChipInfo.Caption := s;
 
-  ChipDetected := CurrentICParam.Size > 0;
+  ChipDetected := (CurrentICParam.Size > 0) or (UISize > 0);
   MainForm.ChipView.Invalidate;
 end;
 
@@ -3231,6 +3243,12 @@ procedure TMainForm.ChipClick(Sender: TObject);
 begin
   if Sender is TMenuItem then
     SelectChipAny(TMenuItem(Sender).Caption);
+end;
+
+//ตั้งขนาดเองก็ถือว่าตั้งค่าชิปแล้ว ไฟดวง Chip ต้องติดตามด้วย
+procedure TMainForm.ComboChipSizeChange(Sender: TObject);
+begin
+  UpdateChipInfo;
 end;
 
 procedure TMainForm.MPHexEditorExChange(Sender: TObject);

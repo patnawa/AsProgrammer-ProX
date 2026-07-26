@@ -226,6 +226,7 @@ object MainForm: TMainForm
       ShowHint = True
       TabOrder = 0
       Text = 'Chip size'
+      OnChange = ComboChipSizeChange
     end
     object Label2: TLabel
       Left = 24

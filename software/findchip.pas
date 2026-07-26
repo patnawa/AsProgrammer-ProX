@@ -360,9 +360,10 @@ begin
   begin
     chipname := ListBoxChips.Items[ListBoxChips.ItemIndex];
     chipname := copy(chipname, 1, pos(' (', chipname)-1); //ตัดชื่อผู้ผลิตออก
-    //หาในไฟล์หลักก่อน ถ้าไม่เจอค่อยหาในไฟล์เสริม
-    if not SelectChip(chiplistfile, chipname) then
-      SelectChip(ChipListFile2, chipname);
+    //ต้องผ่าน SelectChipAny เท่านั้น เพราะมันหาในไฟล์หลักก่อนแล้วค่อยไปไฟล์เสริม
+    //และที่สำคัญคือมันรีเฟรชสรุปข้อมูลชิปกับไฟสถานะให้ด้วย
+    //ถ้าเรียก SelectChip ตรง ๆ ไฟดวง Chip จะไม่ติด ทั้งที่เลือกชิปสำเร็จแล้ว
+    Main.SelectChipAny(chipname);
   end;
 end;
 
