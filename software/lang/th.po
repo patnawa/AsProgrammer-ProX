@@ -1,0 +1,544 @@
+# Thai
+msgid ""
+msgstr ""
+
+#: msgstr.str_45page_powerof2
+msgid "Установлен размер страницы кратный двум!"
+msgstr "ขนาดเพจเป็นกำลังของสอง"
+
+#: msgstr.str_45page_std
+msgid "Установлен стандартный размер страницы"
+msgstr "ตั้งขนาดเพจเป็นค่ามาตรฐานแล้ว"
+
+#: msgstr.str_block_en
+msgid ""
+"Возможно включена защита на запись. Нажмите кнопку \"Снять защиту\" и "
+"сверьтесь с даташитом"
+msgstr "ชิปอาจถูกป้องกันการเขียนอยู่ กดปุ่ม \"ปลดล็อก\" แล้วตรวจสอบกับดาต้าชีต"
+
+#: msgstr.str_changed
+msgid "Изменен"
+msgstr "แก้ไขแล้ว"
+
+#: msgstr.str_check_settings
+msgid "Проверьте настройки"
+msgstr "ตรวจสอบการตั้งค่า"
+
+#: msgstr.str_combo_warn
+msgid "Чип будет стерт и перезаписан. Продолжить?"
+msgstr "ชิปจะถูกลบและเขียนใหม่ ทำต่อหรือไม่"
+
+#: msgstr.str_connection_error
+msgid "Ошибка подключения к "
+msgstr "เชื่อมต่อไม่สำเร็จ"
+
+#: msgstr.str_done
+msgid "Готово"
+msgstr "เสร็จแล้ว"
+
+#: msgstr.str_erasing_flash
+msgid "Стираю флэшку..."
+msgstr "กำลังลบหน่วยความจำ..."
+
+#: msgstr.str_goto_addr
+msgid "Перейти по адресу"
+msgstr "ไปที่แอดเดรส"
+
+#: msgstr.str_i2c_no_answer
+msgid "Микросхема не отвечает"
+msgstr "ชิปไม่ตอบสนอง"
+
+#: msgstr.str_id_unknown
+msgid "(Неизвестно)"
+msgstr "(ไม่รู้จัก)"
+
+#: msgstr.str_mini_eeprom_support
+msgid "Данная версия прошивки не поддерживает I2C и MW!"
+msgstr "เฟิร์มแวร์รุ่นนี้ไม่รองรับ I2C และ MW"
+
+#: msgstr.str_new_sreg
+msgid "Стало Sreg: "
+msgstr "SREG ใหม่:"
+
+#: msgstr.str_curr_hw
+msgid "Используется программатор: "
+msgstr "เครื่องโปรแกรมที่ใช้อยู่:"
+
+#: msgstr.str_not_found_hex
+msgid "Значение не найдено"
+msgstr "ไม่พบค่าที่ค้นหา"
+
+#: msgstr.str_no_eeprom_support
+msgid "Данная версия прошивки не поддерживается!"
+msgstr "เฟิร์มแวร์รุ่นนี้ไม่รองรับการเขียนหน่วยความจำ"
+
+#: msgstr.str_old_sreg
+msgid "Было Sreg: "
+msgstr "SREG เดิม:"
+
+#: msgstr.str_reading_flash
+msgid "Читаю флэшку..."
+msgstr "กำลังอ่านหน่วยความจำ..."
+
+#: msgstr.str_search_hex
+msgid "Поиск HEX значения"
+msgstr "ค้นหาค่า HEX"
+
+#: msgstr.str_set_speed_error
+msgid "Ошибка установки скорости SPI"
+msgstr "ตั้งความเร็ว SPI ไม่สำเร็จ"
+
+#: msgstr.str_size
+msgid "Размер: "
+msgstr "ขนาด:"
+
+#: msgstr.str_specify_hex
+msgid "Укажите шестнадцатеричные числа"
+msgstr "กรุณาใส่เป็นเลขฐานสิบหก"
+
+#: msgstr.str_start_erase
+msgid "Точно стереть чип?"
+msgstr "ลบชิปเลยหรือไม่"
+
+#: msgstr.str_start_write
+msgid "Начать запись?"
+msgstr "เริ่มเขียนเลยหรือไม่"
+
+#: msgstr.str_time
+msgid "Время выполнения: "
+msgstr "เวลาที่ใช้:"
+
+#: msgstr.str_usb_timeout
+msgid "USB_control_msg отвалился по таймауту!"
+msgstr "USB_control_msg หมดเวลารอ"
+
+#: msgstr.str_user_cancel
+msgid "Прервано пользователем"
+msgstr "ผู้ใช้ยกเลิก"
+
+#: msgstr.str_verify
+msgid "Проверяю флэшку..."
+msgstr "กำลังตรวจสอบหน่วยความจำ..."
+
+#: msgstr.str_verify_error
+msgid "Ошибка сравнения по адресу: "
+msgstr "ตรวจสอบไม่ตรงที่แอดเดรส:"
+
+#: msgstr.str_writing_flash
+msgid "Записываю флэшку..."
+msgstr "กำลังเขียนหน่วยความจำ..."
+
+#: msgstr.str_writing_flash_wchk
+msgid "Записываю флэшку с проверкой..."
+msgstr "กำลังเขียนหน่วยความจำ พร้อมตรวจสอบ..."
+
+#: msgstr.str_wrong_bytes_read
+msgid "Количество прочитанных байт не равно размеру флэшки"
+msgstr "จำนวนไบต์ที่อ่านได้ไม่เท่ากับขนาดชิป"
+
+#: msgstr.str_wrong_bytes_write
+msgid "Количество записанных байт не равно размеру флэшки"
+msgstr "จำนวนไบต์ที่เขียนได้ไม่เท่ากับขนาดชิป"
+
+#: msgstr.str_wrong_file_size
+msgid "Размер файла больше размера чипа"
+msgstr "ไฟล์ใหญ่กว่าขนาดชิป"
+
+#: msgstr.str_erase_notice
+msgid "Процесс может длиться больше минуты на больших флешках!"
+msgstr "ถ้าเป็นชิปความจุสูง ขั้นตอนนี้อาจใช้เวลาเกินหนึ่งนาที"
+
+#: tmainform.allowinsertitem.caption
+msgid "Разрешить режим вставки"
+msgstr "โหมดแทรก"
+
+#: tmainform.menuitemhardware.caption
+msgid "Программатор"
+msgstr "ฮาร์ดแวร์"
+
+#: tmainform.buttonblock.hint
+msgid "Снять защиту"
+msgstr "ปลดล็อก"
+
+#: tmainform.buttoncancel.hint
+msgid "Прервать текущею операцию"
+msgstr "ยกเลิก"
+
+#: tmainform.buttonerase.hint
+msgid "Стереть"
+msgstr "ลบชิป"
+
+#: tmainform.buttonopenhex.hint
+msgid "Загрузить прошивку в редактор"
+msgstr "เปิดไฟล์"
+
+#: tmainform.buttonread.hint
+msgid "Прочитать"
+msgstr "อ่านชิป"
+
+#: tmainform.buttonreadid.hint
+msgid "Прочитать индификатор"
+msgstr "อ่าน ID"
+
+#: tmainform.buttonsavehex.hint
+msgid "Сохранить прошивку из редактора"
+msgstr "บันทึกไฟล์"
+
+#: tmainform.buttonverify.hint
+msgid "Сравнить содержимое"
+msgstr "ตรวจสอบชิป"
+
+#: tmainform.buttonwrite.hint
+msgid "Записать"
+msgstr "เขียนชิป"
+
+#: tmainform.clearlogmenuitem.caption
+msgid "Очистить"
+msgstr "ล้าง"
+
+#: tmainform.comboaddrtype.hint
+msgid "Тип адресации к памяти"
+msgstr "รูปแบบการระบุแอดเดรส"
+
+#: tmainform.combochipsize.hint
+msgid "Размер чипа в байтах"
+msgstr "ขนาดชิปเป็นไบต์"
+
+#: tmainform.comboitem1.caption
+msgid "Снять защиту -> стереть -> записать -> проверить"
+msgstr "ปลดล็อก -> ลบ -> เขียน -> ตรวจสอบ"
+
+#: tmainform.combomwbitlen.hint
+msgid "Длинна адреса в битах"
+msgstr "ความยาวแอดเดรสเป็นบิต"
+
+#: tmainform.combopagesize.hint
+msgid "Размер страницы"
+msgstr "ขนาดเพจ"
+
+#: tmainform.copylogmenuitem.caption
+msgctxt "TMAINFORM.COPYLOGMENUITEM.CAPTION"
+msgid "Копировать"
+msgstr "คัดลอก"
+
+#: tmainform.label1.caption
+msgid "Страница"
+msgstr "เพจ"
+
+#: tmainform.label2.caption
+msgid "Размер"
+msgstr "ขนาด"
+
+#: tmainform.label4.caption
+msgid "Тип адреса"
+msgstr "ชนิดแอดเดรส"
+
+#: tmainform.label5.caption
+msgid "Длина адреса"
+msgstr "ความยาวแอดเดรส"
+
+#: tmainform.label3.caption
+msgctxt "tmainform.label3.caption"
+msgid "Микросхема:"
+msgstr "ชิป:"
+
+#: tmainform.labelspicmd.caption
+msgid "Команды SPI"
+msgstr "ชุดคำสั่ง SPI"
+
+#: tmainform.menuautocheck.caption
+msgid "Проверка записи"
+msgstr "ตรวจสอบหลังเขียน"
+
+#: tmainform.menuchip.caption
+msgctxt "TMAINFORM.MENUCHIP.CAPTION"
+msgid "Микросхема"
+msgstr "ชิป"
+
+#: tmainform.menucopytoclip.caption
+msgctxt "tmainform.menucopytoclip.caption"
+msgid "Копировать"
+msgstr "คัดลอก"
+
+#: tmainform.menufind.caption
+msgid "Поиск"
+msgstr "ค้นหา"
+
+#: tmainform.menufindchip.caption
+msgctxt "tmainform.menufindchip.caption"
+msgid "Поиск"
+msgstr "ค้นหา"
+
+#: tmainform.menuskipff.caption
+msgid "Не писать FF"
+msgstr "ไม่ต้องเขียนค่า FF"
+
+#: tmainform.menusendab.caption
+msgid "Выводить чип из сна"
+msgstr "ส่งคำสั่งปลุกชิป"
+
+#: tmainform.menuignorebusybit.caption
+msgid "Не проверять Busy бит"
+msgstr "ไม่ต้องตรวจบิต Busy"
+
+#: tmainform.menuitemlockflash.caption
+msgid "Поставить защиту"
+msgstr "ตั้งบิตป้องกันการเขียน"
+
+#: tmainform.menuitemreadsreg.caption
+msgid "Прочитать SREG"
+msgstr "อ่าน SREG"
+
+#: tmainform.menuitemeditsreg.caption
+msgid "Изменить SREG"
+msgstr "แก้ไข SREG"
+
+#: tmainform.menumwclock.caption
+msgctxt "TMAINFORM.MENUMWCLOCK.CAPTION"
+msgid "Частота"
+msgstr "ความถี่"
+
+#: tmainform.menuoptions.caption
+msgid "Настройки"
+msgstr "ตั้งค่า"
+
+#: tmainform.menuspiclock.caption
+msgctxt "tmainform.menuspiclock.caption"
+msgid "Частота"
+msgstr "ความถี่"
+
+#: tsearchform.casesensecheckbox.caption
+msgid "Учитывать регистр"
+msgstr "แยกตัวพิมพ์เล็กใหญ่"
+
+#: tsearchform.findbutton.caption
+msgid "Найти"
+msgstr "ค้นหา"
+
+#: tsearchform.frombeginingcheckbox.caption
+msgid "Искать сначала"
+msgstr "ค้นหาตั้งแต่ต้น"
+
+#: tsearchform.hexcheckbox.caption
+msgid "Искать HEX значение"
+msgstr "ค้นหาค่า HEX"
+
+#: tsearchform.replaceallcheckbox.caption
+msgid "Заменить все"
+msgstr "แทนที่ทั้งหมด"
+
+#: tsearchform.replacecheckbox.caption
+msgid "Заменить"
+msgstr "แทนที่"
+
+#: tsearchform.replacelabel.caption
+msgid "заменить на:"
+msgstr "แทนที่ด้วย:"
+
+#: tsearchform.searchlabel.caption
+msgid "Искать"
+msgstr "ค้นหา"
+
+#: tsregeditform.buttonreadsreg.caption
+msgctxt "TSREGEDITFORM.BUTTONREADSREG.CAPTION"
+msgid "Прочитать"
+msgstr "อ่าน"
+
+#: tsregeditform.buttonwritesreg.caption
+msgctxt "TSREGEDITFORM.BUTTONWRITESREG.CAPTION"
+msgid "Записать"
+msgstr "เขียน"
+
+#: tchipsearchform.caption
+msgid "Поиск микросхемы"
+msgstr "ค้นหาชิป"
+
+#: tchipsearchform.label1.caption
+msgid "Маркировка содержит:"
+msgstr "ชื่อบนตัวชิปมีคำว่า:"
+
+#: tchipsearchform.ChipSearchSelectButton.caption
+msgid "Выбрать микросхему"
+msgstr "เลือกชิปนี้"
+
+#: tmainform.blankcheckmenuitem.caption
+msgid "Проверка на чистоту"
+msgstr "ตรวจว่าชิปว่าง"
+
+#: tmainform.Label_I2C_DevAddr.caption
+msgctxt "tmainform.Label_I2C_DevAddr.caption"
+msgid "Адрес устройства"
+msgstr "แอดเดรสอุปกรณ์"
+
+#: tmainform.CheckBox_I2C_ByteRead.caption
+msgctxt "tmainform.CheckBox_I2C_ByteRead.caption"
+msgid "Побайтовое чтение"
+msgstr "อ่านทีละไบต์"
+
+#: tmainform.scriptsmenuitem.caption
+msgid "Скрипты"
+msgstr "สคริปต์"
+
+#: msgstr.str_script_no_section
+msgid "Нет секции: "
+msgstr "ไม่มีเซกชันชื่อ:"
+
+#: msgstr.str_script_run_section
+msgid "Выполняется секция: "
+msgstr "กำลังรันเซกชัน:"
+
+#: msgstr.str_script_sel_section
+msgid "Выберите секцию"
+msgstr "เลือกเซกชัน"
+
+#: msgstr.str_dlg_filechgd
+msgid "файл изменён"
+msgstr "ไฟล์ถูกแก้ไข"
+
+#: msgstr.str_dlg_savefile
+msgid "Сохранить изменения?"
+msgstr "บันทึกการเปลี่ยนแปลงหรือไม่"
+
+#: msgstr.str_using_script
+msgid "Используется скрипт: "
+msgstr "ใช้สคริปต์:"
+
+#: tscripteditform.menuitemfile.caption
+msgid "Файл"
+msgstr "ไฟล์"
+
+#: tscripteditform.menuitemopen.caption
+msgid "Открыть"
+msgstr "เปิด"
+
+#: tscripteditform.menuitemrun.caption
+msgid "Выполнить"
+msgstr "รัน"
+
+#: tscripteditform.menuitemsave.caption
+msgid "Сохранить"
+msgstr "บันทึก"
+
+#: tscripteditform.menuitemsaveas.caption
+msgid "Сохранить как..."
+msgstr "บันทึกเป็น..."
+
+#: tscripteditform.menuitemsection.caption
+msgid "Секция ="
+msgstr "เซกชัน ="
+
+#: tmainform.speedbutton1.hint
+msgid "Выполнить скрипт"
+msgstr "รันสคริปต์"
+
+#: tmainform.label_startaddress.caption
+msgid "Начальный адрес"
+msgstr "แอดเดรสเริ่มต้น"
+
+#: tmainform.menugotooffset.caption
+msgid "Перейти по адресу"
+msgstr "ไปที่แอดเดรส"
+
+#: tsearchform.caption
+msgid "Поиск"
+msgstr "ค้นหา"
+
+#: tmainform.label_chip_scripts.caption
+msgid "Скрипты"
+msgstr "สคริปต์"
+
+#: tmainform.langmenuitem.caption
+msgid "Language"
+msgstr "ภาษา"
+
+#: tmainform.listcomportsmenuitem.caption
+msgid "List FREE COM Ports"
+msgstr "แสดงพอร์ต COM ที่ว่าง"
+
+#: tmainform.creditsmenuitem.caption
+msgid "Credits"
+msgstr "เครดิต"
+
+#: tmainform.debugconsolemenuitem.caption
+msgid "Launch Console"
+msgstr "เปิดคอนโซล"
+
+#: tmainform.menucheckidbefore.caption
+msgid "Check chip ID before write / erase"
+msgstr "ตรวจ ID ของชิปก่อนเขียนและก่อนลบ"
+
+#: tmainform.menuautobackup.caption
+msgid "Back up the chip before write / erase (slow)"
+msgstr "สำรองข้อมูลชิปก่อนเขียนและก่อนลบ (ช้า)"
+
+#: tmainform.menuprodconfig.caption
+msgid "Serial number and production..."
+msgstr "เลขรันนิ่งและการผลิตเป็นชุด..."
+
+#: tmainform.menubackgroundops.caption
+msgid "Run operations in background (GUI stays responsive)"
+msgstr "รันงานเบื้องหลัง (หน้าต่างไม่ค้าง)"
+
+#: tmainform.menudarktheme.caption
+msgid "Dark theme"
+msgstr "ธีมมืด"
+
+#: tmainform.menusfdpdetect.caption
+msgid "Detect chip via SFDP"
+msgstr "ตรวจหาชิปด้วย SFDP"
+
+#: tmainform.menuchecksum.caption
+msgid "Buffer checksum (CRC32 / SUM)"
+msgstr "ค่า checksum ของบัฟเฟอร์ (CRC32 / SUM)"
+
+#: tmainform.menucomparechip.caption
+msgid "Compare buffer with chip"
+msgstr "เทียบบัฟเฟอร์กับชิป"
+
+#: tmainform.menuopenproject.caption
+msgid "Open project..."
+msgstr "เปิดโปรเจกต์..."
+
+#: tmainform.menusaveproject.caption
+msgid "Save project..."
+msgstr "บันทึกโปรเจกต์..."
+
+#: tmainform.menurunbatch.caption
+msgid "Run production batch..."
+msgstr "เริ่มผลิตเป็นชุด..."
+
+#: tmainform.menusecreg.caption
+msgid "Read unique ID and security registers"
+msgstr "อ่านเลขประจำตัวชิปและ security register"
+
+#: tmainform.menufillbuffer.caption
+msgid "Fill buffer..."
+msgstr "เติมค่าลงบัฟเฟอร์..."
+
+#: tmainform.menuswapbytes.caption
+msgid "Swap bytes (16-bit words)"
+msgstr "สลับไบต์ (คำขนาด 16 บิต)"
+
+#: tmainform.savelogmenuitem.caption
+msgid "Save log to file..."
+msgstr "บันทึก log ลงไฟล์..."
+
+#: tmainform.menuerasechip.caption
+msgid "Erase whole chip"
+msgstr "ลบทั้งชิป"
+
+#: tmainform.menueraserangeauto.caption
+msgid "Erase range (sector size from chip list / SFDP)"
+msgstr "ลบตามช่วง (ขนาดเซกเตอร์จาก chiplist หรือ SFDP)"
+
+#: tmainform.menueraserange4k.caption
+msgid "Erase range - 4 KB sectors (20h)"
+msgstr "ลบตามช่วง - เซกเตอร์ 4 KB (20h)"
+
+#: tmainform.menueraserange32k.caption
+msgid "Erase range - 32 KB blocks (52h)"
+msgstr "ลบตามช่วง - บล็อก 32 KB (52h)"
+
+#: tmainform.menueraserange64k.caption
+msgid "Erase range - 64 KB blocks (D8h)"
+msgstr "ลบตามช่วง - บล็อก 64 KB (D8h)"

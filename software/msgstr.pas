@@ -97,6 +97,18 @@ resourcestring
   STR_AUTH_COUNTER       = 'Last returned counter data: ';
   STR_AUTH_NEEDS_KEY     = 'Counter and key commands (9Bh) are HMAC-SHA-256 signed and '
                          + 'cannot be used without the root key';
+  STR_NO_CHIP            = 'No chip answered. Check the socket, the orientation of pin 1, '
+                         + 'the cable and the supply voltage';
+  STR_DETECT_ONE         = 'Chip detected and selected: ';
+  STR_DETECT_MANY        = 'This ID matches %d chips, pick the right one from the list';
+  STR_DETECT_NONE        = 'This ID is not in chiplist.xml and the chip has no SFDP table. '
+                         + 'Set size and page size by hand, or add the chip to chiplist.xml';
+  STR_DETECT_SFDP        = 'Not in chiplist.xml, falling back to SFDP';
+  STR_VENDOR             = 'Manufacturer: ';
+  STR_DRIVER_HINT        = 'If the programmer is plugged in, its driver is probably missing. '
+                         + 'Install it from ';
+  STR_DRIVER_HINT_COM    = 'Check the COM port setting and that no other program is holding '
+                         + 'the port open';
 
 implementation
 

@@ -15,7 +15,7 @@ uses
   spi45, spi95, i2c, microwire, spimulti, ft232hhw,
   XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
-  utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig,
+  utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, jedec,
   pascalc, ScriptsFunc, ScriptEdit, baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
 
 type
@@ -628,11 +628,30 @@ begin
 end;
 
 
+//บอกให้ตรงจุดว่าไดรเวอร์ของฮาร์ดแวร์ตัวไหนน่าจะยังไม่ได้ติดตั้ง
+//ข้อความจาก DLL มักบอกแค่ว่าเปิดอุปกรณ์ไม่ได้ ซึ่งไม่ช่วยอะไรเลย
+procedure LogDriverHint;
+begin
+  case AsProgrammer.Current_HW of
+    CHW_CH341:
+      LogPrint(STR_DRIVER_HINT + 'drivers\CH341\CH341PAR.EXE (WCH CH341PAR)');
+    CHW_CH347:
+      LogPrint(STR_DRIVER_HINT + 'drivers\CH343\CH343 (WCH CH347PAR)');
+    CHW_FT232H:
+      LogPrint(STR_DRIVER_HINT + 'drivers\FT232\CDM212364_Setup.exe (FTDI D2XX)');
+    CHW_USBASP, CHW_AVRISP:
+      LogPrint(STR_DRIVER_HINT + 'drivers\usbasp\zadig (libusb-win32)');
+    CHW_ARDUINO, CHW_BUZZPIRAT:
+      LogPrint(STR_DRIVER_HINT_COM);
+  end;
+end;
+
 function OpenDevice: boolean;
 begin
   if not AsProgrammer.Programmer.DevOpen then
   begin
     LogPrint(AsProgrammer.Programmer.GetLastError);
+    LogDriverHint;
     result := false;
     Exit;
   end;
@@ -1262,6 +1281,55 @@ begin
   end;
 
   Stream.Position := 0;
+end;
+
+//เติมค่าที่อ่านได้จาก SFDP ลงในหน้าจอและใน CurrentICParam
+//ลำดับสำคัญ เพราะ RadioSPIChange จะล้างค่าในช่องต่าง ๆ ทิ้ง
+procedure ApplySFDPInfo(const Info: TSFDPInfo);
+var
+  i: integer;
+  ESize: cardinal;
+  EOpcode: byte;
+begin
+  LogPrint(STR_SFDP_FOUND + ' (JESD216 rev ' + IntToStr(Info.MajorRev) + '.' +
+           IntToStr(Info.MinorRev) + ')');
+  LogPrint('  Size: ' + IntToStr(Info.Density) + ' bytes');
+  LogPrint('  Page: ' + IntToStr(Info.PageSize) + ' bytes');
+  LogPrint('  Address bytes: ' + SFDPAddrBytesStr(Info));
+
+  for i := 1 to 4 do
+    if Info.EraseTypes[i].Size > 0 then
+      LogPrint('  Erase type ' + IntToStr(i) + ': ' + IntToStr(Info.EraseTypes[i].Size) +
+               ' bytes, opcode 0x' + IntToHex(Info.EraseTypes[i].Opcode, 2));
+
+  MainForm.ComboSPICMD.ItemIndex := SPI_CMD_25;
+  MainForm.RadioSPI.Checked := True;
+  MainForm.RadioSPIChange(MainForm);
+
+  MainForm.ComboChipSize.Text := IntToStr(Info.Density);
+  MainForm.ComboPageSize.Text := IntToStr(Info.PageSize);
+  MainForm.LabelChipName.Caption := 'SFDP ' + IntToStr(Info.Density div 1024) + 'K';
+
+  CurrentICParam.Name := MainForm.LabelChipName.Caption;
+  CurrentICParam.Size := Info.Density;
+  CurrentICParam.Page := Info.PageSize;
+  CurrentICParam.SpiCmd := SPI_CMD_25;
+  CurrentICParam.Script := '';
+  CurrentICParam.ID := '';
+  MainForm.ComboBox_chip_scriptrun.Items.Clear;
+
+  if SFDPSmallestErase(Info, ESize, EOpcode) then
+  begin
+    CurrentICParam.Sector := ESize;
+    CurrentICParam.SectorOpcode := EOpcode;
+  end
+  else
+  begin
+    CurrentICParam.Sector := 0;
+    CurrentICParam.SectorOpcode := 0;
+  end;
+
+  LogPrint(STR_SFDP_APPLIED);
 end;
 
 //ตั้งความเร็วของ spi และ Microwire
@@ -3512,6 +3580,10 @@ var
   IDstr90H: string[4];
   IDstrABH: string[6];
   IDstr15H: string[4];
+  Matches: TStringList;
+  Vendor, ChipName: string;
+  Info: TSFDPInfo;
+  SfdpOK: boolean;
 begin
   try
     if not OpenDevice() then exit;
@@ -3537,8 +3609,11 @@ begin
     end;
 
     UsbAsp25_ReadID(ID);
-    ExitProgMode25;
 
+    //อ่าน SFDP ตอนที่ยังอยู่ในโหมดโปรแกรม เผื่อชิปไม่มีในฐานข้อมูล
+    SfdpOK := SFDPDetect(Info);
+
+    ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
 
     IDstr9FH := Upcase(IntToHex(ID.ID9FH[0], 2)+IntToHex(ID.ID9FH[1], 2)+IntToHex(ID.ID9FH[2], 2));
@@ -3546,44 +3621,72 @@ begin
     IDstrABH := Upcase(IntToHex(ID.IDABH, 2));
     IDstr15H := Upcase(IntToHex(ID.ID15H[0], 2)+IntToHex(ID.ID15H[1], 2));
 
-    if FileExists('chiplist.xml') then
-    begin
+    LogPrint('ID(9F): '+ IDstr9FH);
+    LogPrint('ID(90): '+ IDstr90H);
+    LogPrint('ID(AB): '+ IDstrABH);
+    LogPrint('ID(15): '+ IDstr15H);
 
-      try
-        ReadXMLFile(XMLfile, 'chiplist.xml');
-      except
-        on E: EXMLReadError do
+    //ทั้ง 00 หรือทั้ง FF แปลว่าไม่มีชิปตอบกลับ ไม่ต้องไปค้นฐานข้อมูลให้เสียเวลา
+    if IsDeadID(ID.ID9FH) then
+    begin
+      LogPrint(STR_NO_CHIP);
+      Exit;
+    end;
+
+    Vendor := JedecVendor(ID.ID9FH[0]);
+    if Vendor <> '' then LogPrint(STR_VENDOR + Vendor);
+
+    Matches := TStringList.Create;
+    try
+      if FileExists(ChipListFileName) then
+      begin
+        XMLfile := nil;
+        try
+          ReadXMLFile(XMLfile, ChipListFileName);
+        except
+          on E: EXMLReadError do ShowMessage(E.Message);
+        end;
+
+        if XMLfile <> nil then
         begin
-          ShowMessage(E.Message);
+          //ไล่จาก 9F ก่อน แล้วค่อยลองโอปโค้ดเก่ากว่าถ้ายังไม่เจอ
+          FindChipInto(XMLfile, '', IDstr9FH, Matches);
+          if Matches.Count = 0 then FindChipInto(XMLfile, '', IDstr90H, Matches);
+          if Matches.Count = 0 then FindChipInto(XMLfile, '', IDstrABH, Matches);
+          if Matches.Count = 0 then FindChipInto(XMLfile, '', IDstr15H, Matches);
+          XMLfile.Free;
         end;
       end;
 
-      ChipSearchForm.ListBoxChips.Clear;
-      ChipSearchForm.EditSearch.Text:= '';
-
-      FindChip.FindChip(XMLfile, '', IDstr9FH);
-      if ChipSearchForm.ListBoxChips.Items.Capacity = 0 then FindChip.FindChip(XMLfile, '', IDstr90H);
-      if ChipSearchForm.ListBoxChips.Items.Capacity = 0 then FindChip.FindChip(XMLfile, '', IDstrABH);
-      if ChipSearchForm.ListBoxChips.Items.Capacity = 0 then FindChip.FindChip(XMLfile, '', IDstr15H);
-
-      XMLfile.Free;
-    end;
-
-      if ChipSearchForm.ListBoxChips.Items.Capacity > 0 then
+      if Matches.Count = 1 then
       begin
+        //ตรงตัวเดียว เลือกให้เลย ไม่ต้องให้ผู้ใช้มากดซ้ำ
+        ChipName := Matches[0];
+        ChipName := Copy(ChipName, 1, Pos(' (', ChipName) - 1);
+        SelectChip(ChipListFile, ChipName);
+        LogPrint(STR_DETECT_ONE + ChipName);
+      end
+      else if Matches.Count > 1 then
+      begin
+        LogPrint(Format(STR_DETECT_MANY, [Matches.Count]));
+        ChipSearchForm.EditSearch.Text := '';
+        ChipSearchForm.ListBoxChips.Items.Assign(Matches);
         ChipSearchForm.Show;
-        LogPrint('ID(9F): '+ IDstr9FH);
-        LogPrint('ID(90): '+ IDstr90H);
-        LogPrint('ID(AB): '+ IDstrABH);
-        LogPrint('ID(15): '+ IDstr15H);
       end
       else
       begin
-        LogPrint('ID(9F): '+ IDstr9FH +STR_ID_UNKNOWN);
-        LogPrint('ID(90): '+ IDstr90H +STR_ID_UNKNOWN);
-        LogPrint('ID(AB): '+ IDstrABH +STR_ID_UNKNOWN);
-        LogPrint('ID(15): '+ IDstr15H +STR_ID_UNKNOWN);
+        //ไม่มีในฐานข้อมูล ยังเหลือทาง SFDP ให้ลอง
+        if SfdpOK then
+        begin
+          LogPrint(STR_DETECT_SFDP);
+          ApplySFDPInfo(Info);
+        end
+        else
+          LogPrint(STR_DETECT_NONE);
       end;
+    finally
+      Matches.Free;
+    end;
 
   finally
     UnlockControl();

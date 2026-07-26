@@ -30,6 +30,10 @@ type
   procedure FindChip(XMLfile: TXMLDocument; chipname: string; chipid: string = '');
   procedure SelectChip(XMLfile: TXMLDocument; chipname: string);
 
+  //เหมือน FindChip แต่ใส่ผลลงในลิสต์ที่ส่งมา ไม่ยุ่งกับหน้าต่างค้นหาและ log
+  //ใช้ตอนตรวจหาชิปอัตโนมัติ ซึ่งต้องนับจำนวนผลก่อนจะตัดสินใจ
+  procedure FindChipInto(XMLfile: TXMLDocument; chipname, chipid: string; Dest: TStrings);
+
 var
   ChipSearchForm: TChipSearchForm;
 
@@ -38,6 +42,51 @@ implementation
 uses main, scriptsfunc;
 
 {$R *.lfm}
+
+procedure FindChipInto(XMLfile: TXMLDocument; chipname, chipid: string; Dest: TStrings);
+var
+  Node, ChipNode: TDOMNode;
+  j, i: integer;
+  cs: string;
+begin
+  if XMLfile = nil then Exit;
+  if Dest = nil then Exit;
+
+  Node := XMLfile.DocumentElement.FirstChild;
+
+  while Assigned(Node) do
+  begin
+    with Node.ChildNodes do
+    try
+      for j := 0 to (Count - 1) do
+        for i := 0 to (Item[j].ChildNodes.Count - 1) do
+        begin
+          ChipNode := Item[j].ChildNodes.Item[i];
+
+          if chipid <> '' then
+          begin
+            if ChipNode.HasAttributes then
+              if ChipNode.Attributes.GetNamedItem('id') <> nil then
+              begin
+                cs := UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('id').NodeValue);
+                if UpCase(cs) = UpCase(chipid) then
+                  Dest.Append(UTF16ToUTF8(ChipNode.NodeName) + ' (' +
+                              UTF16ToUTF8(Item[j].NodeName) + ')');
+              end;
+          end
+          else
+          begin
+            cs := UTF16ToUTF8(ChipNode.NodeName);
+            if Pos(UpCase(chipname), UpCase(cs)) > 0 then
+              Dest.Append(cs + ' (' + UTF16ToUTF8(Item[j].NodeName) + ')');
+          end;
+        end;
+    finally
+      Free;
+    end;
+    Node := Node.NextSibling;
+  end;
+end;
 
 //ค้นหาชิปจากชื่อ ถ้า id ไม่ว่างจะค้นจาก id อย่างเดียว
 procedure FindChip(XMLfile: TXMLDocument; chipname: string; chipid: string = '');
