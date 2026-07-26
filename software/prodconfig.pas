@@ -1,6 +1,7 @@
 unit prodconfig;
 
-//เลขรันนิ่งอัตโนมัติและโหมดผลิตเป็นชุด
+//ไดอะล็อกตั้งค่าเลขรันนิ่งและการผลิตเป็นชุด
+//ตรรกะการสร้างเลขอยู่ใน serialnum ซึ่งไม่พึ่ง LCL และมีเทสต์ครอบไว้
 //
 //ไดอะล็อกสร้างด้วยโค้ด ไม่ได้มาจาก .lfm เพราะถ้าพิมพ์ผิดในไฟล์ฟอร์ม
 //โปรแกรมจะเปิดไม่ขึ้นทั้งตัว แบบนี้พังได้แค่ไดอะล็อกนี้
@@ -10,158 +11,13 @@ unit prodconfig;
 interface
 
 uses
-  Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, Dialogs, Graphics;
-
-type
-
-  TSerialMode = (
-    smIncrement,        //นับอย่างเดียว
-    smDateIncrement,    //วันที่แบบ BCD ปี เดือน วัน แล้วตามด้วยตัวนับ
-    smRandom            //ไบต์สุ่ม
-  );
-
-  TProdSettings = record
-    SNEnabled: boolean;
-    SNAddress: cardinal;    //ตำแหน่งในบัฟเฟอร์ที่จะวางเลข
-    SNLength: byte;         //1..8 ไบต์
-    SNMode: TSerialMode;
-    SNValue: QWord;         //ค่าตัวนับปัจจุบัน
-    SNStep: cardinal;
-    SNBigEndian: boolean;   //เรียงไบต์สูงขึ้นก่อน
-    SNLogFile: string;      //ไฟล์บันทึกเลขที่จ่ายไป เว้นว่างคือไม่บันทึก
-
-    BatchEnabled: boolean;
-    BatchTarget: integer;   //จะเขียนกี่ตัวต่อหนึ่งรอบการผลิต
-  end;
+  Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, Dialogs, Graphics,
+  serialnum;
 
 //ไดอะล็อกตั้งค่า คืน True เมื่อผู้ใช้กด OK
 function EditProdSettings(var S: TProdSettings): boolean;
 
-//ค่าเริ่มต้น
-procedure DefaultProdSettings(out S: TProdSettings);
-
-//สร้างไบต์ของเลขรันนิ่งจากค่าตัวนับปัจจุบัน
-procedure BuildSerialBytes(const S: TProdSettings; out Bytes: array of byte);
-
-//วางเลขลงบัฟเฟอร์ คืน False ถ้าเลขไม่พอดีกับบัฟเฟอร์
-function ApplySerial(const S: TProdSettings; var Data: array of byte;
-  DataSize: cardinal): boolean;
-
-//รูปแบบที่อ่านออกของเลขรันนิ่ง ใช้ตอนเขียน log
-function SerialToStr(const S: TProdSettings): string;
-
 implementation
-
-procedure DefaultProdSettings(out S: TProdSettings);
-begin
-  S.SNEnabled := False;
-  S.SNAddress := 0;
-  S.SNLength := 4;
-  S.SNMode := smIncrement;
-  S.SNValue := 1;
-  S.SNStep := 1;
-  S.SNBigEndian := True;
-  S.SNLogFile := 'serials.log';
-
-  S.BatchEnabled := False;
-  S.BatchTarget := 10;
-end;
-
-function ToBCD(V: byte): byte;
-begin
-  Result := byte(((V div 10) shl 4) or (V mod 10));
-end;
-
-procedure BuildSerialBytes(const S: TProdSettings; out Bytes: array of byte);
-var
-  i, CounterBytes, Offset: integer;
-  V: QWord;
-  Y, M, D: word;
-  t: byte;
-begin
-  FillByte(Bytes[0], S.SNLength, 0);
-
-  case S.SNMode of
-
-    smRandom:
-      for i := 0 to S.SNLength - 1 do
-        Bytes[i] := byte(Random(256));
-
-    smDateIncrement:
-      begin
-        DecodeDate(Date, Y, M, D);
-
-        //วันที่กินไป 3 ไบต์ ใส่ได้ต่อเมื่อเลขยาวพอ
-        if S.SNLength >= 4 then
-        begin
-          Bytes[0] := ToBCD(byte(Y mod 100));
-          Bytes[1] := ToBCD(byte(M));
-          Bytes[2] := ToBCD(byte(D));
-          Offset := 3;
-        end
-        else
-          Offset := 0;
-
-        CounterBytes := S.SNLength - Offset;
-        V := S.SNValue;
-
-        for i := CounterBytes - 1 downto 0 do
-        begin
-          Bytes[Offset + i] := byte(V and $FF);
-          V := V shr 8;
-        end;
-      end;
-
-  else  //smIncrement
-    begin
-      V := S.SNValue;
-      for i := S.SNLength - 1 downto 0 do
-      begin
-        Bytes[i] := byte(V and $FF);
-        V := V shr 8;
-      end;
-    end;
-  end;
-
-  //ไบต์ถูกเรียงสูงขึ้นก่อน ถ้าต้องการสลับก็กลับด้านตรงนี้
-  if not S.SNBigEndian then
-    for i := 0 to (S.SNLength div 2) - 1 do
-    begin
-      t := Bytes[i];
-      Bytes[i] := Bytes[S.SNLength - 1 - i];
-      Bytes[S.SNLength - 1 - i] := t;
-    end;
-end;
-
-function ApplySerial(const S: TProdSettings; var Data: array of byte;
-  DataSize: cardinal): boolean;
-var
-  Bytes: array[0..7] of byte;
-  i: integer;
-begin
-  Result := False;
-  if (not S.SNEnabled) or (S.SNLength < 1) or (S.SNLength > 8) then Exit;
-  if S.SNAddress + S.SNLength > DataSize then Exit;
-
-  BuildSerialBytes(S, Bytes);
-
-  for i := 0 to S.SNLength - 1 do
-    Data[S.SNAddress + cardinal(i)] := Bytes[i];
-
-  Result := True;
-end;
-
-function SerialToStr(const S: TProdSettings): string;
-var
-  Bytes: array[0..7] of byte;
-  i: integer;
-begin
-  BuildSerialBytes(S, Bytes);
-  Result := '';
-  for i := 0 to S.SNLength - 1 do
-    Result := Result + IntToHex(Bytes[i], 2);
-end;
-
 //--------------------------------------------------------------------- ไดอะล็อก
 
 type

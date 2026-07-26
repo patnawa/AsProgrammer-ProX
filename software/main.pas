@@ -15,7 +15,7 @@ uses
   spi45, spi95, i2c, microwire, spimulti, ft232hhw,
   XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
-  utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, jedec,
+  utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, serialnum, jedec,
   pascalc, ScriptsFunc, ScriptEdit, baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
 
 type

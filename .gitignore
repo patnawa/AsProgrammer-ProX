@@ -13,3 +13,6 @@ mphexeditor/
 
 # Runtime copy of the chip list (source of truth is chiplist.xml in the repo root)
 software/chiplist.xml
+
+# Release output
+release/

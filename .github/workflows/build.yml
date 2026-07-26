@@ -1,0 +1,46 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The project targets win32, so the 64-bit Lazarus cannot build it
+      # without an i386 cross compiler. Install the 32-bit one.
+      - name: Cache Lazarus
+        id: cache-lazarus
+        uses: actions/cache@v4
+        with:
+          path: C:\lazarus32
+          key: lazarus-4.8-fpc-3.2.2-win32
+
+      - name: Install Lazarus 32 bit
+        if: steps.cache-lazarus.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = "https://downloads.sourceforge.net/project/lazarus/Lazarus%20Windows%2032%20bits/Lazarus%204.8/lazarus-4.8-fpc-3.2.2-win32.exe"
+          curl.exe -L --fail --retry 3 -o lazarus.exe $url
+          Start-Process -FilePath .\lazarus.exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/NOCANCEL","/DIR=C:\lazarus32","/TASKS=" -Wait
+          if (-not (Test-Path C:\lazarus32\lazbuild.exe)) { throw "Lazarus did not install" }
+
+      - name: Build and test
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File tools\build.ps1
+
+      - name: Assemble the release folder
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsProgrammer-ProX
+          path: release/*.zip
+          if-no-files-found: error
