@@ -120,6 +120,7 @@ resourcestring
   STR_CMP_READ_SECOND    = 'Reading the second chip...';
   STR_CMP_SWAP           = 'Now swap in the second chip, then press OK.';
   STR_HINT_KEYS          = 'Esc = cancel   F1 = console';
+  STR_COMPARE_SEE_LOG    = 'The differing ranges are listed in the log below.';
   STR_DRIVER_HINT        = 'If the programmer is plugged in, its driver is probably missing. '
                          + 'Install it from ';
   STR_DRIVER_HINT_COM    = 'Check the COM port setting and that no other program is holding '

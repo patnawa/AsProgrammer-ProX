@@ -1294,7 +1294,8 @@ end;
 procedure ReadFlash25(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal); forward;
 
 //ตัวช่วยของงานเทียบข้อมูล ตัวจริงอยู่ท้ายไฟล์ แต่มีผู้เรียกอยู่ก่อนหน้านั้น
-procedure ReportDiff(const A, B: array of byte; Size: integer); forward;
+function ReportDiff(const A, B: array of byte; Size: integer): integer; forward;
+function UIChipSize: cardinal; forward;
 function ReadCurrentChip(Stream: TMemoryStream; Size: cardinal): boolean; forward;
 
 //ตรวจว่าชิปที่เสียบอยู่ตรงกับที่เลือกไว้จริงหรือไม่
@@ -4166,12 +4167,12 @@ begin
     F2 := Dlg.FileName;
 
     //ขนาดชิปใช้เป็นกรอบตอนกางไฟล์ HEX ถ้าไม่ได้ตั้งไว้ก็ใช้ขนาดไฟล์เอง
-    if not LoadFirmware(F1, S1, OpUI.ChipSize, $FF, ErrMsg) then
+    if not LoadFirmware(F1, S1, UIChipSize, $FF, ErrMsg) then
     begin
       LogPrint(ExtractFileName(F1) + ': ' + ErrMsg);
       Exit;
     end;
-    if not LoadFirmware(F2, S2, OpUI.ChipSize, $FF, ErrMsg) then
+    if not LoadFirmware(F2, S2, UIChipSize, $FF, ErrMsg) then
     begin
       LogPrint(ExtractFileName(F2) + ': ' + ErrMsg);
       Exit;
@@ -4653,7 +4654,7 @@ end;
 
 //รายงานความต่างระหว่างข้อมูลสองชุด เป็นช่วง ๆ พร้อมยอดรวม
 //ใช้ร่วมกันทั้งการเทียบกับชิป เทียบไฟล์ และเทียบชิปสองตัว
-procedure ReportDiff(const A, B: array of byte; Size: integer);
+function ReportDiff(const A, B: array of byte; Size: integer): integer;
 var
   i, DiffCount, RangeCount, RangeStart: integer;
   InRange: boolean;
@@ -4695,6 +4696,24 @@ begin
   else
     LogPrint(STR_COMPARE_DIFF + IntToStr(DiffCount) + ' / ' + IntToStr(Size) +
              ',  ranges: ' + IntToStr(RangeCount));
+
+  //ผลลัพธ์ต้องเด้งให้เห็น ไม่ใช่ซ่อนอยู่ในบรรทัดล่างสุดของ log
+  if DiffCount = 0 then
+    ShowMessage(STR_COMPARE_EQUAL)
+  else
+    ShowMessage(STR_COMPARE_DIFF + IntToStr(DiffCount) + ' / ' + IntToStr(Size) +
+                LineEnding + 'Ranges: ' + IntToStr(RangeCount) +
+                LineEnding + LineEnding + STR_COMPARE_SEE_LOG);
+
+  Result := DiffCount;
+end;
+
+//ขนาดชิปที่ตั้งไว้บนหน้าจอ อ่านสด ไม่ผ่าน OpUI ซึ่งมีค่าเฉพาะหลังเริ่มงานแล้ว
+function UIChipSize: cardinal;
+begin
+  Result := 0;
+  if IsNumber(MainForm.ComboChipSize.Text) then
+    Result := StrToInt(MainForm.ComboChipSize.Text);
 end;
 
 //อ่านชิปด้วยวิธีของโปรโตคอลที่กำลังใช้อยู่
