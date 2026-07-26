@@ -66,6 +66,9 @@ type
     LabelSPICMD: TLabel;
     LabelChipName: TLabel;
     LabelChipInfo: TLabel;
+    ChipView: TPaintBox;
+    HwTimer: TTimer;
+    MenuAutoDetectHW: TMenuItem;
     MainMenu: TMainMenu;
     Log: TMemo;
     Menu32Khz: TMenuItem;
@@ -223,6 +226,8 @@ type
     procedure MenuProdConfigClick(Sender: TObject);
     procedure MenuRunBatchClick(Sender: TObject);
     procedure MenuSecRegClick(Sender: TObject);
+    procedure ChipViewPaint(Sender: TObject);
+    procedure HwTimerTimer(Sender: TObject);
     procedure ButtonEraseClick(Sender: TObject);
     procedure ButtonReadClick(Sender: TObject);
     procedure ClearLogMenuItemClick(Sender: TObject);
@@ -372,6 +377,10 @@ var
 
   //เลขรันนิ่งอัตโนมัติและการผลิตเป็นชุด
   ProdSettings: TProdSettings;
+
+  //สถานะที่วาดเป็นไฟบอกสถานะในแผงด้านซ้าย
+  ProgrammerPresent: boolean = False;
+  ChipDetected: boolean = False;
 
   //สถานะหน้าจอที่อ่านเก็บไว้บน thread หลักก่อนเริ่มงาน
   //thread เบื้องหลังต้องอ่านจากตรงนี้ ห้ามอ่านจาก control โดยตรง
@@ -1091,6 +1100,9 @@ begin
   if s = '' then s := STR_NO_CHIP_SELECTED;
 
   MainForm.LabelChipInfo.Caption := s;
+
+  ChipDetected := CurrentICParam.Size > 0;
+  MainForm.ChipView.Invalidate;
 end;
 
 //แผงด้านซ้ายในไฟล์ฟอร์มถูกวางไว้แบบพิกัดตายตัวและแคบเกินไป
@@ -1137,6 +1149,14 @@ begin
   MainForm.Label_StartAddress.Left := cx;
   MainForm.Label6.Left := cx;
   MainForm.StartAddressEdit.Left := cx + 20;
+
+  //ภาพชิปกินพื้นที่ที่เหลือทั้งหมดด้านล่าง และยืดตามความสูงหน้าต่าง
+  MainForm.ChipView.Left := 6;
+  MainForm.ChipView.Width := PanelW - 12;
+  MainForm.ChipView.Top := 330;
+  MainForm.ChipView.Anchors := [akLeft, akTop, akRight, akBottom];
+  MainForm.ChipView.Height := MainForm.GroupChipSettings.ClientHeight - 336;
+  if MainForm.ChipView.Height < 120 then MainForm.ChipView.Height := 120;
 end;
 
 //รอจนแฟล็ก Busy ดับ คืน false ถ้าผู้ใช้สั่งยกเลิก
@@ -2858,6 +2878,92 @@ begin
 
 end;
 
+//ไล่เปิดอุปกรณ์ทีละตัว เพื่อดูว่ามีเครื่องโปรแกรมตัวไหนเสียบอยู่จริง
+//ข้ามพวกที่ใช้พอร์ตอนุกรม เพราะการไล่เปิดพอร์ตมั่ว ๆ จะไปกวนอุปกรณ์อื่น
+function ProbeProgrammer(out Found: THardwareList): boolean;
+const
+  Candidates: array[0..4] of THardwareList =
+    (CHW_CH341, CHW_CH347, CHW_FT232H, CHW_USBASP, CHW_AVRISP);
+var
+  i: integer;
+  Saved: THardwareList;
+begin
+  Result := False;
+  Found := CHW_NONE;
+  Saved := AsProgrammer.Current_HW;
+
+  for i := Low(Candidates) to High(Candidates) do
+  begin
+    AsProgrammer.Current_HW := Candidates[i];
+    if AsProgrammer.Programmer.DevOpen then
+    begin
+      AsProgrammer.Programmer.DevClose;
+      Found := Candidates[i];
+      AsProgrammer.Current_HW := Saved;
+      Exit(True);
+    end;
+  end;
+
+  AsProgrammer.Current_HW := Saved;
+end;
+
+//ติ๊กเมนู Hardware ให้ตรงกับอุปกรณ์ที่ใช้งานอยู่จริง
+procedure SetHardwareMenuCheck(HW: THardwareList);
+begin
+  MainForm.MenuHWUSBASP.Checked    := HW = CHW_USBASP;
+  MainForm.MenuHWCH341A.Checked    := HW = CHW_CH341;
+  MainForm.MenuHWCH347.Checked     := HW = CHW_CH347;
+  MainForm.MenuHWAVRISP.Checked    := HW = CHW_AVRISP;
+  MainForm.MenuHWARDUINO.Checked   := HW = CHW_ARDUINO;
+  MainForm.MenuHWBUZZPIRAT.Checked := HW = CHW_BUZZPIRAT;
+  MainForm.MenuHWFT232H.Checked    := HW = CHW_FT232H;
+end;
+
+//เช็คว่ามีเครื่องโปรแกรมต่ออยู่ไหม ถ้าตัวที่เลือกไว้หายไปและเปิดโหมดค้นหาอัตโนมัติ
+//ก็สลับไปใช้ตัวที่เจอแทน
+procedure PollProgrammer(Announce: boolean);
+var
+  Present, Was: boolean;
+  Found: THardwareList;
+begin
+  if OperationRunning then Exit;
+
+  Was := ProgrammerPresent;
+
+  //อุปกรณ์ที่ใช้พอร์ตอนุกรมไม่เอามาวนเช็ค เพราะจะไปจับพอร์ตทิ้งขว้างตลอดเวลา
+  if AsProgrammer.Current_HW in [CHW_ARDUINO, CHW_BUZZPIRAT] then
+  begin
+    ProgrammerPresent := True;
+    MainForm.ChipView.Invalidate;
+    Exit;
+  end;
+
+  Present := AsProgrammer.Programmer.DevOpen;
+  if Present then AsProgrammer.Programmer.DevClose;
+
+  if (not Present) and MainForm.MenuAutoDetectHW.Checked then
+    if ProbeProgrammer(Found) then
+    begin
+      SelectHW(Found);
+      SetHardwareMenuCheck(Found);
+      Present := True;
+      LogPrint(STR_HW_SWITCHED + AsProgrammer.Programmer.HardwareName);
+    end;
+
+  ProgrammerPresent := Present;
+
+  //พูดเฉพาะตอนสถานะเปลี่ยน ไม่งั้น log จะเต็มไปด้วยข้อความซ้ำทุกสามวินาที
+  if Announce or (Was <> ProgrammerPresent) then
+  begin
+    if ProgrammerPresent then
+      LogPrint(STR_HW_CONNECTED + AsProgrammer.Programmer.HardwareName)
+    else
+      LogPrint(STR_HW_DISCONNECTED);
+  end;
+
+  MainForm.ChipView.Invalidate;
+end;
+
 procedure LockControl;
 begin
   //อ่านสถานะหน้าจอเก็บไว้ก่อนเริ่มงาน thread เบื้องหลังจะอ่านค่า
@@ -3217,6 +3323,7 @@ begin
   ComboAddrType.Text:= '';
   ComboPageSize.Text:= 'Page size';
   ComboChipSize.Text:= 'Chip size';
+  ChipView.Invalidate;
 end;
 
 procedure TMainForm.RadioMwChange(Sender: TObject);
@@ -3240,6 +3347,7 @@ begin
   ComboAddrType.Text:= '';
   ComboPageSize.Text:= 'Page size';
   ComboChipSize.Text:= 'Chip size';
+  ChipView.Invalidate;
 end;
 
 procedure TMainForm.RadioSPIChange(Sender: TObject);
@@ -3283,6 +3391,7 @@ begin
   ComboAddrType.Text:= '';
   ComboPageSize.Text:= 'Page size';
   ComboChipSize.Text:= 'Chip size';
+  ChipView.Invalidate;
 end;
 
 procedure TMainForm.ButtonWriteClick(Sender: TObject);
@@ -4108,6 +4217,146 @@ end;
 //เลขประจำตัวชิปและ security register (OTP)
 //security register ล็อกถาวรได้ การเขียนจึงต้องผ่านการยืนยัน
 //และโค้ดนี้ไม่แตะบิตล็อกเลย
+//วาดตัวชิปตามโปรโตคอลที่เลือก พร้อมชื่อขา และไฟบอกสถานะข้างล่าง
+//ชื่อขาใช้เป็นแผนผังต่อสายได้เลย ซึ่งเป็นสิ่งที่ต้องเปิดดาต้าชีตหาทุกครั้ง
+procedure TMainForm.ChipViewPaint(Sender: TObject);
+const
+  PinsSPI: array[0..7] of string = ('CS', 'DO', 'WP', 'GND', 'DI', 'CLK', 'HOLD', 'VCC');
+  PinsI2C: array[0..7] of string = ('A0', 'A1', 'A2', 'GND', 'SDA', 'SCL', 'WP', 'VCC');
+  PinsMW:  array[0..7] of string = ('CS', 'CLK', 'DI', 'DO', 'GND', 'ORG', 'NC', 'VCC');
+  BodyW = 74;
+  PinW = 15;
+  PinH = 7;
+var
+  C: TCanvas;
+  Pins: array[0..7] of string;
+  Dark: boolean;
+  ColText, ColDim, ColBody, ColEdge, ColPin, ColAccent: TColor;
+  BodyL, BodyT, BodyH, Pitch, i, py, ledY, Avail: integer;
+  s: string;
+
+  procedure Led(ATop: integer; const ACaption, AValue: string; AOn: boolean);
+  begin
+    if AOn then C.Brush.Color := TColor($5B9E2E)   //#2E9E5B
+    else        C.Brush.Color := ColDim;
+    C.Pen.Color := C.Brush.Color;
+    C.Ellipse(4, ATop, 15, ATop + 11);
+
+    C.Brush.Style := bsClear;
+    C.Font.Color := ColText;
+    C.TextOut(22, ATop - 2, ACaption);
+    C.Font.Color := ColDim;
+    C.TextOut(22 + C.TextWidth(ACaption) + 6, ATop - 2, AValue);
+    C.Brush.Style := bsSolid;
+  end;
+
+begin
+  C := ChipView.Canvas;
+  Dark := MenuDarkTheme.Checked;
+
+  if Dark then
+  begin
+    ColText   := TColor($D9D1C9);
+    ColDim    := TColor($8E8578);
+    ColBody   := TColor($241F1B);
+    ColEdge   := TColor($6E6055);
+    ColPin    := TColor($B8AFA4);
+    ColAccent := TColor($F3B32B);
+    C.Brush.Color := TColor($241F1B);
+  end
+  else
+  begin
+    ColText   := TColor($33291F);
+    ColDim    := TColor($9A8E80);
+    ColBody   := TColor($3A322C);
+    ColEdge   := TColor($6E6055);
+    ColPin    := TColor($9A9186);
+    ColAccent := TColor($D16E0A);
+    C.Brush.Color := TColor($F7F4F2);
+  end;
+
+  C.FillRect(0, 0, ChipView.Width, ChipView.Height);
+  C.Font.Name := 'Segoe UI';
+  C.Font.Size := 7;
+
+  //ชื่อขาขึ้นกับโปรโตคอลที่กำลังใช้
+  //คัดลอกทีละตัว ห้ามใช้ Move เพราะสตริงมีตัวนับอ้างอิงอยู่
+  for i := 0 to 7 do
+    if RadioI2C.Checked then Pins[i] := PinsI2C[i]
+    else if RadioMw.Checked then Pins[i] := PinsMW[i]
+    else Pins[i] := PinsSPI[i];
+
+  BodyL := (ChipView.Width - BodyW) div 2;
+
+  //กันที่ไว้ให้ไฟสถานะสองแถวข้างล่าง ที่เหลือเป็นของตัวชิป
+  Avail := ChipView.Height - 56;
+  if Avail < 90 then Avail := 90;
+
+  BodyH := Avail - 16;
+  if BodyH > 128 then BodyH := 128;
+  BodyT := (Avail - BodyH) div 2;
+  Pitch := BodyH div 4;
+
+  //ขาชิป ซ้ายนับ 1-4 จากบนลงล่าง ขวานับ 5-8 จากล่างขึ้นบน ตามมาตรฐาน
+  C.Brush.Color := ColPin;
+  C.Pen.Color := ColEdge;
+  for i := 0 to 3 do
+  begin
+    py := BodyT + (Pitch - PinH) div 2 + i * Pitch;
+    C.Rectangle(BodyL - PinW, py, BodyL, py + PinH);
+    C.Rectangle(BodyL + BodyW, py, BodyL + BodyW + PinW, py + PinH);
+  end;
+
+  //ตัวถัง
+  C.Brush.Color := ColBody;
+  C.Pen.Color := ColEdge;
+  C.RoundRect(BodyL, BodyT, BodyL + BodyW, BodyT + BodyH, 6, 6);
+
+  //จุดบอกขา 1
+  C.Brush.Color := ColAccent;
+  C.Pen.Color := ColAccent;
+  C.Ellipse(BodyL + 7, BodyT + 8, BodyL + 15, BodyT + 16);
+
+  //ชื่อรุ่นบนตัวถัง ตัดถ้ายาวเกินความกว้าง
+  C.Brush.Style := bsClear;
+  C.Font.Color := TColor($E8E2DA);
+  s := CurrentICParam.Name;
+  if s = '' then s := STR_PKG_UNKNOWN;
+  while (s <> '') and (C.TextWidth(s) > BodyW - 8) do Delete(s, Length(s), 1);
+  C.TextOut(BodyL + (BodyW - C.TextWidth(s)) div 2, BodyT + BodyH div 2 - 6, s);
+
+  //ชื่อขา ฝั่งซ้ายชิดขวา ฝั่งขวาชิดซ้าย
+  C.Font.Color := ColText;
+  for i := 0 to 3 do
+  begin
+    py := BodyT + (Pitch - PinH) div 2 + i * Pitch - 3;
+
+    s := IntToStr(i + 1) + ' ' + Pins[i];
+    C.TextOut(BodyL - PinW - 4 - C.TextWidth(s), py, s);
+
+    s := Pins[7 - i] + ' ' + IntToStr(8 - i);
+    C.TextOut(BodyL + BodyW + PinW + 4, py, s);
+  end;
+
+  //ไฟบอกสถานะยึดกับขอบล่างเสมอ
+  ledY := ChipView.Height - 46;
+  C.Font.Size := 8;
+
+  if ProgrammerPresent then
+    s := AsProgrammer.Programmer.HardwareName
+  else
+    s := '';
+  Led(ledY, STR_LED_PROGRAMMER, s, ProgrammerPresent);
+
+  if ChipDetected then s := CurrentICParam.ID else s := '';
+  Led(ledY + 22, STR_LED_CHIP, s, ChipDetected);
+end;
+
+procedure TMainForm.HwTimerTimer(Sender: TObject);
+begin
+  PollProgrammer(False);
+end;
+
 procedure TMainForm.MenuSecRegClick(Sender: TObject);
 const
   SecRegAddr: array[0..2] of longword = ($001000, $002000, $003000);
@@ -4506,6 +4755,11 @@ begin
   LayoutLeftPanel;
   ApplyTheme(MenuDarkTheme.Checked);
   UpdateChipInfo;
+
+  //ค้นหาเครื่องโปรแกรมที่เสียบอยู่ตั้งแต่เปิดโปรแกรม แล้วเฝ้าดูต่อเป็นระยะ
+  SetHardwareMenuCheck(AsProgrammer.Current_HW);
+  PollProgrammer(True);
+  HwTimer.Enabled := True;
 end;
 
 procedure TMainForm.FormDestroy(Sender: TObject);
@@ -5084,6 +5338,10 @@ begin
       TDOMElement(ParentNode).SetAttribute('dark_theme', '1') else
         TDOMElement(ParentNode).SetAttribute('dark_theme', '0');
 
+    if MainForm.MenuAutoDetectHW.Checked then
+      TDOMElement(ParentNode).SetAttribute('auto_detect_hw', '1') else
+        TDOMElement(ParentNode).SetAttribute('auto_detect_hw', '0');
+
     if MainForm.MenuCheckIDBefore.Checked then
       TDOMElement(ParentNode).SetAttribute('check_id', '1') else
         TDOMElement(ParentNode).SetAttribute('check_id', '0');
@@ -5209,6 +5467,10 @@ begin
       if  Node.Attributes.GetNamedItem('dark_theme') <> nil then
         MainForm.MenuDarkTheme.Checked :=
           Node.Attributes.GetNamedItem('dark_theme').NodeValue = '1';
+
+      if  Node.Attributes.GetNamedItem('auto_detect_hw') <> nil then
+        MainForm.MenuAutoDetectHW.Checked :=
+          Node.Attributes.GetNamedItem('auto_detect_hw').NodeValue = '1';
 
       if  Node.Attributes.GetNamedItem('check_id') <> nil then
         MainForm.MenuCheckIDBefore.Checked :=

@@ -106,6 +106,12 @@ resourcestring
   STR_DETECT_SFDP        = 'Not in chiplist.xml, falling back to SFDP';
   STR_VENDOR             = 'Manufacturer: ';
   STR_NO_CHIP_SELECTED   = 'No chip selected.'#13#10'Pick one from the IC menu, or press Read ID.';
+  STR_HW_CONNECTED       = 'Programmer connected: ';
+  STR_HW_DISCONNECTED    = 'No programmer connected';
+  STR_HW_SWITCHED        = 'Switched to the programmer that is actually plugged in: ';
+  STR_LED_PROGRAMMER     = 'Programmer';
+  STR_LED_CHIP           = 'Chip';
+  STR_PKG_UNKNOWN        = 'select a chip';
   STR_DRIVER_HINT        = 'If the programmer is plugged in, its driver is probably missing. '
                          + 'Install it from ';
   STR_DRIVER_HINT_COM    = 'Check the COM port setting and that no other program is holding '

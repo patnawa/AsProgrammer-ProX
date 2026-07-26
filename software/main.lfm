@@ -496,6 +496,13 @@ object MainForm: TMainForm
         TabOrder = 7
       end
     end
+    object ChipView: TPaintBox
+      Left = 8
+      Height = 230
+      Top = 340
+      Width = 184
+      OnPaint = ChipViewPaint
+    end
     object LabelChipInfo: TLabel
       Left = 12
       Height = 60
@@ -787,6 +794,11 @@ object MainForm: TMainForm
       object MenuAutoCheck: TMenuItem
         AutoCheck = True
         Caption = 'Проверка записи'
+      end
+      object MenuAutoDetectHW: TMenuItem
+        AutoCheck = True
+        Caption = 'Detect the programmer automatically'
+        Checked = True
       end
       object MenuCheckIDBefore: TMenuItem
         AutoCheck = True
@@ -1445,6 +1457,12 @@ object MainForm: TMainForm
       Caption = 'Unlock -> erase only needed sectors -> write -> verify'
       OnClick = MenuSmartWriteClick
     end
+  end
+  object HwTimer: TTimer
+    Interval = 3000
+    OnTimer = HwTimerTimer
+    Left = 400
+    Top = 128
   end
   object EraseDropDownMenu: TPopupMenu
     Left = 480
