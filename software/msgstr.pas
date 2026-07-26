@@ -139,6 +139,19 @@ resourcestring
                          + 'Writing over data that is not erased usually fails.'#13#10#13#10
                          + 'Continue anyway?';
   STR_BLANK_CHECKING     = 'Checking that the target area is erased...';
+  STR_PROT_HEADER        = 'Status register: SR1=0x%.2x  SR2=0x%.2x';
+  STR_PROT_RANGE         = 'Protected: 0x%.8x - 0x%.8x  (%d KB)';
+  STR_PROT_NONE          = 'Nothing is write protected';
+  STR_PROT_CAVEAT        = 'Bit layout read as Winbond W25Q, which most makers follow. '
+                         + 'Check the datasheet for anything unusual';
+  STR_OTP_TITLE          = 'Security register';
+  STR_OTP_WHICH          = 'Which register, 1 to 3?';
+  STR_OTP_ERASE_Q        = 'Erase it instead of writing to it?';
+  STR_OTP_NEED_256       = 'The editor needs at least 256 bytes: its first 256 bytes are written';
+  STR_OTP_CONFIRM        = 'Security register %d can be locked permanently, and once locked '
+                         + 'nothing can change it again.'#13#10#13#10'Continue?';
+  STR_OTP_WRITING        = 'Writing security register %d...';
+  STR_OTP_ERASING        = 'Erasing security register %d...';
   STR_DRIVER_HINT        = 'If the programmer is plugged in, its driver is probably missing. '
                          + 'Install it from ';
   STR_DRIVER_HINT_COM    = 'Check the COM port setting and that no other program is holding '

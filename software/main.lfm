@@ -11,9 +11,11 @@ object MainForm: TMainForm
   Constraints.MinWidth = 300
   Menu = MainMenu
   OnCloseQuery = FormCloseQuery
+  AllowDropFiles = True
   KeyPreview = True
   OnCreate = FormCreate
   OnDestroy = FormDestroy
+  OnDropFiles = FormDropFiles
   OnKeyDown = FormKeyDown
   OnShow = FormShow
   Position = poDesktopCenter
@@ -702,7 +704,7 @@ object MainForm: TMainForm
         Width = 120
       end    
       item
-        Width = 80
+        Width = 200
       end    
       item
         Width = 500
@@ -797,6 +799,10 @@ object MainForm: TMainForm
       object MenuSecReg: TMenuItem
         Caption = 'Read unique ID and security registers'
         OnClick = MenuSecRegClick
+      end
+      object MenuSecRegWrite: TMenuItem
+        Caption = 'Write or erase a security register...'
+        OnClick = MenuSecRegWriteClick
       end
     end
     object MenuOptions: TMenuItem

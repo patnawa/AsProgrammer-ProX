@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, FileUtil, Forms, Controls, Graphics, Dialogs, StdCtrls,
-  ExtCtrls, dom, utilfunc, lazUTF8;
+  ExtCtrls, dom, utilfunc, lazUTF8, Masks;
 
 type
 
@@ -46,6 +46,24 @@ uses main, scriptsfunc;
 
 {$R *.lfm}
 
+//เทียบชื่อชิปกับคำค้น
+//ถ้าคำค้นมี * หรือ ? จะเทียบแบบ wildcard เช่น 25q*1.8 หา 25Q ที่เป็นชิป 1.8V
+//ถ้าไม่มี ก็หาแบบข้อความย่อยเหมือนเดิม
+function ChipNameMatches(const ChipName, Query: string): boolean;
+begin
+  if Query = '' then Exit(True);
+
+  if (Pos('*', Query) > 0) or (Pos('?', Query) > 0) then
+  begin
+    try
+      Result := MatchesMask(UpCase(ChipName), UpCase(Query));
+    except
+      Result := False;   //คำค้นที่รูปแบบผิดไม่ควรทำให้โปรแกรมล้ม
+    end;
+  end
+  else
+    Result := Pos(UpCase(Query), UpCase(ChipName)) > 0;
+end;
 procedure FindChipInto(XMLfile: TXMLDocument; chipname, chipid: string; Dest: TStrings);
 var
   Node, ChipNode: TDOMNode;
@@ -80,7 +98,7 @@ begin
           else
           begin
             cs := UTF16ToUTF8(ChipNode.NodeName);
-            if Pos(UpCase(chipname), UpCase(cs)) > 0 then
+            if ChipNameMatches(cs, chipname) then
               Dest.Append(cs + ' (' + UTF16ToUTF8(Item[j].NodeName) + ')');
           end;
         end;
@@ -133,7 +151,7 @@ begin
            else
            begin
              cs := UTF16ToUTF8(ChipNode.NodeName); //ชิป
-             if pos(Upcase(chipname), Upcase(cs)) > 0 then
+             if ChipNameMatches(cs, chipname) then
              begin
                ChipSearchForm.ListBoxChips.Items.Append(cs+' ('+ UTF16ToUTF8(Item[j].NodeName) +')');
                LogPrint(cs+' ('+ UTF16ToUTF8(Item[j].NodeName) +')');
@@ -182,6 +200,12 @@ begin
              Main.CurrentICParam.Name:= UTF16ToUTF8(ChipNode.NodeName);
              if (ChipNode.HasAttributes) then
              begin
+
+               //หมายเหตุของชิป เช่นข้อควรระวังเรื่องแรงดัน
+               if ChipNode.Attributes.GetNamedItem('note') <> nil then
+                 Main.CurrentICParam.Note := UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('note').NodeValue)
+               else
+                 Main.CurrentICParam.Note := '';
 
                //ต้องมี id ไว้ตรวจก่อนเขียนและก่อนลบ
                if ChipNode.Attributes.GetNamedItem('id') <> nil then

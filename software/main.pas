@@ -15,7 +15,7 @@ uses
   spi45, spi95, i2c, microwire, spimulti, ft232hhw,
   XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
-  utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, serialnum, jedec,
+  utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, serialnum, jedec, protbits,
   pascalc, ScriptsFunc, ScriptEdit, baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
 
 type
@@ -136,6 +136,8 @@ type
     MenuProdConfig: TMenuItem;
     MenuRunBatch: TMenuItem;
     MenuSecReg: TMenuItem;
+    MenuSecRegWrite: TMenuItem;
+    MenuProtInfo: TMenuItem;
     EraseDropDownMenu: TPopupMenu;
     MPHexEditorEx: TMPHexEditorEx;
     ScriptsMenuItem: TMenuItem;
@@ -236,6 +238,8 @@ type
     procedure MenuProdConfigClick(Sender: TObject);
     procedure MenuRunBatchClick(Sender: TObject);
     procedure MenuSecRegClick(Sender: TObject);
+    procedure MenuSecRegWriteClick(Sender: TObject);
+    procedure MenuProtInfoClick(Sender: TObject);
     procedure ChipViewPaint(Sender: TObject);
     procedure HwTimerTimer(Sender: TObject);
     procedure ButtonEraseClick(Sender: TObject);
@@ -248,6 +252,7 @@ type
     procedure FormCreate(Sender: TObject);
     procedure FormShow(Sender: TObject);
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
     procedure FormDestroy(Sender: TObject);
     procedure ChipClick(Sender: TObject);
     procedure ChangeLang(Sender: TObject);
@@ -332,6 +337,7 @@ type
     Sector: Longword;    //ขนาดเซกเตอร์สำหรับลบ ถ้าเป็น 0 คือไม่ระบุ จะใช้ 4096
     SectorOpcode: byte;  //opcode สำหรับลบเซกเตอร์ ถ้าเป็น 0 จะเลือกให้ตามขนาด
     ID: string;          //id จาก chiplist.xml ใช้ตรวจก่อนเริ่มทำงานกับชิป
+    Note: string;        //หมายเหตุจาก chiplist.xml เช่นข้อควรระวังเรื่องแรงดัน
 
     Script: string;
   end;
@@ -373,7 +379,9 @@ type
     procedure SyncProgressMax;
     procedure SyncProgressPos;
     procedure SyncProgressReset;
+    procedure SyncStatus;
   public
+    procedure Status(const S: string);
     procedure Log(const S: string);
     procedure ProgressMax(V: integer);
     procedure ProgressPos(V: integer);
@@ -424,6 +432,17 @@ begin
   MainForm.ProgressBar.Position := 0;
 end;
 
+procedure TUIProxy.SyncStatus;
+begin
+  MainForm.StatusBar.Panels.Items[1].Text := FMsg;
+end;
+
+procedure TUIProxy.Status(const S: string);
+begin
+  FMsg := S;
+  TThread.Synchronize(nil, @SyncStatus);
+end;
+
 procedure TUIProxy.Log(const S: string);
 begin
   FMsg := S;
@@ -445,6 +464,45 @@ end;
 procedure TUIProxy.ProgressReset;
 begin
   TThread.Synchronize(nil, @SyncProgressReset);
+end;
+
+//ความเร็วและเวลาที่เหลือ คิดจากงานที่ทำไปแล้วเทียบกับเวลาที่ใช้
+//เป็นข้อมูลที่ต้องมีเวลารออ่านชิป 64 Mbit ซึ่งกินเวลาหลายสิบนาที
+procedure ShowSpeed(BytesDone, BytesTotal: cardinal; Started: TDateTime);
+var
+  Sec, Rate: double;
+  Remain: integer;
+  s: string;
+begin
+  Sec := MilliSecondsBetween(Now, Started) / 1000;
+  if (Sec < 0.5) or (BytesDone = 0) then Exit;
+
+  Rate := BytesDone / Sec;
+  if Rate < 1024 then
+    s := Format('%.0f B/s', [Rate])
+  else if Rate < 1024 * 1024 then
+    s := Format('%.1f KB/s', [Rate / 1024])
+  else
+    s := Format('%.2f MB/s', [Rate / (1024 * 1024)]);
+
+  if (BytesTotal > BytesDone) and (Rate > 0) then
+  begin
+    Remain := Round((BytesTotal - BytesDone) / Rate);
+    s := s + Format('   %d:%.2d left', [Remain div 60, Remain mod 60]);
+  end;
+
+  if InWorkerThread then
+    UIProxy.Status(s)
+  else
+    MainForm.StatusBar.Panels.Items[1].Text := s;
+end;
+
+procedure ClearSpeed;
+begin
+  if InWorkerThread then
+    UIProxy.Status('')
+  else
+    MainForm.StatusBar.Panels.Items[1].Text := '';
 end;
 
 //ตั้งค่า progress แบบปลอดภัยต่อ thread
@@ -1121,6 +1179,12 @@ begin
          IntToHex(CurrentSectorOpcode, 2) + 'h)';
   end;
 
+  if CurrentICParam.Note <> '' then
+  begin
+    if s <> '' then s := s + LineEnding;
+    s := s + CurrentICParam.Note;
+  end;
+
   if s = '' then s := STR_NO_CHIP_SELECTED;
 
   MainForm.LabelChipInfo.Caption := s;
@@ -1783,6 +1847,7 @@ var
   ProgressPos: integer;
   SkipPage: boolean;
   Retry, BadOffset: integer;
+  OpStarted: TDateTime;
 
   //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
   //ตัวนับลูปต้องเป็นตัวแปรในตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
@@ -1808,6 +1873,7 @@ var
   SetProgressPos(0);
   ProgressPos := 0;
   Retry := 0;
+  OpStarted := Now;
 
   if WriteSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
 
@@ -1912,6 +1978,7 @@ var
     Inc(Address, PageSize);
     Inc(ProgressPos);
     SetProgressPos(ProgressPos);
+    ShowSpeed(Address - StartAddress, WriteSize, OpStarted);
     OpProcessMessages;
 
     if UserCancel then Break;
@@ -1926,6 +1993,7 @@ var
     LogPrint(STR_DONE);
 
   SetProgressPos(0);
+  ClearSpeed;
   end;
 
 begin
@@ -2235,6 +2303,7 @@ var
   DataChunk: array[0..65534] of byte;
   Address: cardinal;
   ProgressPos: integer;
+  OpStarted: TDateTime;
 
   //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
   procedure DoWork;
@@ -2262,6 +2331,7 @@ var
   SetProgressMax(ChipSize div ChunkSize);
   SetProgressPos(0);
   ProgressPos := 0;
+  OpStarted := Now;
 
   RomStream.Clear;
 
@@ -2281,6 +2351,7 @@ var
 
     Inc(ProgressPos);
     SetProgressPos(ProgressPos);
+    ShowSpeed(Address - StartAddress, ChipSize - StartAddress, OpStarted);
     OpProcessMessages;
 
     if UserCancel then Break;
@@ -2294,6 +2365,7 @@ var
     LogPrint(STR_DONE);
 
   SetProgressPos(0);
+  ClearSpeed;
   end;
 
 begin
@@ -2448,6 +2520,7 @@ var
   DataChunkFile: array[0..16786] of byte;
   Address: cardinal;
   ProgressPos: integer;
+  OpStarted: TDateTime;
 
   //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
   //ตัวนับลูปต้องเป็นตัวแปรในตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
@@ -2475,6 +2548,7 @@ var
   SetProgressMax(DataSize div ChunkSize);
   SetProgressPos(0);
   ProgressPos := 0;
+  OpStarted := Now;
 
   if DataSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
 
@@ -2501,6 +2575,7 @@ var
 
     Inc(ProgressPos);
     SetProgressPos(ProgressPos);
+    ShowSpeed(Address - StartAddress, DataSize, OpStarted);
     OpProcessMessages;
 
     if UserCancel then Break;
@@ -2514,6 +2589,7 @@ var
     LogPrint(STR_DONE);
 
   SetProgressPos(0);
+  ClearSpeed;
   end;
 
 begin
@@ -4608,6 +4684,133 @@ begin
   PollProgrammer(False);
 end;
 
+//อธิบายบิตป้องกันการเขียนเป็นภาษาคน พร้อมบอกว่าช่วงไหนของชิปถูกล็อกอยู่
+//ของเดิมมีแต่ให้ดู SREG เป็นเลขฐานสอง ซึ่งต้องเปิดดาต้าชีตแปลเอง
+procedure TMainForm.MenuProtInfoClick(Sender: TObject);
+var
+  SR1, SR2: byte;
+  P: TProtInfo;
+  FromA, ToA: cardinal;
+begin
+  if OperationRunning then Exit;
+
+  if (not RadioSPI.Checked) or (ComboSPICMD.ItemIndex <> SPI_CMD_25) then
+  begin
+    LogPrint(STR_SECTOR_SPI25_ONLY);
+    Exit;
+  end;
+
+try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then Exit;
+  LockControl();
+
+  EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
+
+  SR1 := 0;
+  SR2 := 0;
+  UsbAsp25_ReadSR(SR1, $05);
+  UsbAsp25_ReadSR(SR2, $35);
+
+  LogPrint(Format(STR_PROT_HEADER, [SR1, SR2]));
+  LogPrint(ProtToText(DecodeProt(SR1, SR2)));
+
+  P := DecodeProt(SR1, SR2);
+  if ProtectedRange(P, OpUI.ChipSize, FromA, ToA) then
+    LogPrint(Format(STR_PROT_RANGE, [FromA, ToA, (ToA - FromA + 1) div 1024]))
+  else
+    LogPrint(STR_PROT_NONE);
+
+  LogPrint(STR_PROT_CAVEAT);
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+end;
+
+//เขียนหรือลบ security register (OTP)
+//หน้าเหล่านี้ล็อกถาวรได้ จึงต้องยืนยันสองชั้น และโค้ดนี้ไม่แตะบิตล็อกเลย
+procedure TMainForm.MenuSecRegWriteClick(Sender: TObject);
+const
+  SecRegAddr: array[0..2] of longword = ($001000, $002000, $003000);
+var
+  s: string;
+  RegNo: integer;
+  Data: array[0..255] of byte;
+  Stream: TMemoryStream;
+  Erase: boolean;
+begin
+  if OperationRunning then Exit;
+
+  if (not RadioSPI.Checked) or (ComboSPICMD.ItemIndex <> SPI_CMD_25) then
+  begin
+    LogPrint(STR_SECTOR_SPI25_ONLY);
+    Exit;
+  end;
+
+  s := Trim(InputBox(STR_OTP_TITLE, STR_OTP_WHICH, '1'));
+  if (s = '') or (not IsNumber(s)) then Exit;
+  RegNo := StrToInt(s);
+  if (RegNo < 1) or (RegNo > 3) then Exit;
+
+  Erase := MessageDlg(STR_OTP_TITLE, STR_OTP_ERASE_Q, mtConfirmation,
+                      [mbYes, mbNo], 0) = mrYes;
+
+  if (not Erase) and (MPHexEditorEx.DataSize < 256) then
+  begin
+    LogPrint(STR_OTP_NEED_256);
+    Exit;
+  end;
+
+  if MessageDlg(STR_OTP_TITLE, Format(STR_OTP_CONFIRM, [RegNo]),
+                mtWarning, [mbYes, mbNo], 0) <> mrYes then Exit;
+
+try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then Exit;
+  LockControl();
+
+  EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
+
+  if not VerifyChipID then Exit;
+
+  if Erase then
+  begin
+    LogPrint(Format(STR_OTP_ERASING, [RegNo]));
+    UsbAsp25_WREN();
+    UsbAsp25_EraseSecReg(SecRegAddr[RegNo - 1]);
+    if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
+  end
+  else
+  begin
+    //256 ไบต์แรกของเอดิเตอร์คือข้อมูลที่จะเขียนลงหน้านั้น
+    Stream := TMemoryStream.Create;
+    try
+      MPHexEditorEx.SaveToStream(Stream);
+      Stream.Position := 0;
+      Stream.ReadBuffer(Data[0], 256);
+    finally
+      Stream.Free;
+    end;
+
+    LogPrint(Format(STR_OTP_WRITING, [RegNo]));
+    UsbAsp25_WREN();
+    UsbAsp25_WriteSecReg(SecRegAddr[RegNo - 1], Data, 256);
+    if not WaitNotBusy25(BUSY_TIMEOUT_PAGE) then Exit;
+  end;
+
+  UsbAsp25_Wrdi();
+  LogPrint(STR_DONE);
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+end;
+
 procedure TMainForm.MenuSecRegClick(Sender: TObject);
 const
   SecRegAddr: array[0..2] of longword = ($001000, $002000, $003000);
@@ -5344,14 +5547,104 @@ end;
 
 //ตอน FormCreate ยังไม่รู้ความสูงจริงของแผง ต้องจัดวางซ้ำหลังหน้าต่างขึ้นแล้ว
 //ไม่งั้นรูปชิปจะถูกคำนวณจากขนาดตอนออกแบบและโดนตัดขอบ
+//คืนขนาดและตำแหน่งหน้าต่างที่ผู้ใช้ตั้งไว้ครั้งก่อน
+//ต้องทำที่นี่ ไม่ใช่ตอนอ่านค่า เพราะหน้าต่างยังไม่มีตัวตนจริงตอนนั้น
+procedure RestoreWindowGeometry;
+var
+  Node: TDOMNode;
+
+  function Attr(const Name: string; Def: integer): integer;
+  var
+    v: string;
+  begin
+    Result := Def;
+    if Node.Attributes.GetNamedItem(Name) = nil then Exit;
+    v := UTF16ToUTF8(Node.Attributes.GetNamedItem(Name).NodeValue);
+    if IsNumber(v) then Result := StrToInt(v);
+  end;
+
+var
+  L, T, W, H: integer;
+begin
+  if SettingsFile = nil then Exit;
+  Node := SettingsFile.DocumentElement.FindNode('options');
+  if (Node = nil) or (not Node.HasAttributes) then Exit;
+
+  W := Attr('win_width', 0);
+  H := Attr('win_height', 0);
+
+  //หน้าจออาจเปลี่ยนไปแล้ว อย่าคืนตำแหน่งที่มองไม่เห็น
+  if (W > 400) and (H > 300) then
+  begin
+    L := Attr('win_left', MainForm.Left);
+    T := Attr('win_top', MainForm.Top);
+
+    if (L > -50) and (T > -50) and
+       (L < Screen.DesktopWidth - 100) and (T < Screen.DesktopHeight - 100) then
+    begin
+      MainForm.Position := poDesigned;
+      MainForm.SetBounds(L, T, W, H);
+    end
+    else
+      MainForm.SetBounds(MainForm.Left, MainForm.Top, W, H);
+  end;
+
+  if Node.Attributes.GetNamedItem('win_max') <> nil then
+    if UTF16ToUTF8(Node.Attributes.GetNamedItem('win_max').NodeValue) = '1' then
+      MainForm.WindowState := wsMaximized;
+end;
+
 procedure TMainForm.FormShow(Sender: TObject);
 begin
+  RestoreWindowGeometry;
   LayoutLeftPanel;
   ChipView.Invalidate;
 
   //คำใบ้ปุ่มลัดอยู่ตรงนี้ ไม่ใช่บนแถบชื่อหน้าต่าง
   ButtonCancel.Hint := ButtonCancel.Hint + ' (Esc)';
   StatusBar.Panels.Items[3].Text := STR_HINT_KEYS;
+end;
+
+//ลากไฟล์มาวางบนหน้าต่างแล้วโหลดเข้าเอดิเตอร์ได้เลย
+//รองรับทุกนามสกุลที่เมนูเปิดไฟล์รองรับ รวมถึง .hex และ S-record
+procedure TMainForm.FormDropFiles(Sender: TObject; const FileNames: array of string);
+var
+  Stream: TMemoryStream;
+  ErrMsg: string;
+  BlankByte: byte;
+begin
+  if OperationRunning then Exit;
+  if Length(FileNames) = 0 then Exit;
+
+  if DetectFormat(FileNames[0]) = ffBinary then
+  begin
+    MPHexEditorEx.LoadFromFile(FileNames[0]);
+    StatusBar.Panels.Items[2].Text := FileNames[0];
+    LogPrint(STR_FILE_LOADED + ExtractFileName(FileNames[0]));
+    Exit;
+  end;
+
+  if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_KB) then
+    BlankByte := $00
+  else
+    BlankByte := $FF;
+
+  Stream := TMemoryStream.Create;
+  try
+    if not LoadFirmware(FileNames[0], Stream, UIChipSize, BlankByte, ErrMsg) then
+    begin
+      LogPrint(ErrMsg);
+      Exit;
+    end;
+    if ErrMsg <> '' then LogPrint(ErrMsg);
+
+    Stream.Position := 0;
+    MPHexEditorEx.LoadFromStream(Stream);
+    StatusBar.Panels.Items[2].Text := FileNames[0];
+    LogPrint(STR_FILE_LOADED + ExtractFileName(FileNames[0]));
+  finally
+    Stream.Free;
+  end;
 end;
 
 //ESC ยกเลิกงานที่ทำอยู่ F1 เปิดคอนโซลดีบัก
@@ -6033,6 +6326,17 @@ begin
     TDOMElement(ParentNode).SetAttribute('sn_logfile', ProdSettings.SNLogFile);
     TDOMElement(ParentNode).SetAttribute('batch_enabled', BoolToStr(ProdSettings.BatchEnabled, '1', '0'));
     TDOMElement(ParentNode).SetAttribute('batch_target', IntToStr(ProdSettings.BatchTarget));
+
+    //ขนาดและตำแหน่งหน้าต่าง เก็บเฉพาะตอนไม่ได้ขยายเต็มจอ
+    if MainForm.WindowState = wsNormal then
+    begin
+      TDOMElement(ParentNode).SetAttribute('win_left', IntToStr(MainForm.Left));
+      TDOMElement(ParentNode).SetAttribute('win_top', IntToStr(MainForm.Top));
+      TDOMElement(ParentNode).SetAttribute('win_width', IntToStr(MainForm.Width));
+      TDOMElement(ParentNode).SetAttribute('win_height', IntToStr(MainForm.Height));
+    end;
+    TDOMElement(ParentNode).SetAttribute('win_max',
+      BoolToStr(MainForm.WindowState = wsMaximized, '1', '0'));
 
     TDOMElement(ParentNode).SetAttribute('arduino_comport', Arduino_COMPort);
     TDOMElement(ParentNode).SetAttribute('arduino_baudrate', IntToStr(Arduino_BaudRate));
