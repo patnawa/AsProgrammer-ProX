@@ -112,6 +112,13 @@ resourcestring
   STR_LED_PROGRAMMER     = 'Programmer';
   STR_LED_CHIP           = 'Chip';
   STR_PKG_UNKNOWN        = 'select a chip';
+  STR_CMP_PICK_FIRST     = 'Pick the first file';
+  STR_CMP_PICK_SECOND    = 'Pick the second file';
+  STR_CMP_FILES          = 'Comparing two files:';
+  STR_CMP_SIZE_DIFF      = 'Sizes differ, comparing the common part only. Difference: ';
+  STR_CMP_READ_FIRST     = 'Reading the first chip...';
+  STR_CMP_READ_SECOND    = 'Reading the second chip...';
+  STR_CMP_SWAP           = 'Now swap in the second chip, then press OK.';
   STR_DRIVER_HINT        = 'If the programmer is plugged in, its driver is probably missing. '
                          + 'Install it from ';
   STR_DRIVER_HINT_COM    = 'Check the COM port setting and that no other program is holding '

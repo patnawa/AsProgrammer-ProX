@@ -126,6 +126,8 @@ type
     MenuCheckIDBefore: TMenuItem;
     MenuAutoBackup: TMenuItem;
     MenuCompareChip: TMenuItem;
+    MenuCompareFiles: TMenuItem;
+    MenuCompareChips: TMenuItem;
     MenuOpenProject: TMenuItem;
     MenuSaveProject: TMenuItem;
     MenuProdConfig: TMenuItem;
@@ -221,6 +223,8 @@ type
     procedure MenuFillBufferClick(Sender: TObject);
     procedure MenuSwapBytesClick(Sender: TObject);
     procedure MenuCompareChipClick(Sender: TObject);
+    procedure MenuCompareFilesClick(Sender: TObject);
+    procedure MenuCompareChipsClick(Sender: TObject);
     procedure MenuOpenProjectClick(Sender: TObject);
     procedure MenuSaveProjectClick(Sender: TObject);
     procedure MenuProdConfigClick(Sender: TObject);
@@ -1287,6 +1291,10 @@ end;
 
 //ตัวจริงอยู่ถัดลงไปในไฟล์ ประกาศไว้ก่อนเพราะการสำรองข้อมูลอัตโนมัติต้องใช้
 procedure ReadFlash25(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal); forward;
+
+//ตัวช่วยของงานเทียบข้อมูล ตัวจริงอยู่ท้ายไฟล์ แต่มีผู้เรียกอยู่ก่อนหน้านั้น
+procedure ReportDiff(const A, B: array of byte; Size: integer); forward;
+function ReadCurrentChip(Stream: TMemoryStream; Size: cardinal): boolean; forward;
 
 //ตรวจว่าชิปที่เสียบอยู่ตรงกับที่เลือกไว้จริงหรือไม่
 //ต้องเรียกตอนอยู่ในโหมดโปรแกรม คืน False เมื่อผู้ใช้เลือกไม่ทำต่อ
@@ -4128,6 +4136,138 @@ begin
   end;
 end;
 
+//เทียบไฟล์สองไฟล์ ไม่ต้องใช้ฮาร์ดแวร์เลย
+//โหลดผ่านตัวอ่านเดียวกับเมนูเปิดไฟล์ จึงเทียบ .hex กับ .bin ข้ามรูปแบบกันได้
+procedure TMainForm.MenuCompareFilesClick(Sender: TObject);
+var
+  Dlg: TOpenDialog;
+  F1, F2: string;
+  S1, S2: TMemoryStream;
+  A, B: array of byte;
+  Size: integer;
+  ErrMsg: string;
+begin
+  if OperationRunning then Exit;
+
+  Dlg := TOpenDialog.Create(nil);
+  S1 := TMemoryStream.Create;
+  S2 := TMemoryStream.Create;
+  try
+    Dlg.Filter := OpenDialog.Filter;
+    Dlg.Options := Dlg.Options + [ofFileMustExist];
+
+    Dlg.Title := STR_CMP_PICK_FIRST;
+    if not Dlg.Execute then Exit;
+    F1 := Dlg.FileName;
+
+    Dlg.Title := STR_CMP_PICK_SECOND;
+    if not Dlg.Execute then Exit;
+    F2 := Dlg.FileName;
+
+    //ขนาดชิปใช้เป็นกรอบตอนกางไฟล์ HEX ถ้าไม่ได้ตั้งไว้ก็ใช้ขนาดไฟล์เอง
+    if not LoadFirmware(F1, S1, OpUI.ChipSize, $FF, ErrMsg) then
+    begin
+      LogPrint(ExtractFileName(F1) + ': ' + ErrMsg);
+      Exit;
+    end;
+    if not LoadFirmware(F2, S2, OpUI.ChipSize, $FF, ErrMsg) then
+    begin
+      LogPrint(ExtractFileName(F2) + ': ' + ErrMsg);
+      Exit;
+    end;
+
+    LogPrint(STR_CMP_FILES);
+    LogPrint('  A: ' + ExtractFileName(F1) + '  ' + IntToStr(S1.Size) + ' bytes  CRC32=' +
+             IntToHex(UpdateCRC32($FFFFFFFF, S1.Memory, S1.Size), 8));
+    LogPrint('  B: ' + ExtractFileName(F2) + '  ' + IntToStr(S2.Size) + ' bytes  CRC32=' +
+             IntToHex(UpdateCRC32($FFFFFFFF, S2.Memory, S2.Size), 8));
+
+    //เทียบเท่าที่ยาวเท่ากัน ส่วนที่เกินรายงานแยก
+    Size := S1.Size;
+    if S2.Size < Size then Size := S2.Size;
+    if Size = 0 then
+    begin
+      LogPrint(STR_CHECKSUM_EMPTY);
+      Exit;
+    end;
+
+    if S1.Size <> S2.Size then
+      LogPrint(STR_CMP_SIZE_DIFF + IntToStr(Abs(S1.Size - S2.Size)) + ' bytes');
+
+    SetLength(A, Size);
+    SetLength(B, Size);
+    S1.Position := 0;  S1.ReadBuffer(A[0], Size);
+    S2.Position := 0;  S2.ReadBuffer(B[0], Size);
+
+    ReportDiff(A, B, Size);
+  finally
+    S1.Free;
+    S2.Free;
+    Dlg.Free;
+  end;
+end;
+
+//เทียบชิปสองตัว อ่านตัวแรก ให้สลับชิป แล้วอ่านตัวที่สอง
+procedure TMainForm.MenuCompareChipsClick(Sender: TObject);
+var
+  S1, S2: TMemoryStream;
+  A, B: array of byte;
+  Size: integer;
+begin
+  if OperationRunning then Exit;
+
+  S1 := TMemoryStream.Create;
+  S2 := TMemoryStream.Create;
+try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then Exit;
+  LockControl();
+
+  if OpUI.ChipSize = 0 then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+  Size := OpUI.ChipSize;
+
+  LogPrint(STR_CMP_READ_FIRST);
+  if not ReadCurrentChip(S1, cardinal(Size)) then Exit;
+
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+
+  if MessageDlg('AsProgrammer', STR_CMP_SWAP, mtConfirmation, [mbOk, mbCancel], 0) <> mrOk then
+  begin
+    LogPrint(STR_USER_CANCEL);
+    Exit;
+  end;
+
+  if not OpenDevice() then Exit;
+
+  LogPrint(STR_CMP_READ_SECOND);
+  if not ReadCurrentChip(S2, cardinal(Size)) then Exit;
+
+  LogPrint('  A: ' + IntToStr(S1.Size) + ' bytes  CRC32=' +
+           IntToHex(UpdateCRC32($FFFFFFFF, S1.Memory, S1.Size), 8));
+  LogPrint('  B: ' + IntToStr(S2.Size) + ' bytes  CRC32=' +
+           IntToHex(UpdateCRC32($FFFFFFFF, S2.Memory, S2.Size), 8));
+
+  SetLength(A, Size);
+  SetLength(B, Size);
+  S1.Position := 0;  S1.ReadBuffer(A[0], Size);
+  S2.Position := 0;  S2.ReadBuffer(B[0], Size);
+
+  ReportDiff(A, B, Size);
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+  S1.Free;
+  S2.Free;
+end;
+end;
+
 procedure TMainForm.MenuOpenProjectClick(Sender: TObject);
 var
   Dlg: TOpenDialog;
@@ -4510,110 +4650,13 @@ begin
   LogPrint(STR_SWAP_DONE + IntToStr(Size div 2));
 end;
 
-//เทียบบัฟเฟอร์กับเนื้อหาในชิปแล้วรายงานเป็นช่วง ๆ
-//ต่างจาก verify ตรงที่ verify จะหยุดที่จุดแรกที่ไม่ตรง
-procedure TMainForm.MenuCompareChipClick(Sender: TObject);
+//รายงานความต่างระหว่างข้อมูลสองชุด เป็นช่วง ๆ พร้อมยอดรวม
+//ใช้ร่วมกันทั้งการเทียบกับชิป เทียบไฟล์ และเทียบชิปสองตัว
+procedure ReportDiff(const A, B: array of byte; Size: integer);
 var
-  ChipData, BufStream: TMemoryStream;
-  A, B: array of byte;
-  Size, i: integer;
-  DiffCount, RangeCount: integer;
-  RangeStart: integer;
+  i, DiffCount, RangeCount, RangeStart: integer;
   InRange: boolean;
-  I2C_DevAddr: byte;
-  I2C_ChunkSize: Word;
 begin
-  I2C_ChunkSize := 65535;
-  if OperationRunning then Exit;
-
-  if MPHexEditorEx.DataSize = 0 then
-  begin
-    LogPrint(STR_CHECKSUM_EMPTY);
-    Exit;
-  end;
-
-  ChipData := TMemoryStream.Create;
-  BufStream := TMemoryStream.Create;
-try
-  ButtonCancel.Tag := 0;
-  if not OpenDevice() then Exit;
-  LockControl();
-
-  if OpUI.ChipSize = 0 then
-  begin
-    LogPrint(STR_CHECK_SETTINGS);
-    Exit;
-  end;
-
-  Size := MPHexEditorEx.DataSize;
-  if cardinal(Size) > OpUI.ChipSize then Size := OpUI.ChipSize;
-
-  LogPrint(STR_COMPARE_READING);
-  TimeCounter := Time();
-
-  //อ่านด้วยวิธีของโปรโตคอลที่กำลังใช้ ไม่ใช่ SPI 25 อย่างเดียว
-  //ไม่งั้น EEPROM ที่ต่อผ่าน I2C หรือ MicroWire จะเทียบข้อมูลไม่ได้เลย
-  if RadioI2C.Checked then
-  begin
-    if ComboAddrType.ItemIndex < 0 then
-    begin
-      LogPrint(STR_CHECK_SETTINGS);
-      Exit;
-    end;
-
-    EnterProgModeI2C();
-    I2C_DevAddr := SetI2CDevAddr();
-
-    if UsbAspI2C_BUSY(I2C_DevAddr) then
-    begin
-      LogPrint(STR_I2C_NO_ANSWER);
-      Exit;
-    end;
-
-    if CheckBox_I2C_ByteRead.Checked then I2C_ChunkSize := 1;
-    ReadFlashI2C(ChipData, 0, cardinal(Size), I2C_ChunkSize, I2C_DevAddr);
-  end
-  else if RadioMw.Checked then
-  begin
-    if not IsNumber(ComboMWBitLen.Text) then
-    begin
-      LogPrint(STR_CHECK_SETTINGS);
-      Exit;
-    end;
-
-    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
-    ReadFlashMW(ChipData, StrToInt(ComboMWBitLen.Text), 0, cardinal(Size));
-  end
-  else
-  begin
-    EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
-
-    case ComboSPICMD.ItemIndex of
-      SPI_CMD_95: ReadFlash95(ChipData, 0, cardinal(Size));
-      SPI_CMD_45:
-        begin
-          if not IsNumber(ComboPageSize.Text) then
-          begin
-            LogPrint(STR_CHECK_SETTINGS);
-            Exit;
-          end;
-          ReadFlash45(ChipData, 0, StrToInt(ComboPageSize.Text), cardinal(Size));
-        end;
-      SPI_CMD_KB: ReadFlashKB(ChipData, 0, cardinal(Size));
-    else
-      ReadFlash25(ChipData, 0, cardinal(Size));
-    end;
-  end;
-
-  if ChipData.Size < Size then Exit;
-
-  MPHexEditorEx.SaveToStream(BufStream);
-
-  SetLength(A, Size);
-  SetLength(B, Size);
-  ChipData.Position := 0;   ChipData.ReadBuffer(A[0], Size);
-  BufStream.Position := 0;  BufStream.ReadBuffer(B[0], Size);
-
   DiffCount := 0;
   RangeCount := 0;
   InRange := False;
@@ -4651,7 +4694,118 @@ try
   else
     LogPrint(STR_COMPARE_DIFF + IntToStr(DiffCount) + ' / ' + IntToStr(Size) +
              ',  ranges: ' + IntToStr(RangeCount));
+end;
 
+//อ่านชิปด้วยวิธีของโปรโตคอลที่กำลังใช้อยู่
+//ผู้เรียกต้องเปิดอุปกรณ์และล็อกหน้าจอมาก่อนแล้ว
+function ReadCurrentChip(Stream: TMemoryStream; Size: cardinal): boolean;
+var
+  I2C_DevAddr: byte;
+  I2C_ChunkSize: Word;
+begin
+  Result := False;
+  I2C_ChunkSize := 65535;
+
+  if MainForm.RadioI2C.Checked then
+  begin
+    if MainForm.ComboAddrType.ItemIndex < 0 then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    EnterProgModeI2C();
+    I2C_DevAddr := SetI2CDevAddr();
+
+    if UsbAspI2C_BUSY(I2C_DevAddr) then
+    begin
+      LogPrint(STR_I2C_NO_ANSWER);
+      Exit;
+    end;
+
+    if MainForm.CheckBox_I2C_ByteRead.Checked then I2C_ChunkSize := 1;
+    ReadFlashI2C(Stream, 0, Size, I2C_ChunkSize, I2C_DevAddr);
+  end
+  else if MainForm.RadioMw.Checked then
+  begin
+    if not IsNumber(MainForm.ComboMWBitLen.Text) then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+    ReadFlashMW(Stream, StrToInt(MainForm.ComboMWBitLen.Text), 0, Size);
+  end
+  else
+  begin
+    EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+
+    case MainForm.ComboSPICMD.ItemIndex of
+      SPI_CMD_95: ReadFlash95(Stream, 0, Size);
+      SPI_CMD_45:
+        begin
+          if not IsNumber(MainForm.ComboPageSize.Text) then
+          begin
+            LogPrint(STR_CHECK_SETTINGS);
+            Exit;
+          end;
+          ReadFlash45(Stream, 0, StrToInt(MainForm.ComboPageSize.Text), Size);
+        end;
+      SPI_CMD_KB: ReadFlashKB(Stream, 0, Size);
+    else
+      ReadFlash25(Stream, 0, Size);
+    end;
+  end;
+
+  Result := Stream.Size >= Int64(Size);
+end;
+
+//เทียบบัฟเฟอร์กับเนื้อหาในชิปแล้วรายงานเป็นช่วง ๆ
+//ต่างจาก verify ตรงที่ verify จะหยุดที่จุดแรกที่ไม่ตรง
+procedure TMainForm.MenuCompareChipClick(Sender: TObject);
+var
+  ChipData, BufStream: TMemoryStream;
+  A, B: array of byte;
+  Size: integer;
+begin
+  if OperationRunning then Exit;
+
+  if MPHexEditorEx.DataSize = 0 then
+  begin
+    LogPrint(STR_CHECKSUM_EMPTY);
+    Exit;
+  end;
+
+  ChipData := TMemoryStream.Create;
+  BufStream := TMemoryStream.Create;
+try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then Exit;
+  LockControl();
+
+  if OpUI.ChipSize = 0 then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+
+  Size := MPHexEditorEx.DataSize;
+  if cardinal(Size) > OpUI.ChipSize then Size := OpUI.ChipSize;
+
+  LogPrint(STR_COMPARE_READING);
+  TimeCounter := Time();
+
+  if not ReadCurrentChip(ChipData, cardinal(Size)) then Exit;
+
+  MPHexEditorEx.SaveToStream(BufStream);
+
+  SetLength(A, Size);
+  SetLength(B, Size);
+  ChipData.Position := 0;   ChipData.ReadBuffer(A[0], Size);
+  BufStream.Position := 0;  BufStream.ReadBuffer(B[0], Size);
+
+  ReportDiff(A, B, Size);
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 
 finally

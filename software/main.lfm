@@ -772,6 +772,14 @@ object MainForm: TMainForm
         Caption = 'Compare buffer with chip'
         OnClick = MenuCompareChipClick
       end
+      object MenuCompareFiles: TMenuItem
+        Caption = 'Compare two files...'
+        OnClick = MenuCompareFilesClick
+      end
+      object MenuCompareChips: TMenuItem
+        Caption = 'Compare two chips...'
+        OnClick = MenuCompareChipsClick
+      end
       object MenuOpenProject: TMenuItem
         Caption = 'Open project...'
         OnClick = MenuOpenProjectClick
