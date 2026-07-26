@@ -16,7 +16,8 @@ uses
   XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
   utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, serialnum, jedec, protbits,
-  pascalc, ScriptsFunc, ScriptEdit, baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
+  pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
+  baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
 
 type
 
@@ -69,6 +70,7 @@ type
     ChipView: TPaintBox;
     HwTimer: TTimer;
     MenuAutoDetectHW: TMenuItem;
+    MenuAutoDetectChip: TMenuItem;
     MenuBlankBeforeWrite: TMenuItem;
     MainMenu: TMainMenu;
     Log: TMemo;
@@ -371,6 +373,10 @@ var
   //สถานะที่วาดเป็นไฟบอกสถานะในแผงด้านซ้าย
   ProgrammerPresent: boolean = False;
   ChipDetected: boolean = False;
+
+  //หน้าต่างหลักขึ้นแล้วหรือยัง ตรวจชิปอัตโนมัติอาจเปิดไดอะล็อก
+  //ซึ่งห้ามเกิดตอนที่หน้าต่างยังสร้างไม่เสร็จ
+  AppReady: boolean = False;
 implementation
 
 
@@ -1415,7 +1421,7 @@ procedure ReadFlash25(var RomStream: TMemoryStream; StartAddress, ChipSize: card
 //ตัวช่วยของงานเทียบข้อมูล ตัวจริงอยู่ท้ายไฟล์ แต่มีผู้เรียกอยู่ก่อนหน้านั้น
 function ReportDiff(const A, B: array of byte; Size: integer): integer; forward;
 function UIChipSize: cardinal; forward;
-procedure ShowDiffInEditor(const A, B: array of byte; Size: integer); forward;
+procedure MarkDiffInEditor(const A, B: array of byte; Size: integer); forward;
 function ReadCurrentChip(Stream: TMemoryStream; Size: cardinal): boolean; forward;
 
 //ตรวจว่าชิปที่เสียบอยู่ตรงกับที่เลือกไว้จริงหรือไม่
@@ -3185,6 +3191,13 @@ begin
   end;
 
   MainForm.ChipView.Invalidate;
+
+  //เพิ่งเสียบเครื่องโปรแกรมเข้ามา ก็ถามชิปในซ็อกเก็ตให้เลย ไม่ต้องรอให้กด Read ID
+  //ทำเฉพาะจังหวะที่สถานะเปลี่ยนจากไม่มีเป็นมี ไม่งั้นจะยิงคำสั่งใส่ชิปทุกสามวินาที
+  //และทำเฉพาะโหมด SPI เพราะคำสั่งอ่านรหัสเป็นของ SPI
+  if AppReady and ProgrammerPresent and (not Was) and
+     MainForm.MenuAutoDetectChip.Checked and MainForm.RadioSPI.Checked then
+    MainForm.ButtonReadIDClick(nil);
 end;
 
 procedure LockControl;
@@ -3301,7 +3314,11 @@ end;
 procedure TMainForm.MenuFindChipClick(Sender: TObject);
 begin
   ChipSearchForm.EditSearch.Text:= '';
-  ChipSearchForm.ListBoxChips.Items.Clear;
+
+  //เปิดมาแล้วเห็นชิปทั้งหมดเลย ไม่ใช่หน้าต่างว่างที่ต้องเดาว่าต้องพิมพ์อะไรก่อน
+  //พิมพ์เมื่อไหร่ก็กรองให้ทันทีเหมือนเดิม
+  ChipSearchForm.EditSearchChange(nil);
+
   ChipSearchForm.Show;
   ChipSearchForm.EditSearch.SetFocus;
 end;
@@ -4402,7 +4419,12 @@ begin
     S1.Position := 0;  S1.ReadBuffer(A[0], Size);
     S2.Position := 0;  S2.ReadBuffer(B[0], Size);
 
-    if ReportDiff(A, B, Size) > 0 then ShowDiffInEditor(A, B, Size);
+    ReportDiff(A, B, Size);
+
+    //ไม่ยุ่งกับตารางกลาง เพราะบัฟเฟอร์ที่ผู้ใช้เตรียมไว้ไม่เกี่ยวกับสองไฟล์นี้
+    ShowCompareWindow(ExtractFileName(F1) + '   ' + IntToStr(S1.Size) + ' bytes',
+                      ExtractFileName(F2) + '   ' + IntToStr(S2.Size) + ' bytes',
+                      A, B, Size);
   finally
     S1.Free;
     S2.Free;
@@ -4460,7 +4482,10 @@ try
   S1.Position := 0;  S1.ReadBuffer(A[0], Size);
   S2.Position := 0;  S2.ReadBuffer(B[0], Size);
 
-  if ReportDiff(A, B, Size) > 0 then ShowDiffInEditor(A, B, Size);
+  ReportDiff(A, B, Size);
+  ShowCompareWindow('first chip   ' + CurrentICParam.Name,
+                    'second chip   ' + CurrentICParam.Name,
+                    A, B, Size);
 
 finally
   ExitProgMode25;
@@ -5058,35 +5083,22 @@ begin
     LogPrint(STR_COMPARE_DIFF + IntToStr(DiffCount) + ' / ' + IntToStr(Size) +
              ',  ranges: ' + IntToStr(RangeCount));
 
-  //ผลลัพธ์ต้องเด้งให้เห็น ไม่ใช่ซ่อนอยู่ในบรรทัดล่างสุดของ log
-  if DiffCount = 0 then
-    ShowMessage(STR_COMPARE_EQUAL)
-  else
-    ShowMessage(STR_COMPARE_DIFF + IntToStr(DiffCount) + ' / ' + IntToStr(Size) +
-                LineEnding + 'Ranges: ' + IntToStr(RangeCount) +
-                LineEnding + LineEnding + STR_COMPARE_SEE_LOG);
-
+  //ไม่มีกล่องข้อความเด้งแล้ว เพราะหน้าต่างเทียบที่เปิดตามมาบอกสรุปไว้บนหัว
+  //อยู่แล้ว กล่องซ้อนขึ้นมาอีกชั้นมีแต่ต้องกดปิดทิ้งเปล่า ๆ
   Result := DiffCount;
 end;
 
-//แสดงผลต่างในตารางกลาง
-//โหลดข้อมูลฝั่ง B ลงตาราง แล้วทำเครื่องหมายไบต์ที่ต่างจากฝั่ง A ว่า "เปลี่ยนแล้ว"
+//ทำเครื่องหมายไบต์ที่ต่างลงในตารางกลาง ใช้ตอนเทียบบัฟเฟอร์กับชิป
 //MPHexEditor จะระบายสีไบต์ที่มีเครื่องหมายนี้ด้วย ChangedText/ChangedBackground
-//ทำเครื่องหมายตรง ๆ ผ่าน ByteChanged ไม่เขียนทับข้อมูลทีละไบต์ เพราะการเขียน
-//ไม่ได้ตั้งบิตนี้ให้ แถมยังสร้างรายการ undo ทีละไบต์จนช้า
-procedure ShowDiffInEditor(const A, B: array of byte; Size: integer);
+//ต้องใช้ ByteChanged ไม่ใช่เขียนข้อมูลทับทีละไบต์ เพราะการเขียนไม่ได้ตั้งบิตนี้
+//แถมยังสร้างรายการย้อนกลับทีละไบต์จนช้า
+procedure MarkDiffInEditor(const A, B: array of byte; Size: integer);
 var
-  S: TMemoryStream;
   i, FirstDiff: integer;
 begin
-  S := TMemoryStream.Create;
-  try
-    S.WriteBuffer(B[0], Size);
-    S.Position := 0;
-    MainForm.MPHexEditorEx.LoadFromStream(S);
-  finally
-    S.Free;
-  end;
+  //ตารางกลางถืออยู่ฝั่ง A แล้ว จึงแค่ทำเครื่องหมาย ไม่โหลดทับ
+  //ถ้าโหลดทับ บัฟเฟอร์ที่ผู้ใช้เตรียมไว้จะหายไปโดยไม่ได้ตั้งใจ
+  if MainForm.MPHexEditorEx.DataSize < Size then Exit;
 
   FirstDiff := -1;
 
@@ -5226,7 +5238,16 @@ try
   ChipData.Position := 0;   ChipData.ReadBuffer(A[0], Size);
   BufStream.Position := 0;  BufStream.ReadBuffer(B[0], Size);
 
-  if ReportDiff(A, B, Size) > 0 then ShowDiffInEditor(A, B, Size);
+  ReportDiff(A, B, Size);
+
+  //ตารางกลางถือบัฟเฟอร์อยู่แล้ว จึงทำเครื่องหมายลงไปได้เลยโดยไม่ทับข้อมูล
+  MarkDiffInEditor(A, B, Size);
+
+  //หน้าต่างเทียบวางบัฟเฟอร์ไว้ซ้าย ชิปไว้ขวา ตามลำดับที่คนอ่านเข้าใจง่ายกว่า
+  ShowCompareWindow('buffer   ' + IntToStr(Size) + ' bytes',
+                    'chip   ' + CurrentICParam.Name,
+                    B, A, Size);
+
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 
 finally
@@ -5342,7 +5363,7 @@ begin
     else
     begin
       s.Add('AsProgrammer ProX');
-      s.Add('Version 4.0.0.0');
+      s.Add('Version ' + PROX_VERSION);
       s.Add('');
       s.Add('Serial flash and EEPROM programmer for SPI, I2C and MicroWire.');
       s.Add('https://github.com/patnawa/AsProgrammer-ProX');
@@ -5469,7 +5490,7 @@ var
 begin
   //เครดิตย้ายมาอยู่ที่นี่ที่เดียว แถบ log ตอนเปิดโปรแกรมไม่ต้องแสดงแล้ว
   credits :=
-    'AsProgrammer ProX v4' + LineEnding +
+    'AsProgrammer ProX ' + PROX_VERSION + LineEnding +
     'https://github.com/patnawa/AsProgrammer-ProX' + LineEnding + LineEnding +
     'Built on:' + LineEnding +
     '  nofeletru - AsProgrammer / UsbAsp-flash' + LineEnding +
@@ -5592,6 +5613,11 @@ begin
   LoadOptions(SettingsFile);
   LoadLangList();
 
+  //เลขเวอร์ชันมาจาก appver ที่เดียว แถบชื่อหน้าต่างกับ log จึงไม่มีวันค้างเลขเก่า
+  Caption := 'AsProgrammer ProX ' + PROX_VERSION;
+  if Log.Lines.Count > 0 then
+    Log.Lines[0] := 'AsProgrammer ProX ' + PROX_VERSION;
+
   LoadModernIcons;
   LayoutLeftPanel;
   ApplyTheme(MenuDarkTheme.Checked);
@@ -5661,6 +5687,13 @@ begin
   //คำใบ้ปุ่มลัดอยู่ตรงนี้ ไม่ใช่บนแถบชื่อหน้าต่าง
   ButtonCancel.Hint := ButtonCancel.Hint + ' (Esc)';
   StatusBar.Panels.Items[3].Text := STR_HINT_KEYS;
+
+  //ตั้งแต่นี้ไปเปิดไดอะล็อกได้แล้ว
+  //ถ้าเสียบเครื่องโปรแกรมมาตั้งแต่ก่อนเปิดโปรแกรม จังหวะเปลี่ยนสถานะผ่านไปแล้ว
+  //จึงต้องตรวจชิปให้หนึ่งครั้งตรงนี้เอง
+  AppReady := True;
+  if ProgrammerPresent and MenuAutoDetectChip.Checked and RadioSPI.Checked then
+    ButtonReadIDClick(nil);
 end;
 
 //ลากไฟล์มาวางบนหน้าต่างแล้วโหลดเข้าเอดิเตอร์ได้เลย
@@ -6307,6 +6340,10 @@ begin
       TDOMElement(ParentNode).SetAttribute('auto_detect_hw', '1') else
         TDOMElement(ParentNode).SetAttribute('auto_detect_hw', '0');
 
+    if MainForm.MenuAutoDetectChip.Checked then
+      TDOMElement(ParentNode).SetAttribute('auto_detect_chip', '1') else
+        TDOMElement(ParentNode).SetAttribute('auto_detect_chip', '0');
+
     if MainForm.MenuBlankBeforeWrite.Checked then
       TDOMElement(ParentNode).SetAttribute('blank_before_write', '1') else
         TDOMElement(ParentNode).SetAttribute('blank_before_write', '0');
@@ -6455,6 +6492,10 @@ begin
       if  Node.Attributes.GetNamedItem('auto_detect_hw') <> nil then
         MainForm.MenuAutoDetectHW.Checked :=
           Node.Attributes.GetNamedItem('auto_detect_hw').NodeValue = '1';
+
+      if  Node.Attributes.GetNamedItem('auto_detect_chip') <> nil then
+        MainForm.MenuAutoDetectChip.Checked :=
+          Node.Attributes.GetNamedItem('auto_detect_chip').NodeValue = '1';
 
       if  Node.Attributes.GetNamedItem('check_id') <> nil then
         MainForm.MenuCheckIDBefore.Checked :=

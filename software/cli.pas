@@ -24,7 +24,7 @@ function RunCLI: integer;
 implementation
 
 uses
-  Windows, Forms, main, basehw, fileformats, findchip, sfdp, jedec;
+  Windows, Forms, main, basehw, fileformats, findchip, sfdp, jedec, appver;
 
 var
   ConsoleReady: boolean = False;
@@ -76,7 +76,7 @@ end;
 
 procedure Usage;
 begin
-  Say('AsProgrammer ProX, command line mode');
+  Say('AsProgrammer ProX ' + PROX_VERSION + ', command line mode');
   Say('');
   Say('  AsProgrammer.exe --read out.bin  --chip W25Q64BV');
   Say('  AsProgrammer.exe --write in.bin  --chip W25Q64BV --erase --verify');

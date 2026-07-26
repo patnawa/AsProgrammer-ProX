@@ -817,6 +817,11 @@ object MainForm: TMainForm
         Caption = 'Detect the programmer automatically'
         Checked = True
       end
+      object MenuAutoDetectChip: TMenuItem
+        AutoCheck = True
+        Caption = 'Read the chip ID automatically when a programmer connects'
+        Checked = True
+      end
       object MenuBlankBeforeWrite: TMenuItem
         AutoCheck = True
         Caption = 'Check the area is erased before writing'

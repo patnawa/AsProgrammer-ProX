@@ -11,7 +11,7 @@
 param(
   [switch]$Release,
   [string]$Lazarus = "C:\lazarus32",
-  [string]$Version = "4.0.0"
+  [string]$Version = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +23,23 @@ function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Die($msg) { Write-Host "FAILED: $msg" -ForegroundColor Red; exit 1 }
 
 if (-not (Test-Path $lazbuild)) { Die "lazbuild not found at $lazbuild (32-bit Lazarus is required, the project targets win32)" }
+
+# --- the version lives in software\appver.pas; everything else must agree ---
+# The number goes into the About box, the log banner and the exe resource, so a
+# stale copy in one of them is worse than no number at all.
+$verSrc = Get-Content "$root\software\appver.pas" -Raw
+if ($verSrc -notmatch "PROX_VERSION\s*=\s*'([0-9.]+)'") { Die "no PROX_VERSION in software\appver.pas" }
+$proxVersion = $Matches[1]
+
+$lpiSrc = Get-Content "$root\software\AsProgrammer.lpi" -Raw
+if ($lpiSrc -notmatch 'ProductVersion="([0-9.]+)"') { Die "no ProductVersion in AsProgrammer.lpi" }
+if ($Matches[1] -ne $proxVersion) {
+  Die "version mismatch: appver.pas says $proxVersion, AsProgrammer.lpi says $($Matches[1]). Bump both."
+}
+Step "version $proxVersion"
+
+# The zip name follows the same number unless the caller overrides it.
+if ($Version -eq "") { $Version = $proxVersion }
 
 # --- the hex editor component lives in a zip to keep the tree small ---
 if (-not (Test-Path "$root\mphexeditor")) {
