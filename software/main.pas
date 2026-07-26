@@ -236,6 +236,7 @@ type
     procedure AllowInsertItemClick(Sender: TObject);
     procedure FormCloseQuery(Sender: TObject; var CanClose: boolean);
     procedure FormCreate(Sender: TObject);
+    procedure FormShow(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure ChipClick(Sender: TObject);
     procedure ChangeLang(Sender: TObject);
@@ -1156,7 +1157,7 @@ begin
   MainForm.ChipView.Top := 330;
   MainForm.ChipView.Anchors := [akLeft, akTop, akRight, akBottom];
   MainForm.ChipView.Height := MainForm.GroupChipSettings.ClientHeight - 336;
-  if MainForm.ChipView.Height < 120 then MainForm.ChipView.Height := 120;
+  if MainForm.ChipView.Height < 160 then MainForm.ChipView.Height := 160;
 end;
 
 //รอจนแฟล็ก Busy ดับ คืน false ถ้าผู้ใช้สั่งยกเลิก
@@ -2800,6 +2801,11 @@ end;
 
 procedure SelectHW(programmer: THardwareList);
 begin
+  //เมนู Buzzpirat กับรายการพอร์ต COM ใช้เฉพาะกับเครื่องที่คุยผ่านพอร์ตอนุกรม
+  //ถ้าใช้ CH341/CH347/FT232H อยู่ก็ไม่ต้องมีให้เกะกะ
+  MainForm.MenuBuzzpirat.Visible := programmer = CHW_BUZZPIRAT;
+  MainForm.ListcomportsMenuItem.Visible := programmer in [CHW_BUZZPIRAT, CHW_ARDUINO];
+
   if programmer = CHW_USBASP then
   begin
     MainForm.MenuSPIClock.Visible:= true;
@@ -4288,13 +4294,28 @@ begin
 
   BodyL := (ChipView.Width - BodyW) div 2;
 
-  //กันที่ไว้ให้ไฟสถานะสองแถวข้างล่าง ที่เหลือเป็นของตัวชิป
-  Avail := ChipView.Height - 56;
-  if Avail < 90 then Avail := 90;
+  //ไฟสถานะไว้บนสุด เป็นสิ่งที่ต้องเหลือบดูบ่อยที่สุด และไม่มีวันตกขอบล่าง
+  ledY := 4;
+  C.Font.Size := 8;
 
-  BodyH := Avail - 16;
-  if BodyH > 128 then BodyH := 128;
-  BodyT := (Avail - BodyH) div 2;
+  if ProgrammerPresent then
+    s := AsProgrammer.Programmer.HardwareName
+  else
+    s := '';
+  Led(ledY, STR_LED_PROGRAMMER, s, ProgrammerPresent);
+
+  if ChipDetected then s := CurrentICParam.ID else s := '';
+  Led(ledY + 21, STR_LED_CHIP, s, ChipDetected);
+
+  C.Font.Size := 7;
+
+  //ที่เหลือใต้ไฟสถานะเป็นของรูปชิป ย่อขยายตามพื้นที่จริงเพื่อไม่ให้ล้นขอบ
+  Avail := ChipView.Height - 50;
+  if Avail < 60 then Exit;    //เตี้ยเกินกว่าจะวาดอะไรได้
+
+  BodyH := Avail - 12;
+  if BodyH > 112 then BodyH := 112;
+  BodyT := 50 + (Avail - BodyH) div 2;
   Pitch := BodyH div 4;
 
   //ขาชิป ซ้ายนับ 1-4 จากบนลงล่าง ขวานับ 5-8 จากล่างขึ้นบน ตามมาตรฐาน
@@ -4338,18 +4359,6 @@ begin
     C.TextOut(BodyL + BodyW + PinW + 4, py, s);
   end;
 
-  //ไฟบอกสถานะยึดกับขอบล่างเสมอ
-  ledY := ChipView.Height - 46;
-  C.Font.Size := 8;
-
-  if ProgrammerPresent then
-    s := AsProgrammer.Programmer.HardwareName
-  else
-    s := '';
-  Led(ledY, STR_LED_PROGRAMMER, s, ProgrammerPresent);
-
-  if ChipDetected then s := CurrentICParam.ID else s := '';
-  Led(ledY + 22, STR_LED_CHIP, s, ChipDetected);
 end;
 
 procedure TMainForm.HwTimerTimer(Sender: TObject);
@@ -4638,8 +4647,20 @@ procedure TMainForm.CreditsMenuItemClick(Sender: TObject);
 var
   credits: string;
 begin
-  credits := 'nofeletru https://github.com/nofeletru, Dreg @therealdreg https://github.com/therealdreg';
-  LogPrint(credits);
+  //เครดิตย้ายมาอยู่ที่นี่ที่เดียว แถบ log ตอนเปิดโปรแกรมไม่ต้องแสดงแล้ว
+  credits :=
+    'AsProgrammer ProX v4' + LineEnding +
+    'https://github.com/patnawa/AsProgrammer-ProX' + LineEnding + LineEnding +
+    'Built on:' + LineEnding +
+    '  nofeletru - AsProgrammer / UsbAsp-flash' + LineEnding +
+    '  https://github.com/nofeletru/UsbAsp-flash' + LineEnding + LineEnding +
+    '  Dreg @therealdreg - dregmod fork' + LineEnding +
+    '  https://github.com/therealdreg/asprogrammer-dregmod' + LineEnding + LineEnding +
+    '  Ian Lesnet - Bus Pirate' + LineEnding +
+    '  Chip data in chiplist-flashrom.xml from the flashrom project (GPL-2.0-or-later)' +
+    LineEnding + LineEnding +
+    'MIT licence, see LICENSE';
+
   ShowMessage(credits);
 end;
 
@@ -4760,6 +4781,14 @@ begin
   SetHardwareMenuCheck(AsProgrammer.Current_HW);
   PollProgrammer(True);
   HwTimer.Enabled := True;
+end;
+
+//ตอน FormCreate ยังไม่รู้ความสูงจริงของแผง ต้องจัดวางซ้ำหลังหน้าต่างขึ้นแล้ว
+//ไม่งั้นรูปชิปจะถูกคำนวณจากขนาดตอนออกแบบและโดนตัดขอบ
+procedure TMainForm.FormShow(Sender: TObject);
+begin
+  LayoutLeftPanel;
+  ChipView.Invalidate;
 end;
 
 procedure TMainForm.FormDestroy(Sender: TObject);

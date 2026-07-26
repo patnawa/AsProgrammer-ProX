@@ -1,11 +1,11 @@
 object MainForm: TMainForm
   Left = 501
-  Height = 700
-  Top = 209
+  Height = 780
+  Top = 150
   Width = 1120
   ActiveControl = RadioSPI
   Caption = 'AsProgrammer ProX v4 - Stop all current operations: keep pressing ESC key - Launch Console: keep pressing F1 key'
-  ClientHeight = 700
+  ClientHeight = 780
   ClientWidth = 1120
   Constraints.MinHeight = 300
   Constraints.MinWidth = 300
@@ -13,6 +13,7 @@ object MainForm: TMainForm
   OnCloseQuery = FormCloseQuery
   OnCreate = FormCreate
   OnDestroy = FormDestroy
+  OnShow = FormShow
   Position = poDesktopCenter
   LCLVersion = '3.2.0.0'
   object ProgressBar: TProgressBar
@@ -721,7 +722,6 @@ object MainForm: TMainForm
     Lines.Strings = (
       'AsProgrammer ProX v4'
       'https://github.com/patnawa/AsProgrammer-ProX'
-      'based on AsProgrammer dregmod by @therealdreg and UsbAsp-flash by nofeletru'
     )
     ParentFont = False
     PopupMenu = LogPopupMenu
