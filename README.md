@@ -31,7 +31,7 @@ programmers, while staying free and open source.
 | **Buffer tools** | Fill buffer, swap bytes (16-bit), find, go to address, copy — plus save the log to a file. |
 | **Chip ID check** | Verifies the JEDEC id against the selected chip before every write and erase. On by default. |
 | **Pre-write backup** | Optionally dumps the chip to `backup\<chip>_<timestamp>.bin` before it is changed, and aborts if the dump fails. |
-| **Compare with chip** | Reports every differing range and a total, instead of stopping at the first mismatch. |
+| **Compare with chip** | Reports every differing range and a total, instead of stopping at the first mismatch. Works for every chip type: SPI 25/45/95, I²C EEPROM and MicroWire. |
 | **Project files** | One `.apxproj` holds the chip, all settings and the buffer. |
 | **Serial numbers** | Increment, BCD date + increment or random, 1–8 bytes at any address, either endianness, appended to a log file as they are issued. |
 | **Production batch** | Program N chips in a row with a prompt between each and a pass/fail summary. |

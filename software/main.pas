@@ -4520,14 +4520,11 @@ var
   DiffCount, RangeCount: integer;
   RangeStart: integer;
   InRange: boolean;
+  I2C_DevAddr: byte;
+  I2C_ChunkSize: Word;
 begin
+  I2C_ChunkSize := 65535;
   if OperationRunning then Exit;
-
-  if (not RadioSPI.Checked) or (ComboSPICMD.ItemIndex <> SPI_CMD_25) then
-  begin
-    LogPrint(STR_SECTOR_SPI25_ONLY);
-    Exit;
-  end;
 
   if MPHexEditorEx.DataSize = 0 then
   begin
@@ -4552,10 +4549,62 @@ try
   if cardinal(Size) > OpUI.ChipSize then Size := OpUI.ChipSize;
 
   LogPrint(STR_COMPARE_READING);
-  EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
   TimeCounter := Time();
 
-  ReadFlash25(ChipData, 0, cardinal(Size));
+  //อ่านด้วยวิธีของโปรโตคอลที่กำลังใช้ ไม่ใช่ SPI 25 อย่างเดียว
+  //ไม่งั้น EEPROM ที่ต่อผ่าน I2C หรือ MicroWire จะเทียบข้อมูลไม่ได้เลย
+  if RadioI2C.Checked then
+  begin
+    if ComboAddrType.ItemIndex < 0 then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    EnterProgModeI2C();
+    I2C_DevAddr := SetI2CDevAddr();
+
+    if UsbAspI2C_BUSY(I2C_DevAddr) then
+    begin
+      LogPrint(STR_I2C_NO_ANSWER);
+      Exit;
+    end;
+
+    if CheckBox_I2C_ByteRead.Checked then I2C_ChunkSize := 1;
+    ReadFlashI2C(ChipData, 0, cardinal(Size), I2C_ChunkSize, I2C_DevAddr);
+  end
+  else if RadioMw.Checked then
+  begin
+    if not IsNumber(ComboMWBitLen.Text) then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+    ReadFlashMW(ChipData, StrToInt(ComboMWBitLen.Text), 0, cardinal(Size));
+  end
+  else
+  begin
+    EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
+
+    case ComboSPICMD.ItemIndex of
+      SPI_CMD_95: ReadFlash95(ChipData, 0, cardinal(Size));
+      SPI_CMD_45:
+        begin
+          if not IsNumber(ComboPageSize.Text) then
+          begin
+            LogPrint(STR_CHECK_SETTINGS);
+            Exit;
+          end;
+          ReadFlash45(ChipData, 0, StrToInt(ComboPageSize.Text), cardinal(Size));
+        end;
+      SPI_CMD_KB: ReadFlashKB(ChipData, 0, cardinal(Size));
+    else
+      ReadFlash25(ChipData, 0, cardinal(Size));
+    end;
+  end;
+
   if ChipData.Size < Size then Exit;
 
   MPHexEditorEx.SaveToStream(BufStream);
