@@ -241,6 +241,7 @@ type
     procedure FormCloseQuery(Sender: TObject; var CanClose: boolean);
     procedure FormCreate(Sender: TObject);
     procedure FormShow(Sender: TObject);
+    procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure FormDestroy(Sender: TObject);
     procedure ChipClick(Sender: TObject);
     procedure ChangeLang(Sender: TObject);
@@ -4992,6 +4993,29 @@ procedure TMainForm.FormShow(Sender: TObject);
 begin
   LayoutLeftPanel;
   ChipView.Invalidate;
+
+  //คำใบ้ปุ่มลัดอยู่ตรงนี้ ไม่ใช่บนแถบชื่อหน้าต่าง
+  ButtonCancel.Hint := ButtonCancel.Hint + ' (Esc)';
+  StatusBar.Panels.Items[3].Text := STR_HINT_KEYS;
+end;
+
+//ESC ยกเลิกงานที่ทำอยู่ F1 เปิดคอนโซลดีบัก
+//เดิมแถบชื่อหน้าต่างโฆษณาสองปุ่มนี้ไว้ แต่ในโค้ดไม่เคยมีตัวรับปุ่มเลย
+procedure TMainForm.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+begin
+  if Key = VK_ESCAPE then
+  begin
+    if OperationRunning then
+    begin
+      ButtonCancel.Tag := 1;
+      Key := 0;
+    end;
+  end
+  else if Key = VK_F1 then
+  begin
+    DebugconsoleMenuItemClick(Sender);
+    Key := 0;
+  end;
 end;
 
 procedure TMainForm.FormDestroy(Sender: TObject);

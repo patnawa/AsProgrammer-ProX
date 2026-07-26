@@ -4,15 +4,17 @@ object MainForm: TMainForm
   Top = 150
   Width = 1120
   ActiveControl = RadioSPI
-  Caption = 'AsProgrammer ProX v4 - Stop all current operations: keep pressing ESC key - Launch Console: keep pressing F1 key'
+  Caption = 'AsProgrammer ProX v4'
   ClientHeight = 780
   ClientWidth = 1120
   Constraints.MinHeight = 300
   Constraints.MinWidth = 300
   Menu = MainMenu
   OnCloseQuery = FormCloseQuery
+  KeyPreview = True
   OnCreate = FormCreate
   OnDestroy = FormDestroy
+  OnKeyDown = FormKeyDown
   OnShow = FormShow
   Position = poDesktopCenter
   LCLVersion = '3.2.0.0'
@@ -707,7 +709,7 @@ object MainForm: TMainForm
       end    
       item
         Alignment = taRightJustify
-        Width = 50
+        Width = 200
       end>
     ParentFont = False
     SimplePanel = False
