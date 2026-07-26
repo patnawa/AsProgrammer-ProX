@@ -1,0 +1,15 @@
+# Lazarus / FPC build output
+software/lib/
+software/backup/
+*.exe
+*.compiled
+*.or
+*.ppu
+*.o
+*.a
+
+# Extracted from mphexeditor.zip during setup, not source
+mphexeditor/
+
+# Runtime copy of the chip list (source of truth is chiplist.xml in the repo root)
+software/chiplist.xml

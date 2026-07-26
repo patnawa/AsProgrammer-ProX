@@ -1,0 +1,5126 @@
+unit main;
+
+//TODO: at45 установка размера странцы
+//TODO: at45 Проверка размера страницы перед операциями
+
+
+{$mode objfpc}{$H+}
+{$modeswitch nestedprocvars}
+
+interface
+
+uses
+  Classes, SysUtils, LazFileUtils, Forms, Controls, Graphics, Dialogs, StdCtrls,
+  ExtCtrls, ComCtrls, Menus, ActnList, Buttons, StrUtils, spi25,
+  spi45, spi95, i2c, microwire, spimulti, ft232hhw,
+  XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
+  LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
+  utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig,
+  pascalc, ScriptsFunc, ScriptEdit, baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
+
+type
+
+  { TMainForm }
+
+  TMainForm = class(TForm)
+    CheckBox_I2C_A1: TToggleBox;
+    CheckBox_I2C_A0: TToggleBox;
+    CheckBox_I2C_ByteRead: TCheckBox;
+    CheckBox_I2C_DevA6: TToggleBox;
+    CheckBox_I2C_DevA5: TToggleBox;
+    CheckBox_I2C_DevA4: TToggleBox;
+    CheckBox_I2C_A2: TToggleBox;
+    ComboAddrType: TComboBox;
+    ComboBox_chip_scriptrun: TComboBox;
+    ComboSPICMD: TComboBox;
+    ComboChipSize: TComboBox;
+    ComboMWBitLen: TComboBox;
+    ComboPageSize: TComboBox;
+    Label6: TLabel;
+    Label_StartAddress: TLabel;
+    MenuHWFT232H: TMenuItem;
+    MenuFT232SPIClock: TMenuItem;
+    MenuFT232SPI30Mhz: TMenuItem;
+    MenuFT232SPI6Mhz: TMenuItem;
+    MenuHWCH347: TMenuItem;
+    MenuCH347SPIClock: TMenuItem;
+    MenuCH347SPIClock468_75KHz: TMenuItem;
+    MenuCH347SPIClock60MHz: TMenuItem;
+    MenuCH347SPIClock30MHz: TMenuItem;
+    MenuCH347SPIClock15MHz: TMenuItem;
+    MenuCH347SPIClock7_5MHz: TMenuItem;
+    MenuCH347SPIClock3_75MHz: TMenuItem;
+    MenuCH347SPIClock1_875MHz: TMenuItem;
+    MenuCH347SPIClock937_5KHz: TMenuItem;
+    MenuSendAB: TMenuItem;
+    StartAddressEdit: TEdit;
+    GroupChipSettings: TGroupBox;
+    ImageList: TImageList;
+    Label1: TLabel;
+    Label2: TLabel;
+    Label3: TLabel;
+    Label4: TLabel;
+    Label5: TLabel;
+    Label_chip_scripts: TLabel;
+    Label_I2C_DevAddr: TLabel;
+    LabelSPICMD: TLabel;
+    LabelChipName: TLabel;
+    MainMenu: TMainMenu;
+    Log: TMemo;
+    Menu32Khz: TMenuItem;
+    Menu93_75Khz: TMenuItem;
+    MenuChip: TMenuItem;
+    MenuAutoCheck: TMenuItem;
+    ComboItem1: TMenuItem;
+    Menu3Mhz: TMenuItem;
+    MenuIgnoreBusyBit: TMenuItem;
+    MenuGotoOffset: TMenuItem;
+    MenuFind: TMenuItem;
+    MenuItem1: TMenuItem;
+    MenuCopyToClip: TMenuItem;
+    CopyLogMenuItem: TMenuItem;
+    ClearLogMenuItem: TMenuItem;
+    MenuHWUSBASP: TMenuItem;
+    MenuHWCH341A: TMenuItem;
+    MenuFindChip: TMenuItem;
+    MenuHWAVRISP: TMenuItem;
+    MenuAVRISPSPIClock: TMenuItem;
+    MenuAVRISP8MHz: TMenuItem;
+    MenuAVRISP4MHz: TMenuItem;
+    MenuAVRISP2MHz: TMenuItem;
+    MenuAVRISP1MHz: TMenuItem;
+    MenuAVRISP500KHz: TMenuItem;
+    MenuAVRISP250KHz: TMenuItem;
+    MenuAVRISP125KHz: TMenuItem;
+    LangMenuItem: TMenuItem;
+    BlankCheckMenuItem: TMenuItem;
+    AllowInsertItem: TMenuItem;
+    MenuHWARDUINO: TMenuItem;
+    MenuHWBUZZPIRAT: TMenuItem;
+    MenuArduinoSPIClock: TMenuItem;
+    MenuArduinoISP8MHz: TMenuItem;
+    MenuArduinoISP4MHz: TMenuItem;
+    MenuArduinoISP2MHz: TMenuItem;
+    MenuArduinoISP1MHz: TMenuItem;
+    MenuArduinoCOMPort: TMenuItem;
+    MenuBuzzpiratCOMPort: TMenuItem;
+    MenuSkipFF: TMenuItem;
+    MenuEraseRangeAuto: TMenuItem;
+    MenuEraseRange4K: TMenuItem;
+    MenuEraseRange32K: TMenuItem;
+    MenuEraseRange64K: TMenuItem;
+    MenuEraseSeparator: TMenuItem;
+    MenuEraseChip: TMenuItem;
+    MenuSmartWrite: TMenuItem;
+    MenuChecksum: TMenuItem;
+    MenuSFDPDetect: TMenuItem;
+    MenuBackgroundOps: TMenuItem;
+    MenuDarkTheme: TMenuItem;
+    SaveLogMenuItem: TMenuItem;
+    MenuFillBuffer: TMenuItem;
+    MenuSwapBytes: TMenuItem;
+    MenuCheckIDBefore: TMenuItem;
+    MenuAutoBackup: TMenuItem;
+    MenuCompareChip: TMenuItem;
+    MenuOpenProject: TMenuItem;
+    MenuSaveProject: TMenuItem;
+    MenuProdConfig: TMenuItem;
+    MenuRunBatch: TMenuItem;
+    MenuSecReg: TMenuItem;
+    EraseDropDownMenu: TPopupMenu;
+    MPHexEditorEx: TMPHexEditorEx;
+    ScriptsMenuItem: TMenuItem;
+    CreditsMenuItem: TMenuItem;
+    BzHelpMenuItem: TMenuItem;
+    DebugconsoleMenuItem: TMenuItem;
+    ListcomportsMenuItem: TMenuItem;
+    MenuItemHardware: TMenuItem;
+    MenuBuzzpirat: TMenuItem;
+    MenuBuzzpiratPullups: TMenuItem;
+    MenuBuzzpiratSPIBUG: TMenuItem;
+    MenuBuzzpiratResetEach: TMenuItem;
+    ClearBuzzlogMenuItem: TMenuItem;
+    MenuBuzzpiratPower: TMenuItem;
+	MenuBuzzpiratLessdbg: TMenuItem;
+    MenuBuzzpiratSPINormal: TMenuItem;
+    MenuBuzzpiratSPIHiz: TMenuItem;
+    MenuBuzzpiratSPI8MHz: TMenuItem;
+    MenuBuzzpiratSPI4MHz: TMenuItem;
+    MenuBuzzpiratSPI2P6MHz: TMenuItem;
+    MenuBuzzpiratSPI2MHz: TMenuItem;
+    MenuBuzzpiratSPI1MHz: TMenuItem;
+    MenuBuzzpiratSPI250KHz: TMenuItem;
+    MenuBuzzpiratSPI125KHz: TMenuItem;
+    MenuBuzzpiratSPI30KHz: TMenuItem;
+    MenuBuzzpiratI2CClock: TMenuItem;
+    MenuBuzzpiratI2C400KHz: TMenuItem;
+    MenuBuzzpiratI2C100KHz: TMenuItem;
+    MenuBuzzpiratI2C50KHz: TMenuItem;
+    MenuBuzzpiratI2C5KHz: TMenuItem;
+    MenuBuzzpiratJustI2CScan: TMenuItem;
+    MenuItemBenchmark: TMenuItem;
+    MenuItemEditSreg: TMenuItem;
+    MenuItemReadSreg: TMenuItem;
+    MenuItemLockFlash: TMenuItem;
+    MenuItem4: TMenuItem;
+    MenuMW8Khz: TMenuItem;
+    MenuMW16Khz: TMenuItem;
+    MenuMicrowire: TMenuItem;
+    MenuMW32Khz: TMenuItem;
+    MenuMWClock: TMenuItem;
+    MenuOptions: TMenuItem;
+    MenuSPI: TMenuItem;
+    MenuSPIClock: TMenuItem;
+    Menu1_5Mhz: TMenuItem;
+    Menu750Khz: TMenuItem;
+    Menu375Khz: TMenuItem;
+    Menu187_5Khz: TMenuItem;
+    OpenDialog: TOpenDialog;
+    DropDownMenu: TPopupMenu;
+    EditorPopupMenu: TPopupMenu;
+    LogPopupMenu: TPopupMenu;
+    DropdownMenuLock: TPopupMenu;
+    Panel_I2C_DevAddr: TPanel;
+    BlankCheckDropDownMenu: TPopupMenu;
+    ProgressBar: TProgressBar;
+    RadioI2C: TRadioButton;
+    RadioMw: TRadioButton;
+    RadioSPI: TRadioButton;
+    SaveDialog: TSaveDialog;
+    SpeedButton1: TSpeedButton;
+    Splitter1: TSplitter;
+    StatusBar: TStatusBar;
+    CheckBox_I2C_DevA7: TToggleBox;
+    ToolBar: TToolBar;
+    ButtonRead: TToolButton;
+    ButtonWrite: TToolButton;
+    ButtonVerify: TToolButton;
+    ToolButton1: TToolButton;
+    ButtonReadID: TToolButton;
+    ButtonErase: TToolButton;
+    ToolButton2: TToolButton;
+    ToolButton3: TToolButton;
+    ButtonBlock: TToolButton;
+    ButtonOpenHex: TToolButton;
+    ButtonSaveHex: TToolButton;
+    ButtonCancel: TToolButton;
+    ToolButton4: TToolButton;
+    ToolButton5: TToolButton;
+    procedure BlankCheckMenuItemClick(Sender: TObject);
+    procedure MenuEraseRangeClick(Sender: TObject);
+    procedure MenuSmartWriteClick(Sender: TObject);
+    procedure MenuChecksumClick(Sender: TObject);
+    procedure MenuSFDPDetectClick(Sender: TObject);
+    procedure MenuBackgroundOpsClick(Sender: TObject);
+    procedure MenuDarkThemeClick(Sender: TObject);
+    procedure SaveLogMenuItemClick(Sender: TObject);
+    procedure MenuFillBufferClick(Sender: TObject);
+    procedure MenuSwapBytesClick(Sender: TObject);
+    procedure MenuCompareChipClick(Sender: TObject);
+    procedure MenuOpenProjectClick(Sender: TObject);
+    procedure MenuSaveProjectClick(Sender: TObject);
+    procedure MenuProdConfigClick(Sender: TObject);
+    procedure MenuRunBatchClick(Sender: TObject);
+    procedure MenuSecRegClick(Sender: TObject);
+    procedure ButtonEraseClick(Sender: TObject);
+    procedure ButtonReadClick(Sender: TObject);
+    procedure ClearLogMenuItemClick(Sender: TObject);
+    procedure ComboSPICMDChange(Sender: TObject);
+    procedure CopyLogMenuItemClick(Sender: TObject);
+    procedure AllowInsertItemClick(Sender: TObject);
+    procedure FormCloseQuery(Sender: TObject; var CanClose: boolean);
+    procedure FormCreate(Sender: TObject);
+    procedure FormDestroy(Sender: TObject);
+    procedure ChipClick(Sender: TObject);
+    procedure ChangeLang(Sender: TObject);
+    procedure ComboItem1Click(Sender: TObject);
+    procedure MenuArduinoCOMPortClick(Sender: TObject);
+    procedure MenuBuzzpiratCOMPortClick(Sender: TObject);
+    procedure MenuHWARDUINOClick(Sender: TObject);
+    procedure MenuHWBUZZPIRATClick(Sender: TObject);
+    procedure MenuHWAVRISPClick(Sender: TObject);
+    procedure MenuCopyToClipClick(Sender: TObject);
+    procedure MenuFindChipClick(Sender: TObject);
+    procedure MenuFindClick(Sender: TObject);
+    procedure MenuGotoOffsetClick(Sender: TObject);
+    procedure MenuHWCH341AClick(Sender: TObject);
+    procedure MenuHWCH347Click(Sender: TObject);
+    procedure MenuHWFT232HClick(Sender: TObject);
+    procedure MenuHWUSBASPClick(Sender: TObject);
+    procedure MenuItemBenchmarkClick(Sender: TObject);
+    procedure MenuItemEditSregClick(Sender: TObject);
+    procedure MenuItemLockFlashClick(Sender: TObject);
+    procedure MenuItemReadSregClick(Sender: TObject);
+    procedure MPHexEditorExChange(Sender: TObject);
+    procedure RadioI2CChange(Sender: TObject);
+    procedure RadioMwChange(Sender: TObject);
+    procedure RadioSPIChange(Sender: TObject);
+    procedure ButtonWriteClick(Sender: TObject);
+    procedure ButtonVerifyClick(Sender: TObject);
+    procedure ButtonBlockClick(Sender: TObject);
+    procedure ButtonReadIDClick(Sender: TObject);
+    procedure ButtonOpenHexClick(Sender: TObject);
+    procedure ButtonSaveHexClick(Sender: TObject);
+    procedure ButtonCancelClick(Sender: TObject);
+    procedure I2C_DevAddrChange(Sender: TObject);
+    procedure ScriptsMenuItemClick(Sender: TObject);
+    procedure CreditsMenuItemClick(Sender: TObject);
+    procedure BzHelpMenuItemClick(Sender: TObject);
+    procedure DebugconsoleMenuItemClick(Sender: TObject);
+    procedure ListcomportsMenuItemClick(Sender: TObject);
+    procedure SpeedButton1Click(Sender: TObject);
+    procedure StartAddressEditChange(Sender: TObject);
+    procedure StartAddressEditKeyPress(Sender: TObject; var Key: char);
+    procedure VerifyFlash(BlankCheck: boolean = false);
+  private
+    { private declarations }
+  public
+    { public declarations }
+
+  end;
+
+  procedure LogPrint(text: string);
+  procedure SaveOptions(XMLfile: TXMLDocument);
+  Procedure LoadOptions(XMLfile: TXMLDocument);
+  procedure LoadXML;
+  procedure Translate(XMLfile: TXMLDocument);
+  function OpenDevice: boolean;
+  function SetSPISpeed(OverrideSpeed: byte): integer;
+  procedure SyncUI_ICParam();
+  function UserCancel(): boolean;
+
+const
+  SPI_CMD_25             = 0;
+  SPI_CMD_45             = 1;
+  SPI_CMD_KB             = 2;
+  SPI_CMD_95             = 3;
+
+  ChipListFileName       = 'chiplist.xml';
+  SettingsFileName       = 'settings.xml';
+  ScriptsPath            = 'scripts'+DirectorySeparator;
+
+type
+
+  TCurrentICParam = record
+    Name: string;
+    Page: integer;
+    Size: Longword;
+    SpiCmd: byte;
+    I2CAddrType: byte;
+    MWAddLen: byte;
+    Sector: Longword;    //Размер сектора стирания. 0 - не задан, берем 4096
+    SectorOpcode: byte;  //Опкод стирания сектора. 0 - подобрать по размеру
+    ID: string;          //Идентификатор из chiplist.xml, для проверки перед работой
+
+    Script: string;
+  end;
+
+
+var
+  MainForm: TMainForm;
+  ChipListFile: TXMLDocument;
+  SettingsFile: TXMLDocument;
+  CurrentICParam: TCurrentICParam;
+  ScriptEngine: TPasCalc;
+  RomF: TMemoryStream;
+
+  AsProgrammer: TAsProgrammer;
+
+  Buzzpirat_ClocKhz: integer = 0;
+  Buzzpirat_Pulls: integer = 0;
+  Buzzpirat_Power: integer = 0;
+  Arduino_COMPort: string;
+  Arduino_BaudRate: integer = 1000000;
+  Buzzpirat_COMPort: string;
+implementation
+
+
+var
+  TimeCounter: TDateTime;
+  CurrentLang: string = 'en';
+
+{$R *.lfm}
+
+type
+  //Прокидывает обновления интерфейса из рабочего потока в главный
+  TUIProxy = class
+  private
+    FMsg: string;
+    FValue: integer;
+    procedure SyncLog;
+    procedure SyncProgressMax;
+    procedure SyncProgressPos;
+    procedure SyncProgressReset;
+  public
+    procedure Log(const S: string);
+    procedure ProgressMax(V: integer);
+    procedure ProgressPos(V: integer);
+    procedure ProgressReset;
+  end;
+
+var
+  UIProxy: TUIProxy;
+
+  //Защита от повторного входа: пункты меню, в отличие от кнопок панели,
+  //остаются доступны, пока главный поток качает сообщения
+  OperationRunning: boolean = False;
+
+  //Автонумерация и серийное производство
+  ProdSettings: TProdSettings;
+
+  //Состояние интерфейса, снятое в главном потоке перед стартом операции.
+  //Рабочий поток обязан читать его отсюда, а не из элементов управления
+  OpUI: record
+    ChipSize: cardinal;
+    SkipFF: boolean;
+    AutoCheck: boolean;
+    IgnoreBusy: boolean;
+  end;
+
+procedure TUIProxy.SyncLog;
+begin
+  MainForm.Log.Lines.Add(FMsg);
+end;
+
+procedure TUIProxy.SyncProgressMax;
+begin
+  MainForm.ProgressBar.Max := FValue;
+end;
+
+procedure TUIProxy.SyncProgressPos;
+begin
+  MainForm.ProgressBar.Position := FValue;
+end;
+
+procedure TUIProxy.SyncProgressReset;
+begin
+  MainForm.ProgressBar.Style := pbstNormal;
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure TUIProxy.Log(const S: string);
+begin
+  FMsg := S;
+  TThread.Synchronize(nil, @SyncLog);
+end;
+
+procedure TUIProxy.ProgressMax(V: integer);
+begin
+  FValue := V;
+  TThread.Synchronize(nil, @SyncProgressMax);
+end;
+
+procedure TUIProxy.ProgressPos(V: integer);
+begin
+  FValue := V;
+  TThread.Synchronize(nil, @SyncProgressPos);
+end;
+
+procedure TUIProxy.ProgressReset;
+begin
+  TThread.Synchronize(nil, @SyncProgressReset);
+end;
+
+//Потокобезопасная установка прогресса
+procedure SetProgressMax(V: integer);
+begin
+  if InWorkerThread then
+    UIProxy.ProgressMax(V)
+  else
+    MainForm.ProgressBar.Max := V;
+end;
+
+procedure SetProgressPos(V: integer);
+begin
+  if InWorkerThread then
+    UIProxy.ProgressPos(V)
+  else
+    MainForm.ProgressBar.Position := V;
+end;
+
+//Снимает состояние интерфейса. Вызывать только из главного потока,
+//до запуска операции
+procedure CaptureUIState;
+begin
+  OpUI.ChipSize := 0;
+  if IsNumber(MainForm.ComboChipSize.Text) then
+    OpUI.ChipSize := StrToInt(MainForm.ComboChipSize.Text);
+
+  OpUI.SkipFF     := MainForm.MenuSkipFF.Checked;
+  OpUI.AutoCheck  := MainForm.MenuAutoCheck.Checked;
+  OpUI.IgnoreBusy := MainForm.MenuIgnoreBusyBit.Checked;
+end;
+
+procedure SyncUI_ICParam();
+begin
+  CurrentICParam.SpiCmd := MainForm.ComboSPICMD.ItemIndex;
+  CurrentICParam.I2CAddrType := MainForm.ComboAddrType.ItemIndex;
+
+  if IsNumber(MainForm.ComboMWBitLen.Text) then
+    CurrentICParam.MWAddLen := StrToInt(MainForm.ComboMWBitLen.Text) else
+      CurrentICParam.MWAddLen := 0;
+
+  if IsNumber(MainForm.ComboPageSize.Text) then
+    CurrentICParam.Page := StrToInt(MainForm.ComboPageSize.Text)
+  else if UpCase(MainForm.ComboPageSize.Text) = 'SSTB' then
+    CurrentICParam.Page := -1
+  else if UpCase(MainForm.ComboPageSize.Text) = 'SSTW' then
+    CurrentICParam.Page := -2
+  else
+    CurrentICParam.Page := 0;
+
+  if IsNumber(MainForm.ComboChipSize.Text) then
+    CurrentICParam.Size := StrToInt(MainForm.ComboChipSize.Text) else
+      CurrentICParam.Size := 0;
+end;
+
+function UserCancel(): boolean;
+begin
+  Result := false;
+  if MainForm.ButtonCancel.Tag <> 0 then
+  begin
+    LogPrint(STR_USER_CANCEL);
+
+    if InWorkerThread then
+      UIProxy.ProgressReset
+    else
+    begin
+      MainForm.ProgressBar.Style := pbstNormal;
+      MainForm.ProgressBar.Position:= 0;
+    end;
+
+    Result := true;
+  end;
+end;
+
+procedure LoadXML;
+var
+  RootNode: TDOMNode;
+begin
+  ChipListFile := nil;
+  SettingsFile := nil;
+  if FileExists(ChipListFileName) then
+  begin
+    try
+      ReadXMLFile(ChipListFile, ChipListFileName);
+    except
+      on E: EXMLReadError do
+      begin
+        ShowMessage(E.Message);
+        ChipListFile := nil;
+      end;
+    end;
+  end;
+
+  if FileExists(SettingsFileName) then
+  begin
+    try
+      ReadXMLFile(SettingsFile, SettingsFileName);
+    except
+      on E: EXMLReadError do
+      begin
+        ShowMessage(E.Message);
+        SettingsFile := nil;
+      end;
+    end;
+  end else
+  begin
+    SettingsFile := TXMLDocument.Create;
+    // Create a root node
+    RootNode := SettingsFile.CreateElement('settings');
+    SettingsFile.Appendchild(RootNode);
+  end;
+
+end;
+
+procedure TMainForm.ChangeLang(Sender: TObject);
+begin
+  CurrentLang := TMenuItem(Sender).Hint;
+
+  Translations.TranslateResourceStrings(GetCurrentDir + '/lang/' + CurrentLang + '.po');
+  LRSTranslator.Free;
+  LRSTranslator:= TPOTranslator.Create(GetCurrentDir + '/lang/' + CurrentLang + '.po');
+  TPOTranslator(LRSTranslator).UpdateTranslation(MainForm);
+  TPOTranslator(LRSTranslator).UpdateTranslation(ScriptEditForm);
+  TPOTranslator(LRSTranslator).UpdateTranslation(ChipSearchForm);
+  TPOTranslator(LRSTranslator).UpdateTranslation(sregeditForm);
+  TPOTranslator(LRSTranslator).UpdateTranslation(SearchForm);
+end;
+
+procedure LoadLangList();
+var
+  LangDir: string;
+  LangName: string;
+  LangFile: Text;
+  SearchRec : TSearchRec;
+  MenuItem: TMenuItem;
+begin
+  LangDir := GetCurrentDir + '/lang/';
+
+  If FindFirstUTF8(LangDir+'*.po', faAnyFile, SearchRec) = 0 then
+  begin
+    Repeat
+      AssignFile(LangFile, LangDir+SearchRec.Name);
+      Reset(LangFile);
+      ReadLn(LangFile, LangName);
+      CloseFile(LangFile);
+      Delete(LangName, 1, 1);
+
+      MenuItem := NewItem(LangName, 0, False, True, @MainForm.ChangeLang, 0, '');
+      MenuItem.Hint := ExtractFileNameOnly(SearchRec.Name);
+      MenuItem.AutoCheck := true;
+      MenuItem.RadioItem := true;
+      MainForm.LangMenuItem.Add(MenuItem);
+      if MenuItem.Hint = Currentlang then MenuItem.Checked := true;
+
+    Until FindNextUTF8(SearchRec) <> 0;
+  end;
+
+  FindCloseUTF8(SearchRec);
+end;
+
+procedure Translate(XMLfile: TXMLDocument);
+var
+   PODirectory: String;
+   Node: TDOMNode;
+begin
+
+  PODirectory:= GetCurrentDir + '/lang/';
+  CurrentLang:='';
+
+  if XMLfile <> nil then
+  begin
+
+      Node := XMLfile.DocumentElement.FindNode('locale');
+
+      if (Node <> nil) then
+      if (Node.HasAttributes) then
+      begin
+
+        if  Node.Attributes.GetNamedItem('lang') <> nil then
+          CurrentLang := UTF16ToUTF8(Node.Attributes.GetNamedItem('lang').NodeValue);
+
+      end;
+  end;
+
+  if CurrentLang = '' then
+  begin
+    CurrentLang := 'en';
+    LRSTranslator:= TPOTranslator.Create(PODirectory + CurrentLang + '.po');
+    Translations.TranslateResourceStrings(PODirectory + CurrentLang + '.po');
+    Exit;
+  end;
+
+  if FileExistsUTF8(PODirectory + CurrentLang + '.po') then
+  begin
+    LRSTranslator:= TPOTranslator.Create(PODirectory + CurrentLang + '.po');
+    Translations.TranslateResourceStrings(PODirectory + CurrentLang + '.po');
+  end;
+
+end;               
+
+procedure LogPrint(text: string);
+begin
+  if InWorkerThread then
+    UIProxy.Log(text)
+  else
+    MainForm.Log.Lines.Add(text);
+end;
+
+
+function OpenDevice: boolean;
+begin
+  if not AsProgrammer.Programmer.DevOpen then
+  begin
+    LogPrint(AsProgrammer.Programmer.GetLastError);
+    result := false;
+    Exit;
+  end;
+
+  LogPrint(STR_CURR_HW+AsProgrammer.Programmer.HardwareName);
+  result := true
+end;
+
+
+function IsLockBitsEnabled: boolean;
+var
+  sreg: byte;
+begin
+  result := false;
+  sreg := 0;
+  if MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25 then
+  begin
+    UsbAsp25_ReadSR(sreg);
+    if IsBitSet(sreg, 2) or
+       IsBitSet(sreg, 3) or
+       IsBitSet(sreg, 4) or
+       IsBitSet(sreg, 5) or
+       IsBitSet(sreg, 6) or
+       IsBitSet(sreg, 7)
+    then
+    begin
+      LogPrint(STR_BLOCK_EN);
+      Result := true;
+    end;
+  end;
+
+  if MainForm.ComboSPICMD.ItemIndex = SPI_CMD_45 then
+  begin
+    UsbAsp45_ReadSR(sreg);
+    if (sreg and 2 <> 0) then
+    begin
+      LogPrint(STR_BLOCK_EN);
+      Result := true;
+    end;
+  end;
+
+end;
+
+//------------------------------------------------------------------------
+// Внешний вид: набор иконок и промышленная темная тема
+//------------------------------------------------------------------------
+
+const
+  IconDirName = 'icons' + DirectorySeparator + 'modern' + DirectorySeparator;
+
+  //TColor хранится как $00BBGGRR, поэтому байты идут в обратном порядке
+
+  //Светлая тема(по умолчанию)
+  LIGHT_CHROME  = $F7F4F2;  //#F2F4F7 панели и фон окна
+  LIGHT_SURFACE = $FFFFFF;  //#FFFFFF лог и редактор
+  LIGHT_TEXT    = $33291F;  //#1F2933 текст
+  LIGHT_ACCENT  = $D16E0A;  //#0A6ED1 акцент
+
+  //Темная тема
+  DARK_CHROME   = $241F1B;  //#1B1F24
+  DARK_SURFACE  = $1C1814;  //#14181C
+  DARK_TEXT     = $D9D1C9;  //#C9D1D9
+  DARK_ACCENT   = $F3B32B;  //#2BB3F3
+
+//Подменяет встроенные иконки на файлы из icons\modern.
+//Если папки нет или набор неполный - остаются встроенные
+procedure LoadModernIcons;
+var
+  Files: TStringList;
+  png: TPortableNetworkGraphic;
+  sr: TSearchRec;
+  i: integer;
+begin
+  if not DirectoryExists(IconDirName) then Exit;
+
+  Files := TStringList.Create;
+  try
+    if FindFirst(IconDirName + '*.png', faAnyFile, sr) = 0 then
+    begin
+      repeat
+        if (sr.Attr and faDirectory) = 0 then Files.Add(sr.Name);
+      until FindNext(sr) <> 0;
+      FindClose(sr);
+    end;
+
+    //Порядок задается именем файла: 00_ ... 08_
+    if Files.Count < MainForm.ImageList.Count then Exit;
+    Files.Sort;
+
+    MainForm.ImageList.Clear;
+    for i := 0 to Files.Count - 1 do
+    begin
+      png := TPortableNetworkGraphic.Create;
+      try
+        png.LoadFromFile(IconDirName + Files[i]);
+        MainForm.ImageList.Add(png, nil);
+      finally
+        png.Free;
+      end;
+    end;
+  finally
+    Files.Free;
+  end;
+end;
+
+procedure ApplyTheme(Dark: boolean);
+var
+  i: integer;
+  C: TComponent;
+  ChromeColor, SurfaceColor, TextColor, AccentColor: TColor;
+begin
+  if Dark then
+  begin
+    ChromeColor  := DARK_CHROME;
+    SurfaceColor := DARK_SURFACE;
+    TextColor    := DARK_TEXT;
+    AccentColor  := DARK_ACCENT;
+  end
+  else
+  begin
+    ChromeColor  := LIGHT_CHROME;
+    SurfaceColor := LIGHT_SURFACE;
+    TextColor    := LIGHT_TEXT;
+    AccentColor  := LIGHT_ACCENT;
+  end;
+
+  MainForm.Color := ChromeColor;
+  MainForm.ToolBar.Color := ChromeColor;
+  MainForm.ToolBar.Flat := True;
+  MainForm.StatusBar.Color := ChromeColor;
+  MainForm.Panel_I2C_DevAddr.Color := ChromeColor;
+  MainForm.GroupChipSettings.Color := ChromeColor;
+
+  //Лог моноширинным: адреса и hex в нем читаются заметно лучше
+  MainForm.Log.Color := SurfaceColor;
+  MainForm.Log.Font.Color := TextColor;
+  MainForm.Log.Font.Name := 'Consolas';
+
+  MainForm.MPHexEditorEx.Color := SurfaceColor;
+  MainForm.MPHexEditorEx.Font.Color := TextColor;
+
+  //У части подписей в main.lfm снят ParentFont, поэтому цвет ставим каждой
+  for i := 0 to MainForm.ComponentCount - 1 do
+  begin
+    C := MainForm.Components[i];
+
+    if C is TLabel then
+    begin
+      TLabel(C).Transparent := True;
+      TLabel(C).Font.Color := TextColor;
+    end;
+
+    if C is TRadioButton then TRadioButton(C).Font.Color := TextColor;
+    if C is TCheckBox then TCheckBox(C).Font.Color := TextColor;
+    if C is TGroupBox then TGroupBox(C).Font.Color := TextColor;
+  end;
+
+  MainForm.LabelChipName.Font.Color := AccentColor;
+  MainForm.LabelChipName.Font.Style := [fsBold];
+end;
+
+//------------------------------------------------------------------------
+// Файл проекта: микросхема, настройки и содержимое буфера в одном файле
+//
+// Формат: 'APXPROJ1' | длина заголовка(4 байта LE) | XML заголовок | данные
+// Заголовок текстовый, данные сырые - без base64 файл не раздувается втрое
+//------------------------------------------------------------------------
+
+const
+  ProjectMagic = 'APXPROJ1';
+
+function SaveProjectFile(const FileName: string): boolean;
+var
+  F: TFileStream;
+  Header: string;
+  HeaderBytes: TBytes;
+  Len: longword;
+  Buf: TMemoryStream;
+begin
+  Result := False;
+
+  Header :=
+    '<asprogrammer_project version="4">' + LineEnding +
+    '  <chip name="' + CurrentICParam.Name + '"' +
+          ' id="' + CurrentICParam.ID + '"' +
+          ' size="' + MainForm.ComboChipSize.Text + '"' +
+          ' page="' + MainForm.ComboPageSize.Text + '"' +
+          ' sector="' + IntToStr(CurrentICParam.Sector) + '"' +
+          ' sectorcmd="' + IntToHex(CurrentICParam.SectorOpcode, 2) + '"' +
+          ' spicmd="' + IntToStr(MainForm.ComboSPICMD.ItemIndex) + '"' +
+          ' protocol="' + BoolToStr(MainForm.RadioSPI.Checked, 'spi',
+                          BoolToStr(MainForm.RadioI2C.Checked, 'i2c', 'mw')) + '"' +
+          ' addrtype="' + IntToStr(MainForm.ComboAddrType.ItemIndex) + '"' +
+          ' mwbitlen="' + MainForm.ComboMWBitLen.Text + '"/>' + LineEnding +
+    '  <options startaddr="' + MainForm.StartAddressEdit.Text + '"' +
+          ' verify="' + BoolToStr(MainForm.MenuAutoCheck.Checked, '1', '0') + '"' +
+          ' skipff="' + BoolToStr(MainForm.MenuSkipFF.Checked, '1', '0') + '"' +
+          ' script="' + CurrentICParam.Script + '"/>' + LineEnding +
+    '</asprogrammer_project>' + LineEnding;
+
+  HeaderBytes := TEncoding.UTF8.GetBytes(Header);
+  Len := Length(HeaderBytes);
+
+  Buf := TMemoryStream.Create;
+  try
+    MainForm.MPHexEditorEx.SaveToStream(Buf);
+
+    F := TFileStream.Create(FileName, fmCreate);
+    try
+      F.WriteBuffer(ProjectMagic[1], Length(ProjectMagic));
+      F.WriteBuffer(Len, SizeOf(Len));
+      if Len > 0 then F.WriteBuffer(HeaderBytes[0], Len);
+
+      Buf.Position := 0;
+      if Buf.Size > 0 then F.CopyFrom(Buf, Buf.Size);
+    finally
+      F.Free;
+    end;
+
+    Result := True;
+  finally
+    Buf.Free;
+  end;
+end;
+
+//Достает значение атрибута из заголовка проекта простым разбором строки:
+//полноценный XML тут избыточен, а зависимость от DOM лишняя
+function ProjectAttr(const Header, Name: string): string;
+var
+  p, q: integer;
+  Key: string;
+begin
+  Result := '';
+  Key := ' ' + Name + '="';
+  p := Pos(Key, Header);
+  if p = 0 then Exit;
+
+  Inc(p, Length(Key));
+  q := p;
+  while (q <= Length(Header)) and (Header[q] <> '"') do Inc(q);
+  Result := Copy(Header, p, q - p);
+end;
+
+function LoadProjectFile(const FileName: string; out ErrMsg: string): boolean;
+var
+  F: TFileStream;
+  Magic: string;
+  Len: longword;
+  HeaderBytes: TBytes;
+  Header, s: string;
+  Buf: TMemoryStream;
+begin
+  Result := False;
+  ErrMsg := '';
+
+  F := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
+  try
+    if F.Size < Length(ProjectMagic) + SizeOf(Len) then
+    begin
+      ErrMsg := 'Not an AsProgrammer project file';
+      Exit;
+    end;
+
+    SetLength(Magic, Length(ProjectMagic));
+    F.ReadBuffer(Magic[1], Length(ProjectMagic));
+    if Magic <> ProjectMagic then
+    begin
+      ErrMsg := 'Not an AsProgrammer project file';
+      Exit;
+    end;
+
+    F.ReadBuffer(Len, SizeOf(Len));
+    if Len > cardinal(F.Size) then
+    begin
+      ErrMsg := 'Project header is corrupt';
+      Exit;
+    end;
+
+    SetLength(HeaderBytes, Len);
+    if Len > 0 then F.ReadBuffer(HeaderBytes[0], Len);
+    Header := TEncoding.UTF8.GetString(HeaderBytes);
+
+    Buf := TMemoryStream.Create;
+    try
+      if F.Size > F.Position then Buf.CopyFrom(F, F.Size - F.Position);
+
+      //Протокол выставляем первым: смена радиокнопки чистит поля
+      s := ProjectAttr(Header, 'protocol');
+      if s = 'i2c' then MainForm.RadioI2C.Checked := True
+      else if s = 'mw' then MainForm.RadioMw.Checked := True
+      else MainForm.RadioSPI.Checked := True;
+
+      s := ProjectAttr(Header, 'spicmd');
+      if IsNumber(s) then MainForm.ComboSPICMD.ItemIndex := StrToInt(s);
+
+      if MainForm.RadioSPI.Checked then MainForm.RadioSPIChange(MainForm);
+
+      MainForm.ComboChipSize.Text := ProjectAttr(Header, 'size');
+      MainForm.ComboPageSize.Text := ProjectAttr(Header, 'page');
+      MainForm.ComboMWBitLen.Text := ProjectAttr(Header, 'mwbitlen');
+      MainForm.StartAddressEdit.Text := ProjectAttr(Header, 'startaddr');
+
+      s := ProjectAttr(Header, 'addrtype');
+      if IsNumber(s) then MainForm.ComboAddrType.ItemIndex := StrToInt(s);
+
+      CurrentICParam.Name := ProjectAttr(Header, 'name');
+      CurrentICParam.ID := ProjectAttr(Header, 'id');
+      CurrentICParam.Script := ProjectAttr(Header, 'script');
+      MainForm.LabelChipName.Caption := CurrentICParam.Name;
+
+      s := ProjectAttr(Header, 'sector');
+      if IsNumber(s) then CurrentICParam.Sector := StrToInt(s);
+
+      s := ProjectAttr(Header, 'sectorcmd');
+      if IsNumber('$' + s) then CurrentICParam.SectorOpcode := StrToInt('$' + s);
+
+      MainForm.MenuAutoCheck.Checked := ProjectAttr(Header, 'verify') = '1';
+      MainForm.MenuSkipFF.Checked := ProjectAttr(Header, 'skipff') = '1';
+
+      if Buf.Size > 0 then
+      begin
+        Buf.Position := 0;
+        MainForm.MPHexEditorEx.LoadFromStream(Buf);
+      end;
+
+      Result := True;
+    finally
+      Buf.Free;
+    end;
+  finally
+    F.Free;
+  end;
+end;
+
+//Опкод стирания по размеру сектора: 20h(4K), 52h(32K), D8h(64K)
+function SectorEraseOpcode(SectorSize: cardinal): byte;
+begin
+  case SectorSize of
+    4096:  Result := $20;
+    32768: Result := $52;
+    65536: Result := $D8;
+  else
+    Result := $20;
+  end;
+end;
+
+//Размер сектора текущей микросхемы. Берется из chiplist.xml(sector=) или SFDP,
+//иначе 4096 - подходит практически для всей современной SPI NOR
+function CurrentSectorSize: cardinal;
+begin
+  if CurrentICParam.Sector > 0 then
+    Result := CurrentICParam.Sector
+  else
+    Result := 4096;
+end;
+
+//Опкод стирания текущей микросхемы
+function CurrentSectorOpcode: byte;
+begin
+  if (CurrentICParam.Sector > 0) and (CurrentICParam.SectorOpcode <> 0) then
+    Result := CurrentICParam.SectorOpcode
+  else
+    Result := SectorEraseOpcode(CurrentSectorSize);
+end;
+
+//Ждет снятия флага Busy. Возвращает false если прервано пользователем
+function WaitNotBusy25: boolean;
+begin
+  Result := True;
+  while UsbAsp25_Busy() do
+  begin
+    OpProcessMessages;
+    if UserCancel then Exit(False);
+  end;
+end;
+
+//Стирает только сектора, попадающие в диапазон StartAddress..StartAddress+RangeLen-1.
+//Границы выравниваются на размер сектора - стирать половину сектора нельзя.
+function EraseRange25(StartAddress, RangeLen, SectorSize: cardinal; Opcode: byte): boolean;
+const
+  FLASH_SIZE_128MBIT = 16777216;
+var
+  ChipSize, Addr, EndAddr, Total, Idx: cardinal;
+  Use4B: boolean;
+  OK: boolean;
+
+  //Тело операции. Выполняется в рабочем потоке, если фоновый режим включен
+  procedure DoWork;
+  begin
+  OK := False;
+
+  if (SectorSize = 0) or (RangeLen = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+
+  ChipSize := OpUI.ChipSize;
+
+  if (ChipSize = 0) or (StartAddress >= ChipSize) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+
+  //Выравниваем начало вниз, конец - вверх, по границе сектора
+  Addr := (StartAddress div SectorSize) * SectorSize;
+  EndAddr := StartAddress + RangeLen;
+  if EndAddr > ChipSize then EndAddr := ChipSize;
+  EndAddr := ((EndAddr + SectorSize - 1) div SectorSize) * SectorSize;
+  if EndAddr > ChipSize then EndAddr := ChipSize;
+
+  Total := (EndAddr - Addr + SectorSize - 1) div SectorSize;
+  if Total = 0 then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+
+  LogPrint(STR_ERASING_RANGE + '0x' + IntToHex(Addr, 8) + ' - 0x' + IntToHex(EndAddr - 1, 8) +
+           ' (' + IntToStr(Total) + ' x ' + IntToStr(SectorSize) + ' bytes, opcode 0x' +
+           IntToHex(Opcode, 2) + ')');
+
+  Use4B := ChipSize > FLASH_SIZE_128MBIT;
+  if Use4B then UsbAsp25_EN4B();
+
+  SetProgressPos(0);
+  SetProgressMax(Integer(Total));
+  Idx := 0;
+
+  try
+    while Addr < EndAddr do
+    begin
+      UsbAsp25_WREN();
+      UsbAsp25_EraseSector(Opcode, Addr, Use4B);
+
+      if not WaitNotBusy25 then Exit;
+
+      Inc(Addr, SectorSize);
+      Inc(Idx);
+      SetProgressPos(Integer(Idx));
+      OpProcessMessages;
+
+      if UserCancel then Exit;
+    end;
+
+    OK := True;
+  finally
+    if Use4B then UsbAsp25_EX4B();
+    UsbAsp25_Wrdi();
+    SetProgressPos(0);
+  end;
+  end;
+
+begin
+  OK := False;
+  RunOperation(@DoWork);
+  Result := OK;
+end;
+
+//Полное стирание микросхемы 25 серии с ожиданием готовности
+procedure ChipErase25;
+
+  //Тело операции. Выполняется в рабочем потоке, если фоновый режим включен
+  procedure DoWork;
+  var
+    Started: TDateTime;
+  begin
+    UsbAsp25_WREN();
+    UsbAsp25_ChipErase();
+
+    LogPrint(STR_ERASE_NOTICE);
+    Started := Now;
+
+    while UsbAsp25_Busy() do
+    begin
+      OpProcessMessages;
+      if UserCancel then Exit;
+    end;
+
+    //Полное стирание физически не может занять доли секунды: почти всегда
+    //это значит, что микросхема отказала в команде из-за защиты
+    if MilliSecondsBetween(Now, Started) < 1000 then
+      LogPrint(STR_ERASE_TOO_FAST);
+  end;
+
+begin
+  RunOperation(@DoWork);
+end;
+
+//Реализация ниже по файлу, нужна для авторезервирования
+procedure ReadFlash25(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal); forward;
+
+//Проверяет, что в панели действительно та микросхема, которая выбрана.
+//Вызывать в режиме программирования. False - пользователь отказался продолжать
+function VerifyChipID: boolean;
+var
+  ID: MEMORY_ID;
+  Expected, s9F, s90, sAB, s15: string;
+begin
+  Result := True;
+
+  if not MainForm.MenuCheckIDBefore.Checked then Exit;
+  if not MainForm.RadioSPI.Checked then Exit;
+  if MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25 then Exit;
+
+  Expected := UpperCase(Trim(CurrentICParam.ID));
+  //У части микросхем идентификатора нет, проверять нечего
+  if (Expected = '') or (Expected = '0') then Exit;
+
+  FillByte(ID.ID9FH, 3, $FF);
+  FillByte(ID.ID90H, 2, $FF);
+  FillByte(ID.IDABH, 1, $FF);
+  FillByte(ID.ID15H, 2, $FF);
+
+  UsbAsp25_ReadID(ID);
+
+  s9F := UpperCase(IntToHex(ID.ID9FH[0], 2) + IntToHex(ID.ID9FH[1], 2) + IntToHex(ID.ID9FH[2], 2));
+  s90 := UpperCase(IntToHex(ID.ID90H[0], 2) + IntToHex(ID.ID90H[1], 2));
+  sAB := UpperCase(IntToHex(ID.IDABH, 2));
+  s15 := UpperCase(IntToHex(ID.ID15H[0], 2) + IntToHex(ID.ID15H[1], 2));
+
+  if (Expected = s9F) or (Expected = s90) or (Expected = sAB) or (Expected = s15) then
+  begin
+    LogPrint(STR_ID_OK + Expected);
+    Exit;
+  end;
+
+  LogPrint(STR_ID_MISMATCH + Expected + ', read 9Fh=' + s9F + ' 90h=' + s90 +
+           ' ABh=' + sAB + ' 15h=' + s15);
+
+  Result := MessageDlg('AsProgrammer', STR_ID_MISMATCH_Q, mtWarning, [mbYes, mbNo], 0) = mrYes;
+end;
+
+//Снимок содержимого микросхемы перед записью или стиранием.
+//False - снять не удалось, продолжать нельзя
+function AutoBackupChip: boolean;
+var
+  Backup: TMemoryStream;
+  Dir, FileName, ChipName: string;
+  i: integer;
+begin
+  Result := True;
+
+  if not MainForm.MenuAutoBackup.Checked then Exit;
+  if not MainForm.RadioSPI.Checked then Exit;
+  if MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25 then Exit;
+  if OpUI.ChipSize = 0 then Exit;
+
+  Dir := 'backup' + DirectorySeparator;
+  if not DirectoryExists(Dir) then
+    if not CreateDir(Dir) then
+    begin
+      LogPrint(STR_BACKUP_FAILED);
+      Exit(False);
+    end;
+
+  //Имя микросхемы попадает в имя файла, чистим недопустимые символы
+  ChipName := CurrentICParam.Name;
+  if ChipName = '' then ChipName := 'chip';
+  for i := 1 to Length(ChipName) do
+    if not (ChipName[i] in ['0'..'9', 'A'..'Z', 'a'..'z', '_', '-', '.']) then
+      ChipName[i] := '_';
+
+  FileName := Dir + ChipName + '_' + FormatDateTime('yyyymmdd-hhnnss', Now) + '.bin';
+
+  LogPrint(STR_BACKUP_MAKING);
+
+  Backup := TMemoryStream.Create;
+  try
+    ReadFlash25(Backup, 0, OpUI.ChipSize);
+
+    if Backup.Size < OpUI.ChipSize then
+    begin
+      LogPrint(STR_BACKUP_FAILED);
+      Exit(False);
+    end;
+
+    Backup.SaveToFile(FileName);
+    LogPrint(STR_BACKUP_DONE + FileName);
+  finally
+    Backup.Free;
+  end;
+end;
+
+//Вставляет очередной серийный номер в поток перед записью и, если задан
+//файл журнала, дописывает выданный номер туда
+procedure ApplySerialToStream(Stream: TMemoryStream);
+var
+  Data: array of byte;
+  Size: integer;
+  LogF: TextFile;
+begin
+  if not ProdSettings.SNEnabled then Exit;
+
+  Size := Stream.Size;
+  if Size = 0 then Exit;
+
+  if ProdSettings.SNAddress + ProdSettings.SNLength > cardinal(Size) then
+  begin
+    LogPrint(STR_SERIAL_NOFIT);
+    Exit;
+  end;
+
+  SetLength(Data, Size);
+  Stream.Position := 0;
+  Stream.ReadBuffer(Data[0], Size);
+
+  if ApplySerial(ProdSettings, Data, cardinal(Size)) then
+  begin
+    LogPrint(STR_SERIAL_WRITTEN + SerialToStr(ProdSettings) +
+             ' @ 0x' + IntToHex(ProdSettings.SNAddress, 6));
+
+    if ProdSettings.SNLogFile <> '' then
+      try
+        AssignFile(LogF, ProdSettings.SNLogFile);
+        if FileExists(ProdSettings.SNLogFile) then Append(LogF) else Rewrite(LogF);
+        WriteLn(LogF, FormatDateTime('yyyy-mm-dd hh:nn:ss', Now) + #9 +
+                      CurrentICParam.Name + #9 + SerialToStr(ProdSettings));
+        CloseFile(LogF);
+      except
+        LogPrint('Cannot write the serial number log file');
+      end;
+
+    Stream.Position := 0;
+    Stream.WriteBuffer(Data[0], Size);
+  end;
+
+  Stream.Position := 0;
+end;
+
+//Установка скорости spi и Microwire
+function SetSPISpeed(OverrideSpeed: byte): integer;
+var
+  Speed: byte;
+begin
+  if AsProgrammer.Current_HW = CHW_ARDUINO then
+  begin
+    if MainForm.MenuArduinoISP8Mhz.Checked then Speed := MainForm.MenuArduinoISP8Mhz.Tag;
+    if MainForm.MenuArduinoISP4Mhz.Checked then Speed := MainForm.MenuArduinoISP4Mhz.Tag;
+    if MainForm.MenuArduinoISP2Mhz.Checked then Speed := MainForm.MenuArduinoISP2Mhz.Tag;
+    if MainForm.MenuArduinoISP1Mhz.Checked then Speed := MainForm.MenuArduinoISP1Mhz.Tag;
+  end;
+
+  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
+  begin
+    if MainForm.MenuArduinoISP8Mhz.Checked then Speed := MainForm.MenuArduinoISP8Mhz.Tag;
+    if MainForm.MenuArduinoISP4Mhz.Checked then Speed := MainForm.MenuArduinoISP4Mhz.Tag;
+    if MainForm.MenuArduinoISP2Mhz.Checked then Speed := MainForm.MenuArduinoISP2Mhz.Tag;
+    if MainForm.MenuArduinoISP1Mhz.Checked then Speed := MainForm.MenuArduinoISP1Mhz.Tag;
+  end;
+
+  if AsProgrammer.Current_HW = CHW_AVRISP then
+  begin
+    if MainForm.MenuAVRISP8Mhz.Checked then Speed := MainForm.MenuAVRISP8Mhz.Tag;
+    if MainForm.MenuAVRISP4Mhz.Checked then Speed := MainForm.MenuAVRISP4Mhz.Tag;
+    if MainForm.MenuAVRISP2Mhz.Checked then Speed := MainForm.MenuAVRISP2Mhz.Tag;
+    if MainForm.MenuAVRISP1Mhz.Checked then Speed := MainForm.MenuAVRISP1Mhz.Tag;
+    if MainForm.MenuAVRISP500Khz.Checked then Speed := MainForm.MenuAVRISP500Khz.Tag;
+    if MainForm.MenuAVRISP250Khz.Checked then Speed := MainForm.MenuAVRISP250Khz.Tag;
+    if MainForm.MenuAVRISP125Khz.Checked then Speed := MainForm.MenuAVRISP125Khz.Tag;
+  end;
+
+  if (MainForm.RadioSPI.Checked) and (AsProgrammer.Current_HW = CHW_USBASP) then
+  begin
+    if MainForm.Menu3Mhz.Checked then Speed := MainForm.Menu3Mhz.Tag;
+    if MainForm.Menu1_5Mhz.Checked then Speed := MainForm.Menu1_5Mhz.Tag;
+    if MainForm.Menu750Khz.Checked then Speed := MainForm.Menu750Khz.Tag;
+    if MainForm.Menu375Khz.Checked then Speed := MainForm.Menu375Khz.Tag;
+    if MainForm.Menu187_5Khz.Checked then Speed := MainForm.Menu187_5Khz.Tag;
+    if MainForm.Menu93_75Khz.Checked then Speed := MainForm.Menu93_75Khz.Tag;
+    if MainForm.Menu32Khz.Checked then Speed := MainForm.Menu32Khz.Tag;
+  end;
+
+  if (MainForm.RadioMw.Checked) and (AsProgrammer.Current_HW = CHW_USBASP) then
+  begin
+    if MainForm.MenuMW32Khz.Checked then Speed := MainForm.MenuMW32Khz.Tag;
+    if MainForm.MenuMW16Khz.Checked then Speed := MainForm.MenuMW16Khz.Tag;
+    if MainForm.MenuMW8Khz.Checked then Speed := MainForm.MenuMW8Khz.Tag;
+  end;
+
+  if (MainForm.RadioSPI.Checked) and (AsProgrammer.Current_HW = CHW_FT232H) then
+  begin
+    if MainForm.MenuFT232SPI30Mhz.Checked then Speed := MainForm.MenuFT232SPI30Mhz.Tag;
+    if MainForm.MenuFT232SPI6Mhz.Checked then Speed := MainForm.MenuFT232SPI6Mhz.Tag;
+  end;
+
+  if (MainForm.RadioSPI.Checked) and (AsProgrammer.Current_HW = CHW_CH347) then
+  begin
+    if MainForm.MenuCH347SPIClock60MHz.Checked then Speed := MainForm.MenuCH347SPIClock60MHz.Tag;
+    if MainForm.MenuCH347SPIClock30MHz.Checked then Speed := MainForm.MenuCH347SPIClock30MHz.Tag;
+    if MainForm.MenuCH347SPIClock15MHz.Checked then Speed := MainForm.MenuCH347SPIClock15MHz.Tag;
+    if MainForm.MenuCH347SPIClock7_5MHz.Checked then Speed := MainForm.MenuCH347SPIClock7_5MHz.Tag;
+    if MainForm.MenuCH347SPIClock3_75MHz.Checked then Speed := MainForm.MenuCH347SPIClock3_75MHz.Tag;
+    if MainForm.MenuCH347SPIClock1_875MHz.Checked then Speed := MainForm.MenuCH347SPIClock1_875MHz.Tag;
+    if MainForm.MenuCH347SPIClock937_5KHz.Checked then Speed := MainForm.MenuCH347SPIClock937_5KHz.Tag;
+    if MainForm.MenuCH347SPIClock468_75KHz.Checked then Speed := MainForm.MenuCH347SPIClock468_75KHz.Tag;
+  end;
+
+  if OverrideSpeed <> 0 then Speed := OverrideSpeed;
+
+  result := speed;
+end;
+
+
+function SetI2CDevAddr(): byte;
+begin
+    result := 0;
+    With MainForm do
+    begin
+      if (CheckBox_I2C_A0.Checked) then result := SetBit(result, 1);
+      if (CheckBox_I2C_A1.Checked) then result := SetBit(result, 2);
+      if (CheckBox_I2C_A2.Checked) then result := SetBit(result, 3);
+
+      if (CheckBox_I2C_DevA4.Checked) then result := SetBit(result, 4);
+      if (CheckBox_I2C_DevA5.Checked) then result := SetBit(result, 5);
+      if (CheckBox_I2C_DevA6.Checked) then result := SetBit(result, 6);
+      if (CheckBox_I2C_DevA7.Checked) then result := SetBit(result, 7);
+    end;
+end;
+
+procedure ReadFlashMW(var RomStream: TMemoryStream; AddrBitLen: byte; StartAddress, ChipSize: cardinal);
+var
+  ChunkSize: Word;
+  BytesRead: integer;
+  DataChunk: array[0..2047] of byte;
+  Address: cardinal;
+begin
+  if (StartAddress >= ChipSize) or (ChipSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  ChunkSize := 2;
+  if ChunkSize > ChipSize then ChunkSize := ChipSize;
+
+  LogPrint(STR_READING_FLASH);
+  BytesRead := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+
+  RomStream.Clear;
+
+  while Address < ChipSize div 2 do
+  begin
+    //if ChunkSize > ((ChipSize div 2) - Address) then ChunkSize := (ChipSize div 2) - Address;
+
+    BytesRead := BytesRead + UsbAspMW_Read(AddrBitLen, Address, datachunk, ChunkSize);
+    RomStream.WriteBuffer(datachunk, ChunkSize);
+    Inc(Address, ChunkSize div 2);
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 2;
+    Application.ProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if BytesRead <> ChipSize then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure WriteFlashMW(var RomStream: TMemoryStream; AddrBitLen: byte; StartAddress, ChipSize: cardinal);
+var
+  DataChunk: array[0..2047] of byte;
+  Address, BytesWrite: cardinal;
+  ChunkSize: Word;
+begin
+  if (StartAddress >= ChipSize) or (ChipSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  LogPrint(STR_WRITING_FLASH);
+  BytesWrite := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := ChipSize;
+
+  ChunkSize := 2;
+
+  if ChunkSize > ChipSize then ChunkSize := ChipSize;
+
+  UsbAspMW_EWEN(AddrBitLen);
+
+  while Address < ChipSize div 2 do
+  begin
+    RomStream.ReadBuffer(DataChunk, ChunkSize);
+
+    BytesWrite := BytesWrite + UsbAspMW_Write(AddrBitLen, Address, datachunk, ChunkSize);
+    Inc(Address, ChunkSize div 2);
+
+    while UsbAspMW_Busy do
+    begin
+       Application.ProcessMessages;
+       if UserCancel then Exit;
+    end; 
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + ChunkSize;
+    Application.ProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if BytesWrite <> ChipSize then
+    LogPrint(STR_WRONG_BYTES_WRITE)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure WriteFlash25(var RomStream: TMemoryStream; StartAddress, WriteSize: cardinal; PageSize: word; WriteType: integer);
+const
+  FLASH_SIZE_128MBIT = 16777216;
+var
+  DataChunk: array[0..2047] of byte;
+  DataChunk2: array[0..2047] of byte;
+  Address, BytesWrite: cardinal;
+  PageSizeTemp: word;
+  ProgressPos: integer;
+  SkipPage: boolean;
+
+  //Тело операции. Выполняется в рабочем потоке, если фоновый режим включен
+  //Счетчик цикла обязан быть локальным: FPC не разрешает использовать
+  //переменную внешней процедуры как счетчик for
+  procedure DoWork;
+  var
+    i: integer;
+  begin
+  if (WriteSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  if OpUI.AutoCheck then
+    LogPrint(STR_WRITING_FLASH_WCHK) else
+      LogPrint(STR_WRITING_FLASH);
+
+  PageSizeTemp := PageSize;
+  BytesWrite := 0;
+  Address := StartAddress;
+  SetProgressMax(WriteSize div PageSize);
+  SetProgressPos(0);
+  ProgressPos := 0;
+
+  if WriteSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
+
+  while (Address-StartAddress) < WriteSize do
+  begin
+    //Сбрасываем на каждой странице: инициализированная переменная в FPC
+    //статическая и сохраняла бы значение от предыдущей операции записи
+    SkipPage := False;
+
+    //Только вначале aai
+    if (((WriteType = WT_SSTB) or (WriteType = WT_SSTW)) and (Address = StartAddress)) or
+    //Вначале страницы
+    (WriteType = WT_PAGE) then UsbAsp25_WREN();
+
+    //Determines first page buffer size to prevent buffer "rolls over" on address boundary
+        if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 2) then
+           PageSize := (OpUI.ChipSize - StartAddress) mod PageSize else
+              PageSize := PageSizeTemp;
+
+    if (WriteSize - (Address-StartAddress)) < PageSize then PageSize := (WriteSize - (Address-StartAddress));
+    RomStream.ReadBuffer(DataChunk, PageSize);
+
+    if (WriteType = WT_SSTB) then
+      if (Address = StartAddress) then //Пишем первый байт с адресом
+        BytesWrite := BytesWrite + UsbAsp25_Write($AF, Address, datachunk, PageSize)
+        else
+        //Пишем остальные(без адреса)
+        BytesWrite := BytesWrite + UsbAsp25_WriteSSTB($AF, datachunk[0]);
+
+    if (WriteType = WT_SSTW) then
+      if (Address = StartAddress) then //Пишем первые два байта с адресом
+        BytesWrite := BytesWrite + UsbAsp25_Write($AD, Address, datachunk, PageSize)
+        else
+        //Пишем остальные(без адреса)
+        BytesWrite := BytesWrite + UsbAsp25_WriteSSTW($AD, datachunk[0], datachunk[1]);
+
+    if WriteType = WT_PAGE then
+    begin
+      //Если страница вся FF то не пишем ее
+      if OpUI.SkipFF then
+      begin
+        SkipPage := True;
+        for i:=0 to PageSize-1 do
+          if DataChunk[i] <> $FF then
+          begin
+            SkipPage := False;
+            Break;
+          end;
+      end;
+
+      if not SkipPage then
+      begin
+        if WriteSize > FLASH_SIZE_128MBIT then //Память больше 128Мбит
+        begin
+          //4 байтная адресация
+          BytesWrite := BytesWrite + UsbAsp25_Write32bitAddr($02, Address, datachunk, PageSize)
+        end
+        else //Память в пределах 128Мбит
+          BytesWrite := BytesWrite + UsbAsp25_Write($02, Address, datachunk, PageSize);
+      end else BytesWrite := BytesWrite + PageSize;
+    end;
+
+    if (not OpUI.IgnoreBusy) and (not SkipPage) then  //Игнорировать проверку
+      while UsbAsp25_Busy() do
+      begin
+        OpProcessMessages;
+        if UserCancel then Exit;
+      end;
+
+    if (OpUI.AutoCheck) and (WriteType = WT_PAGE) then
+    begin
+	  
+      if WriteSize > FLASH_SIZE_128MBIT then
+        UsbAsp25_Read32bitAddr($03, Address, datachunk2, PageSize)
+      else
+        UsbAsp25_Read($03, Address, datachunk2, PageSize);
+
+      for i:=0 to PageSize-1 do
+        if DataChunk2[i] <> DataChunk[i] then
+        begin
+          LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
+          SetProgressPos(0);
+          Exit;
+        end;
+    end;
+
+    Inc(Address, PageSize);
+    Inc(ProgressPos);
+    SetProgressPos(ProgressPos);
+    OpProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if WriteSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
+  UsbAsp25_Wrdi(); //Для sst
+
+  if BytesWrite <> WriteSize then
+    LogPrint(STR_WRONG_BYTES_WRITE)
+  else
+    LogPrint(STR_DONE);
+
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
+end;
+
+procedure WriteFlash95(var RomStream: TMemoryStream; StartAddress, WriteSize: cardinal; PageSize: word; ChipSize: integer);
+var
+  DataChunk: array[0..2047] of byte;
+  DataChunk2: array[0..2047] of byte;
+  Address, BytesWrite: cardinal;
+  PageSizeTemp: word;
+  i: integer;
+begin
+  if (WriteSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  if MainForm.MenuAutoCheck.Checked then
+    LogPrint(STR_WRITING_FLASH_WCHK) else
+      LogPrint(STR_WRITING_FLASH);
+
+  PageSizeTemp := PageSize;
+  BytesWrite := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := WriteSize div PageSize;
+
+  while (Address-StartAddress) < WriteSize do
+  begin
+    UsbAsp95_WREN();
+
+    //Determines first page buffer size to prevent buffer "rolls over" on address boundary
+        if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 1) then
+           PageSize := (ChipSize - StartAddress) mod PageSize else
+              PageSize := PageSizeTemp;
+
+    if (WriteSize - (Address-StartAddress)) < PageSize then PageSize := (WriteSize - (Address-StartAddress));
+    RomStream.ReadBuffer(DataChunk, PageSize);
+
+    BytesWrite := BytesWrite + UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
+
+    if not MainForm.MenuIgnoreBusyBit.Checked then  //Игнорировать проверку
+      while UsbAsp25_Busy() do
+      begin
+        Application.ProcessMessages;
+        if UserCancel then Exit;
+      end;
+
+    if MainForm.MenuAutoCheck.Checked then
+    begin
+      UsbAsp95_Read(ChipSize, Address, datachunk2, PageSize);
+      for i:=0 to PageSize-1 do
+        if DataChunk2[i] <> DataChunk[i] then
+        begin
+          LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
+          MainForm.ProgressBar.Position := 0;
+          Exit;
+        end;
+    end;
+
+    Inc(Address, PageSize);
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+    if UserCancel then Break;
+  end;
+
+  if BytesWrite <> WriteSize then
+    LogPrint(STR_WRONG_BYTES_WRITE)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure EraseEEPROM25(StartAddress, WriteSize: cardinal; PageSize: word; ChipSize: integer);
+var
+  DataChunk: array[0..2047] of byte;
+  DataChunk2: array[0..2047] of byte;
+  Address, BytesWrite: cardinal;
+  i: integer;
+begin
+  if (StartAddress >= WriteSize) or (WriteSize = 0) {or (PageSize > WriteSize)} then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  BytesWrite := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := WriteSize div PageSize;
+
+  while Address < WriteSize do
+  begin
+    UsbAsp95_WREN();
+
+    if (WriteSize - Address) < PageSize then PageSize := (WriteSize - Address);
+
+    FillByte(DataChunk, PageSize, $FF);
+
+    BytesWrite := BytesWrite + UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
+
+    if not MainForm.MenuIgnoreBusyBit.Checked then  //Игнорировать проверку
+      while UsbAsp25_Busy() do
+      begin
+        Application.ProcessMessages;
+        if UserCancel then Exit;
+      end;
+
+    if MainForm.MenuAutoCheck.Checked then
+    begin
+      UsbAsp95_Read(ChipSize, Address, datachunk2, PageSize);
+      for i:=0 to PageSize-1 do
+        if DataChunk2[i] <> DataChunk[i] then
+        begin
+          LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
+          MainForm.ProgressBar.Position := 0;
+          Exit;
+        end;
+    end;
+
+    Inc(Address, PageSize);
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if BytesWrite <> WriteSize then
+    LogPrint(STR_WRONG_BYTES_WRITE)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+function EraseFlashKB(chipsize: longword; pagesize: word): integer;
+var
+  i: integer;
+  busy: boolean;
+begin
+  MainForm.ProgressBar.Max := chipsize div pagesize;
+
+  UsbAspMulti_EnableEDI();
+  UsbAspMulti_WriteReg($FEA7, $A4); //en write
+
+  for i:= 0 to (chipsize div pagesize)-1 do
+  begin
+    UsbAspMulti_ErasePage(i * pagesize);
+    //busy
+    repeat
+      if UserCancel then Exit;
+      busy := UsbAspMulti_Busy();
+    until busy = false;
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+  end;
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure WriteFlashKB(var RomStream: TMemoryStream; StartAddress, WriteSize: cardinal; PageSize: word);
+var
+  DataChunk: array[0..2047] of byte;
+  DataChunk2: array[0..2047] of byte;
+  Address, BytesWrite: cardinal;
+  i: integer;
+  busy: boolean;
+  SkipPage: boolean = false;
+begin
+  if (StartAddress >= WriteSize) or (WriteSize = 0) {or (PageSize > WriteSize)} then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  if MainForm.MenuAutoCheck.Checked then
+    LogPrint(STR_WRITING_FLASH_WCHK) else
+      LogPrint(STR_WRITING_FLASH);
+
+  BytesWrite := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := WriteSize div PageSize;
+
+  UsbAspMulti_EnableEDI();
+  UsbAspMulti_WriteReg($FEA7, $A4); //en write
+
+  while Address < WriteSize do
+  begin
+
+    //if (WriteSize - Address) < PageSize then PageSize := (WriteSize - Address);
+    RomStream.ReadBuffer(DataChunk, PageSize);
+
+
+    //Если страница вся 00 то не пишем ее
+    if MainForm.MenuSkipFF.Checked then
+    begin
+      SkipPage := True;
+      for i:=0 to PageSize-1 do
+        if DataChunk[i] <> $00 then
+        begin
+          SkipPage := False;
+          Break;
+        end;
+    end;
+
+    if not SkipPage then
+      UsbAspMulti_WritePage(Address, datachunk);
+
+    //busy
+    repeat
+      if UserCancel then Exit;
+      busy := UsbAspMulti_Busy();
+    until busy = false;
+
+    BytesWrite := BytesWrite + PageSize;
+
+     if (MainForm.MenuAutoCheck.Checked) then
+      begin
+        for i:=0 to PageSize-1 do
+        begin
+          UsbAspMulti_Read(Address+i, DataChunk2[0]);
+          if DataChunk2[0] <> DataChunk[i] then
+          begin
+            LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
+            MainForm.ProgressBar.Position := 0;
+            Exit;
+          end;
+        end;
+      end;
+
+    Inc(Address, PageSize);
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+    if UserCancel then Exit;
+  end;
+
+  if BytesWrite <> WriteSize then
+    LogPrint(STR_WRONG_BYTES_WRITE)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure WriteFlash45(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal; PageSize: word; WriteType: integer);
+var
+  DataChunk: array[0..2047] of byte;
+  DataChunk2: array[0..2047] of byte;
+  PageAddress, BytesWrite: cardinal;
+  i: integer;
+begin
+  if (StartAddress >= ChipSize) or (ChipSize = 0) or (PageSize > ChipSize) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  if MainForm.MenuAutoCheck.Checked then
+    LogPrint(STR_WRITING_FLASH_WCHK) else
+      LogPrint(STR_WRITING_FLASH);
+
+  BytesWrite := 0;
+  PageAddress := StartAddress;
+  MainForm.ProgressBar.Max := ChipSize div PageSize;
+
+  while PageAddress < ChipSize div PageSize do
+  begin
+    //UsbAsp45_WREN(hUSBDev);
+    RomStream.ReadBuffer(DataChunk, PageSize);
+
+    if WriteType = WT_PAGE then
+      BytesWrite := BytesWrite + UsbAsp45_Write(PageAddress, datachunk, PageSize);
+
+    while UsbAsp45_Busy() do
+    begin
+      Application.ProcessMessages;
+      if UserCancel then Exit;
+    end;
+
+    if MainForm.MenuAutoCheck.Checked then
+    begin
+      UsbAsp45_Read(PageAddress, datachunk2, PageSize);
+      for i:=0 to PageSize-1 do
+        if DataChunk2[i] <> DataChunk[i] then
+        begin
+          LogPrint(STR_VERIFY_ERROR+IntToHex((PageAddress*PageSize )+i, 8));
+          Exit;
+        end;
+    end;
+
+    Inc(PageAddress, 1);
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+    if UserCancel then Break;
+  end;
+
+  if BytesWrite <> ChipSize then
+    LogPrint(STR_WRONG_BYTES_WRITE)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure ReadFlash25(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal);
+const
+  FLASH_SIZE_128MBIT = 16777216;
+var
+  ChunkSize: Word;
+  BytesRead: integer;
+  DataChunk: array[0..65534] of byte;
+  Address: cardinal;
+  ProgressPos: integer;
+
+  //Тело операции. Выполняется в рабочем потоке, если фоновый режим включен
+  procedure DoWork;
+  begin
+  if (StartAddress >= ChipSize) or (ChipSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  if ASProgrammer.Current_HW = CHW_FT232H then
+    ChunkSize := 16787 else
+  if ASProgrammer.Current_HW = CHW_CH347 then
+    ChunkSize := SizeOf(DataChunk)
+  else
+    ChunkSize := 2048;
+
+
+
+  if ChunkSize > ChipSize then ChunkSize := ChipSize;
+
+  LogPrint(STR_READING_FLASH);
+  BytesRead := 0;
+  Address := StartAddress;
+  SetProgressMax(ChipSize div ChunkSize);
+  SetProgressPos(0);
+  ProgressPos := 0;
+
+  RomStream.Clear;
+
+  if ChipSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
+
+  while Address < ChipSize do
+  begin
+    if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
+
+    if ChipSize > FLASH_SIZE_128MBIT then
+      BytesRead := BytesRead + UsbAsp25_Read32bitAddr($03, Address, datachunk, ChunkSize)
+    else
+      BytesRead := BytesRead + UsbAsp25_Read($03, Address, datachunk, ChunkSize);
+
+    RomStream.WriteBuffer(datachunk, chunksize);
+    Inc(Address, ChunkSize);
+
+    Inc(ProgressPos);
+    SetProgressPos(ProgressPos);
+    OpProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if ChipSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
+
+  if BytesRead <> ChipSize then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
+end;
+
+procedure ReadFlash95(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal);
+var
+  ChunkSize: Word;
+  BytesRead: integer;
+  DataChunk: array[0..2047] of byte;
+  Address: cardinal;
+begin
+  if (StartAddress >= ChipSize) or (ChipSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  ChunkSize := SizeOf(DataChunk);
+  if ChunkSize > ChipSize then ChunkSize := ChipSize;
+
+  LogPrint(STR_READING_FLASH);
+  BytesRead := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+
+  RomStream.Clear;
+
+  while Address < ChipSize do
+  begin
+    if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
+
+    BytesRead := BytesRead + UsbAsp95_Read(ChipSize, Address, datachunk, ChunkSize);
+    RomStream.WriteBuffer(datachunk, chunksize);
+    Inc(Address, ChunkSize);
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if BytesRead <> ChipSize then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure ReadFlash45(var RomStream: TMemoryStream; StartAddress, PageSize, ChipSize: cardinal);
+var
+  ChunkSize: Word;
+  BytesRead: integer;
+  DataChunk: array[0..2047] of byte;
+  Address: cardinal;
+begin
+  if (StartAddress >= ChipSize) or (ChipSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  ChunkSize := PageSize;
+  if ChunkSize > ChipSize then ChunkSize := ChipSize;
+
+  LogPrint(STR_READING_FLASH);
+  BytesRead := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+
+  RomStream.Clear;
+
+  while Address < ChipSize div ChunkSize do
+  begin
+    if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
+
+    BytesRead := BytesRead + UsbAsp45_Read(Address, datachunk, ChunkSize);
+    RomStream.WriteBuffer(datachunk, chunksize);
+    Inc(Address, 1);
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if BytesRead <> ChipSize then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure ReadFlashKB(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal);
+var
+  ChunkSize: byte;
+  BytesRead: integer;
+  DataChunk: byte;
+  Address: cardinal;
+begin
+  if (StartAddress >= ChipSize) or (ChipSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  ChunkSize := SizeOf(DataChunk);
+  if ChunkSize > ChipSize then ChunkSize := ChipSize;
+
+  LogPrint(STR_READING_FLASH);
+  BytesRead := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+
+  UsbAspMulti_EnableEDI();
+
+  RomStream.Clear;
+
+  while Address < ChipSize do
+  begin
+    if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
+
+    BytesRead := BytesRead + UsbAspMulti_Read(Address, datachunk);
+    RomStream.WriteBuffer(datachunk, chunksize);
+    Inc(Address, ChunkSize);
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if BytesRead <> ChipSize then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+
+procedure VerifyFlash25(var RomStream: TMemoryStream; StartAddress, DataSize: cardinal);
+const
+  FLASH_SIZE_128MBIT = 16777216;
+var
+  ChunkSize: Word;
+  BytesRead: integer;
+  DataChunk: array[0..16786] of byte;
+  DataChunkFile: array[0..16786] of byte;
+  Address: cardinal;
+  ProgressPos: integer;
+
+  //Тело операции. Выполняется в рабочем потоке, если фоновый режим включен
+  //Счетчик цикла обязан быть локальным: FPC не разрешает использовать
+  //переменную внешней процедуры как счетчик for
+  procedure DoWork;
+  var
+    i: integer;
+  begin
+  if (DataSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  if ASProgrammer.Current_HW = CHW_FT232H then
+    ChunkSize := SizeOf(DataChunk)
+  else
+    ChunkSize := 2048;
+
+  if ChunkSize > DataSize then ChunkSize := DataSize;
+
+  LogPrint(STR_VERIFY);
+  BytesRead := 0;
+  Address := StartAddress;
+  SetProgressMax(DataSize div ChunkSize);
+  SetProgressPos(0);
+  ProgressPos := 0;
+
+  if DataSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
+
+  while (Address-StartAddress) < DataSize do
+  begin
+    if ChunkSize > (DataSize - (Address-StartAddress)) then ChunkSize := DataSize - (Address-StartAddress);
+
+    if DataSize > FLASH_SIZE_128MBIT then
+        BytesRead := BytesRead + UsbAsp25_Read32bitAddr($03, Address, datachunk, ChunkSize)
+      else
+        BytesRead := BytesRead + UsbAsp25_Read($03, Address, datachunk, ChunkSize);
+
+    RomStream.ReadBuffer(DataChunkFile, ChunkSize);
+
+    for i := 0 to ChunkSize -1 do
+    if DataChunk[i] <> DataChunkFile[i] then
+    begin
+      LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
+      SetProgressPos(0);
+      Exit;
+    end;
+
+    Inc(Address, ChunkSize);
+
+    Inc(ProgressPos);
+    SetProgressPos(ProgressPos);
+    OpProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if DataSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
+
+  if (BytesRead <> DataSize) then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
+end;
+
+procedure VerifyFlash95(var RomStream: TMemoryStream; StartAddress, DataSize, ChipSize: cardinal);
+var
+  ChunkSize: Word;
+  BytesRead, i: integer;
+  DataChunk: array[0..2047] of byte;
+  DataChunkFile: array[0..2047] of byte;
+  Address: cardinal;
+begin
+  if (DataSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  ChunkSize := SizeOf(DataChunk);
+  if ChunkSize > DataSize then ChunkSize := DataSize;
+
+  LogPrint(STR_VERIFY);
+  BytesRead := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := DataSize div ChunkSize;
+
+  while (Address-StartAddress) < DataSize do
+  begin
+    if ChunkSize > (DataSize - (Address-StartAddress)) then ChunkSize := DataSize - (Address-StartAddress);
+
+    BytesRead := BytesRead + UsbAsp95_Read(ChipSize, Address, datachunk, ChunkSize);
+    RomStream.ReadBuffer(DataChunkFile, ChunkSize);
+
+    for i := 0 to ChunkSize -1 do
+    if DataChunk[i] <> DataChunkFile[i] then
+    begin
+      LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
+      MainForm.ProgressBar.Position := 0;
+      Exit;
+    end;
+
+    Inc(Address, ChunkSize);
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if (BytesRead <> DataSize) then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure VerifyFlash45(var RomStream: TMemoryStream; StartAddress, PageSize, ChipSize: cardinal);
+var
+  ChunkSize: Word;
+  BytesRead, i: integer;
+  DataChunk: array[0..2047] of byte;
+  DataChunkFile: array[0..2047] of byte;
+  PageAddress: cardinal;
+begin
+  if (StartAddress >= ChipSize) or (ChipSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  ChunkSize := PageSize;
+  if ChunkSize > ChipSize then ChunkSize := ChipSize;
+
+  LogPrint(STR_VERIFY);
+  BytesRead := 0;
+  PageAddress := StartAddress;
+  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+
+  while PageAddress < ChipSize div ChunkSize do
+  begin
+    //if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
+
+    BytesRead := BytesRead + UsbAsp45_Read(PageAddress, datachunk, ChunkSize);
+    RomStream.ReadBuffer(DataChunkFile, ChunkSize);
+
+    for i := 0 to ChunkSize -1 do
+    if DataChunk[i] <> DataChunkFile[i] then
+    begin
+      LogPrint(STR_VERIFY_ERROR+IntToHex((PageAddress*ChunkSize)+i, 8));
+      MainForm.ProgressBar.Position := 0;
+      Exit;
+    end;
+
+    Inc(PageAddress, 1);
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if (BytesRead <> ChipSize) then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure VerifyFlashMW(var RomStream: TMemoryStream; AddrBitLen: byte; StartAddress, ChipSize: cardinal);
+var
+  ChunkSize: Word;
+  BytesRead, i: integer;
+  DataChunk: array[0..2047] of byte;
+  DataChunkFile: array[0..2047] of byte;
+  Address: cardinal;
+begin
+  if (StartAddress >= ChipSize) or (ChipSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  ChunkSize := 2;
+  if ChunkSize > ChipSize then ChunkSize := ChipSize;
+
+  LogPrint(STR_VERIFY);
+  BytesRead := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+
+  while Address < ChipSize div 2 do
+  begin
+    BytesRead := BytesRead + UsbAspMW_Read(AddrBitLen, Address, datachunk, ChunkSize);
+    RomStream.ReadBuffer(DataChunkFile, ChunkSize);
+
+    for i := 0 to ChunkSize -1 do
+    if DataChunk[i] <> DataChunkFile[i] then
+    begin
+      LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
+      MainForm.ProgressBar.Position := 0;
+      Exit;
+    end;
+
+    Inc(Address, ChunkSize div 2);
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 2;
+    Application.ProcessMessages;
+    if UserCancel then Break;
+  end;
+
+  if (BytesRead <> ChipSize) then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure VerifyFlashKB(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal);
+var
+  ChunkSize: byte;
+  BytesRead: integer;
+  DataChunk: byte;
+  DataChunkFile: byte;
+  Address: cardinal;
+begin
+  if (StartAddress >= ChipSize) or (ChipSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  ChunkSize := SizeOf(DataChunk);
+  if ChunkSize > ChipSize then ChunkSize := ChipSize;
+
+  LogPrint(STR_VERIFY);
+  BytesRead := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+
+  UsbAspMulti_EnableEDI();
+  UsbAspMulti_WriteReg($FEAD, $08); //en flash
+
+  //RomStream.Clear;
+
+  while Address < ChipSize do
+  begin
+    if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
+
+    BytesRead := BytesRead + UsbAspMulti_Read(Address, datachunk);
+    RomStream.ReadBuffer(DataChunkFile, ChunkSize);
+
+    if DataChunk <> DataChunkFile then
+    begin
+      LogPrint(STR_VERIFY_ERROR+IntToHex(Address, 8));
+      MainForm.ProgressBar.Position := 0;
+      Exit;
+    end;
+
+    Inc(Address, ChunkSize);
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  if BytesRead <> ChipSize then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure ReadFlashI2C(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal; ChunkSize: Word; DevAddr: byte);
+var
+  BytesRead: integer;
+  DataChunk: array[0..255] of byte;
+  Address: cardinal;
+begin
+  if ChipSize = 0 then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  if ChunkSize > SizeOf(DataChunk) then ChunkSize := SizeOf(DataChunk);
+  if ChunkSize < 1 then ChunkSize := 1;
+  if ChunkSize > ChipSize then ChunkSize := ChipSize;
+
+  LogPrint(STR_READING_FLASH);
+  BytesRead := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+
+  RomStream.Clear;
+
+  while Address < ChipSize do
+  begin
+    if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
+
+    BytesRead := BytesRead + UsbAspI2C_Read(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, ChunkSize);
+    RomStream.WriteBuffer(DataChunk, ChunkSize);
+    Inc(Address, ChunkSize);
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+    if UserCancel then Break;
+  end;
+
+  if BytesRead <> ChipSize then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure WriteFlashI2C(var RomStream: TMemoryStream; StartAddress, WriteSize: cardinal; PageSize: word; DevAddr: byte);
+var
+  DataChunk: array[0..2047] of byte;
+  Address, BytesWrite: cardinal;
+  PageSizeTemp: word;
+begin
+  if {(StartAddress >= WriteSize) or} (WriteSize = 0) {or (PageSize > WriteSize)} then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  PageSizeTemp := PageSize;
+  LogPrint(STR_WRITING_FLASH);
+  BytesWrite := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := WriteSize div PageSize;
+
+  while (Address-StartAddress) < WriteSize do
+  begin
+    //Determines first page buffer size to prevent buffer "rolls over" on address boundary
+    if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 1) then
+       PageSize := (StrToInt(MainForm.ComboChipSize.Text) - StartAddress) mod PageSize else
+           PageSize := PageSizeTemp;
+
+    if (WriteSize - (Address-StartAddress)) < PageSize then PageSize := (WriteSize - (Address-StartAddress));
+
+    RomStream.ReadBuffer(DataChunk, PageSize);
+    BytesWrite := BytesWrite + UsbAspI2C_Write(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, PageSize);
+    Inc(Address, PageSize);
+
+    while UsbAspI2C_BUSY(DevAddr) do
+    begin
+      Application.ProcessMessages;
+      if UserCancel then Exit;
+    end; 
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+    if UserCancel then Break;
+  end;
+
+  if BytesWrite <> WriteSize then
+    LogPrint(STR_WRONG_BYTES_WRITE)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure EraseFlashI2C(StartAddress, WriteSize: cardinal; PageSize: word; DevAddr: byte);
+var
+  DataChunk: array[0..2047] of byte;
+  Address, BytesWrite: cardinal;
+begin
+  if (StartAddress >= WriteSize) or (WriteSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  LogPrint(STR_ERASING_FLASH);
+  BytesWrite := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := WriteSize div PageSize;
+
+  while Address < WriteSize do
+  begin
+    if (WriteSize - Address) < PageSize then PageSize := (WriteSize - Address);
+    FillByte(DataChunk, PageSize, $FF);
+    BytesWrite := BytesWrite + UsbAspI2C_Write(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, PageSize);
+    Inc(Address, PageSize);
+
+    while UsbAspI2C_BUSY(DevAddr) do
+    begin
+      Application.ProcessMessages;
+      if UserCancel then Exit;
+    end; 
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+    if UserCancel then Break;
+  end;
+
+  if BytesWrite <> WriteSize then
+    LogPrint(STR_WRONG_BYTES_WRITE)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure VerifyFlashI2C(var RomStream: TMemoryStream; StartAddress, DataSize: cardinal; ChunkSize: Word; DevAddr: byte);
+var
+  BytesRead, i: integer;
+  DataChunk: array[0..2047] of byte;
+  DataChunkFile: array[0..2047] of byte;
+  Address: cardinal;
+begin
+  if (DataSize = 0) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    exit;
+  end;
+
+  if ChunkSize > SizeOf(DataChunk) then ChunkSize := SizeOf(DataChunk);
+  if ChunkSize < 1 then ChunkSize := 1;
+  if ChunkSize > DataSize then ChunkSize := DataSize;
+
+  LogPrint(STR_VERIFY);
+  BytesRead := 0;
+  Address := StartAddress;
+  MainForm.ProgressBar.Max := DataSize div ChunkSize;
+
+  while (Address-StartAddress) < DataSize do
+  begin
+    if ChunkSize > (DataSize - (Address - StartAddress)) then ChunkSize := DataSize -(Address - StartAddress) ;
+
+    BytesRead := BytesRead + UsbAspI2C_Read(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, ChunkSize);
+    RomStream.ReadBuffer(DataChunkFile, ChunkSize);
+
+    for i := 0 to ChunkSize -1 do
+    if DataChunk[i] <> DataChunkFile[i] then
+    begin
+      LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
+      MainForm.ProgressBar.Position := 0;
+      Exit;
+    end;
+
+    Inc(Address, ChunkSize);
+
+    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    Application.ProcessMessages;
+    if UserCancel then Break;
+  end;
+
+  if (BytesRead <> DataSize) then
+    LogPrint(STR_WRONG_BYTES_READ)
+  else
+    LogPrint(STR_DONE);
+
+  MainForm.ProgressBar.Position := 0;
+end;
+
+procedure SelectHW(programmer: THardwareList);
+begin
+  if programmer = CHW_USBASP then
+  begin
+    MainForm.MenuSPIClock.Visible:= true;
+    MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuAVRISPSPIClock.Visible:= false;
+    MainForm.MenuArduinoSPIClock.Visible:= false;
+    MainForm.MenuFT232SPIClock.Visible:= false;
+    MainForm.MenuMicrowire.Enabled:= true;
+    AsProgrammer.Current_HW := CHW_USBASP;
+  end;
+
+  if programmer = CHW_CH341 then
+  begin
+    MainForm.MenuSPIClock.Visible:= false;
+    MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuAVRISPSPIClock.Visible:= false;
+    MainForm.MenuArduinoSPIClock.Visible:= false;
+    MainForm.MenuFT232SPIClock.Visible:= false;
+    MainForm.MenuMicrowire.Enabled:= false;
+    AsProgrammer.Current_HW := CHW_CH341;
+  end;
+
+  if programmer = CHW_CH347 then
+  begin
+    MainForm.MenuCH347SPIClock.Visible:= true;
+    MainForm.MenuSPIClock.Visible:= false;
+    MainForm.MenuAVRISPSPIClock.Visible:= false;
+    MainForm.MenuArduinoSPIClock.Visible:= false;
+    MainForm.MenuFT232SPIClock.Visible:= false;
+    MainForm.MenuMicrowire.Enabled:= false;
+    AsProgrammer.Current_HW := CHW_CH347;
+  end;
+
+  if programmer = CHW_AVRISP then
+  begin
+    MainForm.MenuSPIClock.Visible:= false;
+    MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuAVRISPSPIClock.Visible:= true;
+    MainForm.MenuArduinoSPIClock.Visible:= false;
+    MainForm.MenuFT232SPIClock.Visible:= false;
+    MainForm.MenuMicrowire.Enabled:= false;
+    AsProgrammer.Current_HW := CHW_AVRISP;
+  end;
+
+  if programmer = CHW_ARDUINO then
+  begin
+    MainForm.MenuSPIClock.Visible:= false;
+    MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuAVRISPSPIClock.Visible:= false;
+    MainForm.MenuArduinoSPIClock.Visible:= true;
+    MainForm.MenuFT232SPIClock.Visible:= false;
+    MainForm.MenuMicrowire.Enabled:= false;
+    AsProgrammer.Current_HW := CHW_ARDUINO;
+  end;
+
+  if programmer = CHW_BUZZPIRAT then
+  begin
+    MainForm.MenuSPIClock.Visible:= false;
+    MainForm.MenuAVRISPSPIClock.Visible:= false;
+    MainForm.MenuArduinoSPIClock.Visible:= false;
+    MainForm.MenuFT232SPIClock.Visible:= false;
+    MainForm.MenuMicrowire.Enabled:= false;
+    AsProgrammer.Current_HW := CHW_BUZZPIRAT;
+  end;
+
+  if programmer = CHW_FT232H then
+  begin
+    MainForm.MenuFT232SPIClock.Visible:= true;
+    MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuSPIClock.Visible:= false;
+    MainForm.MenuAVRISPSPIClock.Visible:= false;
+    MainForm.MenuArduinoSPIClock.Visible:= false;
+    MainForm.MenuMicrowire.Enabled:= false;
+    AsProgrammer.Current_HW := CHW_FT232H;
+  end;
+
+end;
+
+procedure LockControl;
+begin
+  //Снимаем состояние интерфейса до старта операции: рабочий поток читает
+  //настройки из OpUI, а не из элементов управления
+  CaptureUIState;
+  OperationRunning := True;
+
+  MainForm.ButtonRead.Enabled := False;
+  MainForm.ButtonWrite.Enabled := False;
+  MainForm.ButtonVerify.Enabled := False;
+  MainForm.ButtonReadID.Enabled := False;
+  MainForm.ButtonBlock.Enabled := False;
+  MainForm.ButtonErase.Enabled := False;
+  MainForm.ButtonOpenHex.Enabled := False;
+  MainForm.ButtonSaveHex.Enabled := False;
+
+  MainForm.GroupChipSettings.Enabled := false;
+  MainForm.MPHexEditorEx.Enabled := false;
+end;
+
+procedure UnlockControl;
+begin
+  OperationRunning := False;
+
+  MainForm.MPHexEditorEx.Enabled := true;
+  MainForm.GroupChipSettings.Enabled := true;
+  MainForm.ButtonRead.Enabled := True;
+  MainForm.ButtonWrite.Enabled := True;
+  MainForm.ButtonVerify.Enabled := True;
+  MainForm.ButtonOpenHex.Enabled := True;
+  MainForm.ButtonSaveHex.Enabled := True;
+  MainForm.ButtonErase.Enabled := True;
+
+  if MainForm.RadioSPI.Checked then
+  begin
+    MainForm.ButtonReadID.Enabled := True;
+    if MainForm.ComboSPICMD.ItemIndex = SPI_CMD_KB then
+      MainForm.ButtonBlock.Enabled := False
+    else
+      MainForm.ButtonBlock.Enabled := True;
+  end;
+end;
+
+procedure TMainForm.ChipClick(Sender: TObject);
+begin
+  if Sender is TMenuItem then
+    findchip.SelectChip(chiplistfile, TMenuItem(Sender).Caption);
+end;
+
+procedure TMainForm.MPHexEditorExChange(Sender: TObject);
+begin
+  StatusBar.Panels.Items[0].Text := STR_SIZE+IntToStr(MPHexEditorEx.DataSize);
+  if MPHexEditorEx.Modified then
+    StatusBar.Panels.Items[1].Text := STR_CHANGED
+  else
+    StatusBar.Panels.Items[1].Text := '';
+end;
+
+procedure TMainForm.ComboItem1Click(Sender: TObject);
+var
+  CheckTemp: Boolean;
+begin
+  if MessageDlg('AsProgrammer', STR_COMBO_WARN, mtConfirmation, [mbYes, mbNo], 0)
+    <> mrYes then Exit;
+
+  if ButtonBlock.Enabled then
+    ButtonBlockClick(Sender);
+  if ButtonErase.Enabled then
+    if ComboSPICMD.ItemIndex <> SPI_CMD_45 then  //Сами стирают страницу
+      ButtonEraseClick(Sender);
+
+  CheckTemp := MenuAutoCheck.Checked;
+  MenuAutoCheck.Checked := True;
+
+  ButtonWriteClick(Sender);
+
+  MenuAutoCheck.Checked := CheckTemp;
+end;
+
+procedure TMainForm.MenuArduinoCOMPortClick(Sender: TObject);
+begin
+  Arduino_COMPort := InputBox('Arduino COMPort','',Arduino_COMPort);
+  MainForm.MenuArduinoCOMPort.Caption := 'Arduino COMPort: '+Arduino_COMPort;
+end;
+
+procedure TMainForm.MenuBuzzpiratCOMPortClick(Sender: TObject);
+begin
+  Buzzpirat_COMPort := InputBox('Buzzpirat / Buspirate COMPort','',Buzzpirat_COMPort);
+  MainForm.MenuBuzzpiratCOMPort.Caption := 'Buzzpirat / Buspirate COMPort: '+Buzzpirat_COMPort;
+end;
+
+procedure TMainForm.MenuCopyToClipClick(Sender: TObject);
+begin
+    MainForm.MPHexEditorEx.CBCopy;
+end;
+
+procedure TMainForm.MenuFindChipClick(Sender: TObject);
+begin
+  ChipSearchForm.EditSearch.Text:= '';
+  ChipSearchForm.ListBoxChips.Items.Clear;
+  ChipSearchForm.Show;
+  ChipSearchForm.EditSearch.SetFocus;
+end;
+
+procedure TMainForm.MenuFindClick(Sender: TObject);
+begin
+  Search.SearchForm.Show;
+end;
+
+procedure TMainForm.MenuGotoOffsetClick(Sender: TObject);
+var
+  s : string;
+  addr: integer;
+begin
+  s := InputBox(STR_GOTO_ADDR,'','');
+  s := Trim(s);
+  if IsNumber('$'+s)  then
+  begin
+    addr := StrToInt('$' + s);
+    MainForm.MPHexEditorEx.SelStart := addr;
+    MainForm.MPHexEditorEx.SelEnd := addr;
+  end;
+end;
+
+procedure TMainForm.MenuHWCH341AClick(Sender: TObject);
+begin
+  SelectHW(CHW_CH341);
+end;
+
+procedure TMainForm.MenuHWCH347Click(Sender: TObject);
+begin
+  SelectHW(CHW_CH347);
+end;
+
+procedure TMainForm.MenuHWFT232HClick(Sender: TObject);
+begin
+  SelectHW(CHW_FT232H);
+end;
+
+procedure TMainForm.MenuHWUSBASPClick(Sender: TObject);
+begin
+  SelectHW(CHW_USBASP);
+end;
+
+procedure TMainForm.MenuHWAVRISPClick(Sender: TObject);
+begin
+  SelectHW(CHW_AVRISP);
+end;
+
+procedure TMainForm.MenuHWARDUINOClick(Sender: TObject);
+begin
+  SelectHW(CHW_ARDUINO);
+end;
+
+procedure TMainForm.MenuHWBUZZPIRATClick(Sender: TObject);
+begin
+  SelectHW(CHW_BUZZPIRAT);
+end;
+
+procedure TMainForm.MenuItemBenchmarkClick(Sender: TObject);
+var
+  buffer: array[0..2047] of byte;
+  i, cycles: integer;
+  t: TDateTime;
+  timeval: integer;
+  ms, sec, d: word;
+begin
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then exit;
+  EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+  LockControl();
+
+  if (AsProgrammer.Current_HW = CHW_CH341) or (AsProgrammer.Current_HW = CHW_AVRISP) or (AsProgrammer.Current_HW = CHW_CH347)
+    or (AsProgrammer.Current_HW = CHW_FT232H) then
+    cycles := 256
+  else
+    cycles := 32;
+
+  LogPrint('Benchmark read '+ IntToStr(SizeOf(buffer))+' bytes * '+ IntToStr(cycles) +' cycles');
+  Application.ProcessMessages();
+  TimeCounter := Time();
+
+  for i:=1 to cycles do
+  begin
+    UsbAsp25_Read(0, 0, buffer, sizeof(buffer));
+    Application.ProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  t :=  Time() - TimeCounter;
+  DecodeDateTime(t, d, d, d, d, d, sec, ms);
+
+  timeval := (sec * 1000) + ms;
+  if timeval = 0 then timeval := 1;
+
+  LogPrint(STR_TIME + TimeToStr(t)+' '+
+    IntToStr( Trunc(((cycles*sizeof(buffer)) / timeval) * 1000)) +' bytes/s');
+
+  LogPrint('Benchmark write '+ IntToStr(SizeOf(buffer))+' bytes * '+ IntToStr(cycles) +' cycles');
+  Application.ProcessMessages();
+  TimeCounter := Time();
+
+  for i:=1 to cycles do
+  begin
+    UsbAsp25_Write(0, 0, buffer, sizeof(buffer));
+    Application.ProcessMessages;
+
+    if UserCancel then Break;
+  end;
+
+  t :=  Time() - TimeCounter;
+  DecodeDateTime(t, d, d, d, d, d, sec, ms);
+
+  timeval := (sec * 1000) + ms;
+  if timeval = 0 then timeval := 1;
+
+  LogPrint(STR_TIME + TimeToStr(t)+' '+
+    IntToStr( Trunc(((cycles*sizeof(buffer)) / timeval) * 1000)) +' bytes/s');
+
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+
+procedure TMainForm.MenuItemEditSregClick(Sender: TObject);
+begin
+  if MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25 then
+    sregedit.sregeditForm.Show;
+end;
+
+procedure TMainForm.MenuItemLockFlashClick(Sender: TObject);
+var
+  sreg: byte;
+begin
+  try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then exit;
+  sreg:= 0;
+  LockControl();
+  EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+
+  if ComboSPICMD.ItemIndex = SPI_CMD_25 then
+  begin
+    UsbAsp25_ReadSR(sreg); //Читаем регистр
+    LogPrint(STR_OLD_SREG+IntToBin(sreg, 8));
+
+    sreg := %10011100; //
+    UsbAsp25_WREN(); //Включаем разрешение записи
+    UsbAsp25_WriteSR(sreg); //Устанавливаем регистр
+
+    //Пока отлипнет ромка
+    while UsbAsp25_Busy() do
+    begin
+      Application.ProcessMessages;
+      if UserCancel then Exit;
+    end;
+
+    LogPrint(STR_NEW_SREG+IntToBin(sreg, 8));
+  end;
+
+  if ComboSPICMD.ItemIndex = SPI_CMD_95 then
+  begin
+    UsbAsp95_ReadSR(sreg); //Читаем регистр
+    LogPrint(STR_OLD_SREG+IntToBin(sreg, 8));
+
+    sreg := %10011100; //
+    UsbAsp95_WREN(); //Включаем разрешение записи
+    UsbAsp95_WriteSR(sreg); //Устанавливаем регистр
+
+    //Пока отлипнет ромка
+    while UsbAsp25_Busy() do
+    begin
+      Application.ProcessMessages;
+      if UserCancel then Exit;
+    end;
+
+    LogPrint(STR_NEW_SREG+IntToBin(sreg, 8));
+  end;
+
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+
+end;
+
+procedure TMainForm.MenuItemReadSregClick(Sender: TObject);
+var
+  sreg, sreg2, sreg3: byte;
+begin
+  try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then exit;
+  sreg:= 0;
+  LockControl();
+  EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+
+  if ComboSPICMD.ItemIndex = SPI_CMD_25 then
+  begin
+    UsbAsp25_ReadSR(sreg); //Читаем регистр
+    UsbAsp25_ReadSR(sreg2, $35); //Второй байт
+    UsbAsp25_ReadSR(sreg3, $15); //Третий байт
+    LogPrint('Sreg: '+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+'), ')
+                                         +IntToBin(sreg2, 8)+'(0x'+(IntToHex(sreg2, 2)+'), ')
+                                         +IntToBin(sreg3, 8)+'(0x'+(IntToHex(sreg3, 2)+')'));
+  end;
+
+  if ComboSPICMD.ItemIndex = SPI_CMD_95 then
+  begin
+    UsbAsp95_ReadSR(sreg); //Читаем регистр
+    LogPrint('Sreg: '+IntToBin(sreg, 8));
+  end;
+
+  if ComboSPICMD.ItemIndex = SPI_CMD_45 then
+  begin
+    UsbAsp45_ReadSR(sreg); //Читаем регистр
+    LogPrint('Sreg: '+IntToBin(sreg, 8));
+  end;
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+
+end;
+
+procedure TMainForm.RadioI2CChange(Sender: TObject);
+begin
+  Label1.Visible              := True;
+  Label4.Visible              := True;
+  ComboAddrType.Visible       := True;
+  ComboPageSize.Visible       := True;
+  Label5.Visible              := False;
+  LabelSPICMD.Visible         := False;
+  ButtonReadID.Enabled        := False;
+  ButtonBlock.Enabled         := False;
+  ButtonErase.Enabled         := True;
+  ComboMWBitLen.Visible       := False;
+  ComboSPICMD.Visible         := False;
+  Panel_I2C_DevAddr.Visible   := True;
+
+  ComboMWBitLen.Text:= 'MW addr len';
+  ComboAddrType.Text:= '';
+  ComboPageSize.Text:= 'Page size';
+  ComboChipSize.Text:= 'Chip size';
+end;
+
+procedure TMainForm.RadioMwChange(Sender: TObject);
+begin
+  Label1.Visible              := False;
+  ComboPageSize.Visible       := False;
+  ComboAddrType.Visible       := False;
+  ComboSPICMD.Visible         := False;
+  ButtonReadID.Enabled        := False;
+  ButtonBlock.Enabled         := False;
+  Label4.Visible              := False;
+  LabelSPICMD.Visible         := False;
+  Panel_I2C_DevAddr.Visible   := False;
+  Label5.Visible              := True;
+  ButtonErase.Enabled         := True;
+  ComboMWBitLen.Visible       := True;
+
+
+  ComboMWBitLen.Text:= 'MW addr len';
+  ComboAddrType.Text:= '';
+  ComboPageSize.Text:= 'Page size';
+  ComboChipSize.Text:= 'Chip size';
+end;
+
+procedure TMainForm.RadioSPIChange(Sender: TObject);
+var
+  SkipFFLabel: string;
+begin
+  Label1.Visible              := True;
+  LabelSPICMD.Visible         := True;
+  ComboPageSize.Visible       := True;
+  ComboSPICMD.Visible         := True;
+
+  ButtonErase.Enabled         := True;
+  ButtonReadID.Enabled        := True;
+
+  if ComboSPICMD.ItemIndex = SPI_CMD_KB then
+  begin
+    ButtonBlock.Enabled := False;
+
+    SkipFFLabel := MenuSkipFF.Caption;
+    Delete(SkipFFLabel, Length(SkipFFLabel)-1 ,2);
+    MenuSkipFF.Caption := SkipFFLabel + '00';
+  end
+  else
+  begin
+    ButtonBlock.Enabled := True;
+
+    SkipFFLabel := MenuSkipFF.Caption;
+    Delete(SkipFFLabel, Length(SkipFFLabel)-1 ,2);
+    MenuSkipFF.Caption := SkipFFLabel + 'FF'
+  end;
+
+  ComboMWBitLen.Visible       := False;
+  Label4.Visible              := False;
+  Label5.Visible              := False;
+  ComboAddrType.Visible       := False;
+
+  Panel_I2C_DevAddr.Visible  := False;
+
+  ComboMWBitLen.Text:= 'MW addr len';
+  ComboAddrType.Text:= '';
+  ComboPageSize.Text:= 'Page size';
+  ComboChipSize.Text:= 'Chip size';
+end;
+
+procedure TMainForm.ButtonWriteClick(Sender: TObject);
+var
+  PageSize: word;
+  WriteType: byte;
+  I2C_DevAddr: byte;
+  I2C_ChunkSize: Word = 65535;
+begin
+try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then exit;
+  if Sender <> ComboItem1 then
+    if MessageDlg('AsProgrammer', STR_START_WRITE, mtConfirmation, [mbYes, mbNo], 0)
+      <> mrYes then Exit;
+  LockControl();
+
+  if RunScriptFromFile(CurrentICParam.Script, 'write') then Exit;
+
+  LogPrint(TimeToStr(Time()));
+
+  if (not IsNumber(ComboChipSize.Text)) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+
+  if MPHexEditorEx.DataSize > StrToInt(ComboChipSize.Text) - Hex2Dec('$'+StartAddressEdit.Text) then
+  begin
+    LogPrint(STR_WRONG_FILE_SIZE);
+    Exit;
+  end;
+
+  //SPI
+  if RadioSPI.Checked then
+  begin
+    EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+
+    if not VerifyChipID then Exit;
+    if not AutoBackupChip then Exit;
+
+    if ComboSPICMD.ItemIndex <> SPI_CMD_KB then
+      IsLockBitsEnabled;
+    if (not IsNumber(ComboPageSize.Text)) and (UpperCase(ComboPageSize.Text)<>'SSTB') and (UpperCase(ComboPageSize.Text)<>'SSTW') then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+    TimeCounter := Time();
+
+    RomF.Position := 0;
+    MPHexEditorEx.SaveToStream(RomF);
+    RomF.Position := 0;
+
+    ApplySerialToStream(RomF);
+
+    if UpperCase(ComboPageSize.Text)='SSTB' then
+    begin
+      PageSize := 1;
+      WriteType := WT_SSTB;
+    end;
+
+    if UpperCase(ComboPageSize.Text)='SSTW' then
+    begin
+      PageSize := 2;
+      WriteType := WT_SSTW;
+    end;
+
+    if IsNumber(ComboPageSize.Text) then
+    begin
+      PageSize := StrToInt(ComboPageSize.Text);
+      if PageSize < 1 then
+      begin
+        PageSize := 1;
+        ComboPageSize.Text := '1';
+      end;
+      WriteType := WT_PAGE;
+    end;
+
+    if ComboSPICMD.ItemIndex = SPI_CMD_25 then
+      WriteFlash25(RomF, Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize, PageSize, WriteType);
+    if ComboSPICMD.ItemIndex = SPI_CMD_95 then
+      WriteFlash95(RomF, Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize, PageSize, StrToInt(ComboChipSize.Text));
+    if ComboSPICMD.ItemIndex = SPI_CMD_45 then
+      WriteFlash45(RomF, 0, MPHexEditorEx.DataSize, PageSize, WriteType);
+    if ComboSPICMD.ItemIndex = SPI_CMD_KB then
+      WriteFlashKB(RomF, 0, MPHexEditorEx.DataSize, PageSize);
+
+    if (MenuAutoCheck.Checked) and (WriteType <> WT_PAGE) then
+    begin
+      LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+      TimeCounter := Time();
+      RomF.Position :=0;
+      MPHexEditorEx.SaveToStream(RomF);
+      RomF.Position :=0;
+      if ComboSPICMD.ItemIndex <> SPI_CMD_KB then
+        VerifyFlash25(RomF, Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize)
+      else
+        VerifyFlashKB(RomF, 0, MPHexEditorEx.DataSize);
+    end;
+
+  end;
+  //I2C
+  if RadioI2C.Checked then
+  begin
+    if ( (ComboAddrType.ItemIndex < 0) or (not IsNumber(ComboPageSize.Text)) ) then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    EnterProgModeI2C();
+
+    //Адрес микросхемы по чекбоксам
+    I2C_DevAddr := SetI2CDevAddr();
+
+    if CheckBox_I2C_ByteRead.Checked then I2C_ChunkSize := 1;
+
+    if UsbAspI2C_BUSY(I2C_DevAddr) then
+    begin
+      LogPrint(STR_I2C_NO_ANSWER);
+      exit;
+    end;
+    TimeCounter := Time();
+
+    RomF.Position := 0;
+    MPHexEditorEx.SaveToStream(RomF);
+    RomF.Position := 0;
+
+    if StrToInt(ComboPageSize.Text) < 1 then ComboPageSize.Text := '1';
+
+    WriteFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize, StrToInt(ComboPageSize.Text), I2C_DevAddr);
+
+    if MenuAutoCheck.Checked then
+    begin
+      if UsbAspI2C_BUSY(I2C_DevAddr) then
+      begin
+        LogPrint(STR_I2C_NO_ANSWER);
+        exit;
+      end;
+      LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+
+      TimeCounter := Time();
+
+      RomF.Position :=0;
+      MPHexEditorEx.SaveToStream(RomF);
+      RomF.Position :=0;
+      VerifyFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), RomF.Size, I2C_ChunkSize, I2C_DevAddr);
+    end;
+
+  end;
+  //Microwire
+  if RadioMW.Checked then
+  begin
+    if (not IsNumber(ComboMWBitLen.Text)) then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+    TimeCounter := Time();
+
+    RomF.Position := 0;
+    MPHexEditorEx.SaveToStream(RomF);
+    RomF.Position := 0;
+
+    WriteFlashMW(RomF, StrToInt(ComboMWBitLen.Text), 0, MPHexEditorEx.DataSize);
+
+    if MenuAutoCheck.Checked then
+    begin
+      TimeCounter := Time();
+      RomF.Position :=0;
+      MPHexEditorEx.SaveToStream(RomF);
+      RomF.Position :=0;
+      VerifyFlashMW(RomF, StrToInt(ComboMWBitLen.Text), 0, StrToInt(ComboChipSize.Text));
+    end;
+
+  end;
+
+  //Счетчик двигаем только если запись дошла до конца
+  if ProdSettings.SNEnabled and (ButtonCancel.Tag = 0) then
+    ProdSettings.SNValue := ProdSettings.SNValue + ProdSettings.SNStep;
+
+  LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+end;
+
+procedure TMainForm.ButtonVerifyClick(Sender: TObject);
+begin
+  VerifyFlash(false);
+end;
+
+procedure TMainForm.VerifyFlash(BlankCheck: boolean = false);
+var
+  I2C_DevAddr: byte;
+  I2C_ChunkSize: Word = 65535;
+  i: Longword;
+  BlankByte: byte;
+begin
+try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then exit;
+  LockControl();
+
+  if RunScriptFromFile(CurrentICParam.Script, 'verify') then Exit;
+
+  LogPrint(TimeToStr(Time()));
+
+  if not IsNumber(ComboChipSize.Text) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+
+  if (MPHexEditorEx.DataSize > StrToInt(ComboChipSize.Text) - Hex2Dec('$'+StartAddressEdit.Text)) and (not BlankCheck) then
+  begin
+    LogPrint(STR_WRONG_FILE_SIZE);
+    Exit;
+  end;
+
+  //SPI
+  if RadioSPI.Checked then
+  begin
+    EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+    TimeCounter := Time();
+
+    RomF.Clear;
+    if BlankCheck then
+    begin
+      if ComboSPICMD.ItemIndex = SPI_CMD_KB then
+        BlankByte := $00
+      else
+        BlankByte := $FF;
+
+      for i:=1 to StrToInt(ComboChipSize.Text) do
+        RomF.WriteByte(BlankByte);
+    end
+    else
+      MPHexEditorEx.SaveToStream(RomF);
+    RomF.Position :=0;
+
+    if ComboSPICMD.ItemIndex = SPI_CMD_KB then
+      VerifyFlashKB(RomF, 0, RomF.Size);
+
+    if ComboSPICMD.ItemIndex = SPI_CMD_25 then
+      VerifyFlash25(RomF, Hex2Dec('$'+StartAddressEdit.Text), RomF.Size);
+
+    if ComboSPICMD.ItemIndex = SPI_CMD_95 then
+      VerifyFlash95(RomF, Hex2Dec('$'+StartAddressEdit.Text), RomF.Size, StrToInt(ComboChipSize.Text));
+
+    if ComboSPICMD.ItemIndex = SPI_CMD_45 then
+     begin
+      if (not IsNumber(ComboPageSize.Text)) then
+      begin
+        LogPrint(STR_CHECK_SETTINGS);
+        Exit;
+      end;
+      VerifyFlash45(RomF, 0, StrToInt(ComboPageSize.Text), RomF.Size);
+    end;
+
+
+  end;
+  //I2C
+  if RadioI2C.Checked then
+  begin
+    if ComboAddrType.ItemIndex < 0 then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    EnterProgModeI2C();
+
+    //Адрес микросхемы по чекбоксам
+    I2C_DevAddr := SetI2CDevAddr();
+
+    if CheckBox_I2C_ByteRead.Checked then I2C_ChunkSize := 1;
+
+    if UsbAspI2C_BUSY(I2C_DevAddr) then
+    begin
+      LogPrint(STR_I2C_NO_ANSWER);
+      exit;
+    end;
+    TimeCounter := Time();
+
+    RomF.Clear;
+    if BlankCheck then
+    begin
+      for i:=1 to StrToInt(ComboChipSize.Text) do
+        RomF.WriteByte($FF);
+    end
+    else
+      MPHexEditorEx.SaveToStream(RomF);
+    RomF.Position :=0;
+
+    VerifyFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), RomF.Size, I2C_ChunkSize, I2C_DevAddr);
+  end;
+
+  //Microwire
+  if RadioMW.Checked then
+  begin
+    if (not IsNumber(ComboMWBitLen.Text)) then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+    TimeCounter := Time();
+
+    RomF.Clear;
+    if BlankCheck then
+    begin
+      for i:=1 to StrToInt(ComboChipSize.Text) do
+        RomF.WriteByte($FF);
+    end
+    else
+      MPHexEditorEx.SaveToStream(RomF);
+    RomF.Position :=0;
+
+    VerifyFlashMW(RomF, StrToInt(ComboMWBitLen.Text), 0, RomF.Size);
+  end;
+
+  LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+end;
+
+procedure TMainForm.ButtonBlockClick(Sender: TObject);
+var
+  sreg: byte;
+  i: integer;
+  s: string;
+  SLreg: array[0..31] of byte;
+begin
+try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then exit;
+  sreg := 0;
+  LockControl();
+
+  if RunScriptFromFile(CurrentICParam.Script, 'unlock') then Exit;
+
+  EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+
+  if ComboSPICMD.ItemIndex = SPI_CMD_25 then
+  begin
+    UsbAsp25_ReadSR(sreg); //Читаем регистр
+    LogPrint(STR_OLD_SREG+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+')'));
+
+    sreg := 0;
+
+    UsbAsp25_WREN(); //Включаем разрешение записи
+    UsbAsp25_WriteSR(sreg); //Сбрасываем регистр
+
+    //Пока отлипнет ромка
+    while UsbAsp25_Busy() do
+    begin
+      Application.ProcessMessages;
+      if UserCancel then Exit;
+    end;
+
+    UsbAsp25_ReadSR(sreg); //Читаем регистр
+    LogPrint(STR_NEW_SREG+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+')'));
+  end;
+
+  if ComboSPICMD.ItemIndex = SPI_CMD_95 then
+  begin
+    UsbAsp95_ReadSR(sreg); //Читаем регистр
+    LogPrint(STR_OLD_SREG+IntToBin(sreg, 8));
+
+    sreg := 0; //
+    UsbAsp95_WREN(); //Включаем разрешение записи
+    UsbAsp95_WriteSR(sreg); //Сбрасываем регистр
+
+    //Пока отлипнет ромка
+    while UsbAsp25_Busy() do
+    begin
+      Application.ProcessMessages;
+      if UserCancel then Exit;
+    end;
+
+    UsbAsp95_ReadSR(sreg); //Читаем регистр
+    LogPrint(STR_NEW_SREG+IntToBin(sreg, 8));
+  end;
+
+  if ComboSPICMD.ItemIndex = SPI_CMD_45 then
+  begin
+    UsbAsp45_DisableSP();
+    UsbAsp45_ReadSR(sreg); //Читаем регистр
+    LogPrint('Sreg: '+IntToBin(sreg, 8));
+
+    UsbAsp45_ReadSectorLockdown(SLreg); //Читаем Lockdown регистр
+
+    s := '';
+    for i:=0 to 31 do
+    begin
+      s := s + IntToHex(SLreg[i], 2);
+    end;
+    LogPrint('Secktor Lockdown регистр: 0x'+s);
+    if UsbAsp45_isPagePowerOfTwo() then LogPrint(STR_45PAGE_POWEROF2)
+      else LogPrint(STR_45PAGE_STD);
+
+  end;
+
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+
+end;
+
+procedure TMainForm.ButtonReadIDClick(Sender: TObject);
+var
+  XMLfile: TXMLDocument;
+  ID: MEMORY_ID;
+  IDstr9FH: string[6];
+  IDstr90H: string[4];
+  IDstrABH: string[6];
+  IDstr15H: string[4];
+begin
+  try
+    if not OpenDevice() then exit;
+    LockControl();
+
+    FillByte(ID.ID9FH, 3, $FF);
+    FillByte(ID.ID90H, 2, $FF);
+    FillByte(ID.IDABH, 1, $FF);
+    FillByte(ID.ID15H, 2, $FF);
+
+    EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+
+    if ComboSPICMD.ItemIndex = SPI_CMD_KB then
+    begin
+      UsbAspMulti_EnableEDI();
+      UsbAspMulti_EnableEDI();
+      UsbAspMulti_ReadReg($FF00, ID.IDABH); //read EC hardware version
+      LogPrint('KB9012 EC Hardware version: '+IntToHex(ID.IDABH, 2));
+      UsbAspMulti_ReadReg($FF24, ID.IDABH); //read EDI version
+      LogPrint('KB9012 EDI version: '+IntToHex(ID.IDABH, 2));
+      ExitProgMode25;
+      Exit;
+    end;
+
+    UsbAsp25_ReadID(ID);
+    ExitProgMode25;
+
+    AsProgrammer.Programmer.DevClose;
+
+    IDstr9FH := Upcase(IntToHex(ID.ID9FH[0], 2)+IntToHex(ID.ID9FH[1], 2)+IntToHex(ID.ID9FH[2], 2));
+    IDstr90H := Upcase(IntToHex(ID.ID90H[0], 2)+IntToHex(ID.ID90H[1], 2));
+    IDstrABH := Upcase(IntToHex(ID.IDABH, 2));
+    IDstr15H := Upcase(IntToHex(ID.ID15H[0], 2)+IntToHex(ID.ID15H[1], 2));
+
+    if FileExists('chiplist.xml') then
+    begin
+
+      try
+        ReadXMLFile(XMLfile, 'chiplist.xml');
+      except
+        on E: EXMLReadError do
+        begin
+          ShowMessage(E.Message);
+        end;
+      end;
+
+      ChipSearchForm.ListBoxChips.Clear;
+      ChipSearchForm.EditSearch.Text:= '';
+
+      FindChip.FindChip(XMLfile, '', IDstr9FH);
+      if ChipSearchForm.ListBoxChips.Items.Capacity = 0 then FindChip.FindChip(XMLfile, '', IDstr90H);
+      if ChipSearchForm.ListBoxChips.Items.Capacity = 0 then FindChip.FindChip(XMLfile, '', IDstrABH);
+      if ChipSearchForm.ListBoxChips.Items.Capacity = 0 then FindChip.FindChip(XMLfile, '', IDstr15H);
+
+      XMLfile.Free;
+    end;
+
+      if ChipSearchForm.ListBoxChips.Items.Capacity > 0 then
+      begin
+        ChipSearchForm.Show;
+        LogPrint('ID(9F): '+ IDstr9FH);
+        LogPrint('ID(90): '+ IDstr90H);
+        LogPrint('ID(AB): '+ IDstrABH);
+        LogPrint('ID(15): '+ IDstr15H);
+      end
+      else
+      begin
+        LogPrint('ID(9F): '+ IDstr9FH +STR_ID_UNKNOWN);
+        LogPrint('ID(90): '+ IDstr90H +STR_ID_UNKNOWN);
+        LogPrint('ID(AB): '+ IDstrABH +STR_ID_UNKNOWN);
+        LogPrint('ID(15): '+ IDstr15H +STR_ID_UNKNOWN);
+      end;
+
+  finally
+    UnlockControl();
+  end;
+
+end;
+
+procedure TMainForm.ButtonOpenHexClick(Sender: TObject);
+var
+  Stream: TMemoryStream;
+  ChipSize: cardinal;
+  BlankByte: byte;
+  ErrMsg: string;
+begin
+  if not OpenDialog.Execute then Exit;
+
+  //Двоичный файл грузим как раньше, без промежуточного буфера
+  if DetectFormat(OpenDialog.FileName) = ffBinary then
+  begin
+    MPHexEditorEx.LoadFromFile(OpenDialog.FileName);
+    StatusBar.Panels.Items[2].Text := OpenDialog.FileName;
+    Exit;
+  end;
+
+  //Текстовые форматы разворачиваются в образ на весь размер микросхемы,
+  //пропуски остаются стертыми
+  ChipSize := 0;
+  if IsNumber(ComboChipSize.Text) then ChipSize := StrToInt(ComboChipSize.Text);
+
+  if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_KB) then
+    BlankByte := $00
+  else
+    BlankByte := $FF;
+
+  Stream := TMemoryStream.Create;
+  try
+    if not LoadFirmware(OpenDialog.FileName, Stream, ChipSize, BlankByte, ErrMsg) then
+    begin
+      LogPrint(ErrMsg);
+      Exit;
+    end;
+
+    if ErrMsg <> '' then LogPrint(ErrMsg);   //предупреждение, но данные загружены
+
+    Stream.Position := 0;
+    MPHexEditorEx.LoadFromStream(Stream);
+    StatusBar.Panels.Items[2].Text := OpenDialog.FileName;
+    LogPrint(STR_FILE_LOADED + IntToStr(Stream.Size) + ' bytes');
+  finally
+    Stream.Free;
+  end;
+end;
+
+procedure TMainForm.ButtonSaveHexClick(Sender: TObject);
+var
+  Stream: TMemoryStream;
+  Fmt: TFwFormat;
+  FileName, ErrMsg: string;
+begin
+  if not SaveDialog.Execute then Exit;
+
+  FileName := SaveDialog.FileName;
+  Fmt := DetectFormat(FileName);
+
+  //Формат берем из фильтра, если пользователь не дописал расширение
+  if (Fmt = ffBinary) and (ExtractFileExt(FileName) = '') then
+    case SaveDialog.FilterIndex of
+      2: begin Fmt := ffIntelHex; FileName := FileName + '.hex'; end;
+      3: begin Fmt := ffSRecord;  FileName := FileName + '.s19'; end;
+    else
+      FileName := FileName + '.bin';
+    end;
+
+  if Fmt = ffBinary then
+  begin
+    MPHexEditorEx.SaveToFile(FileName);
+    StatusBar.Panels.Items[2].Text := FileName;
+    Exit;
+  end;
+
+  Stream := TMemoryStream.Create;
+  try
+    MPHexEditorEx.SaveToStream(Stream);
+
+    if not SaveFirmware(FileName, Stream, Fmt, ErrMsg) then
+    begin
+      LogPrint(ErrMsg);
+      Exit;
+    end;
+
+    StatusBar.Panels.Items[2].Text := FileName;
+    LogPrint(STR_FILE_SAVED + FileName);
+  finally
+    Stream.Free;
+  end;
+end;
+
+//Сохранение лога в файл
+procedure TMainForm.SaveLogMenuItemClick(Sender: TObject);
+var
+  Dlg: TSaveDialog;
+begin
+  Dlg := TSaveDialog.Create(nil);
+  try
+    Dlg.Filter := 'Text file|*.txt|All files|*.*';
+    Dlg.DefaultExt := 'txt';
+    Dlg.FileName := 'asprogrammer-log.txt';
+    if Dlg.Execute then Log.Lines.SaveToFile(Dlg.FileName);
+  finally
+    Dlg.Free;
+  end;
+end;
+
+//Заполнение всего буфера одним значением
+procedure TMainForm.MenuFillBufferClick(Sender: TObject);
+var
+  s: string;
+  Value: integer;
+  Size: cardinal;
+  Data: array of byte;
+  Stream: TMemoryStream;
+begin
+  if OperationRunning then Exit;
+
+  Size := 0;
+  if IsNumber(ComboChipSize.Text) then Size := StrToInt(ComboChipSize.Text);
+  if Size = 0 then Size := MPHexEditorEx.DataSize;
+
+  if Size = 0 then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+
+  s := Trim(InputBox(STR_FILL_BUFFER, STR_FILL_VALUE_HEX, 'FF'));
+  if s = '' then Exit;
+
+  if not IsNumber('$' + s) then
+  begin
+    LogPrint(STR_SPECIFY_HEX);
+    Exit;
+  end;
+
+  Value := StrToInt('$' + s) and $FF;
+
+  SetLength(Data, Size);
+  FillChar(Data[0], Size, byte(Value));
+
+  Stream := TMemoryStream.Create;
+  try
+    Stream.WriteBuffer(Data[0], Size);
+    Stream.Position := 0;
+    MPHexEditorEx.LoadFromStream(Stream);
+  finally
+    Stream.Free;
+  end;
+
+  LogPrint(STR_FILL_BUFFER + ' 0x' + IntToHex(Value, 2) + ', ' +
+           IntToStr(Size) + ' bytes');
+end;
+
+procedure TMainForm.MenuSaveProjectClick(Sender: TObject);
+var
+  Dlg: TSaveDialog;
+begin
+  if OperationRunning then Exit;
+
+  Dlg := TSaveDialog.Create(nil);
+  try
+    Dlg.Filter := 'AsProgrammer project|*.apxproj|All files|*.*';
+    Dlg.DefaultExt := 'apxproj';
+    Dlg.Options := Dlg.Options + [ofOverwritePrompt];
+    if CurrentICParam.Name <> '' then Dlg.FileName := CurrentICParam.Name + '.apxproj';
+
+    if not Dlg.Execute then Exit;
+
+    if SaveProjectFile(Dlg.FileName) then
+    begin
+      StatusBar.Panels.Items[2].Text := Dlg.FileName;
+      LogPrint(STR_PROJECT_SAVED + Dlg.FileName);
+    end
+    else
+      LogPrint(STR_PROJECT_FAILED);
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TMainForm.MenuOpenProjectClick(Sender: TObject);
+var
+  Dlg: TOpenDialog;
+  ErrMsg: string;
+begin
+  if OperationRunning then Exit;
+
+  Dlg := TOpenDialog.Create(nil);
+  try
+    Dlg.Filter := 'AsProgrammer project|*.apxproj|All files|*.*';
+    Dlg.Options := Dlg.Options + [ofFileMustExist];
+
+    if not Dlg.Execute then Exit;
+
+    if LoadProjectFile(Dlg.FileName, ErrMsg) then
+    begin
+      StatusBar.Panels.Items[2].Text := Dlg.FileName;
+      LogPrint(STR_PROJECT_LOADED + Dlg.FileName);
+    end
+    else
+      LogPrint(STR_PROJECT_FAILED + ' ' + ErrMsg);
+  finally
+    Dlg.Free;
+  end;
+end;
+
+procedure TMainForm.MenuProdConfigClick(Sender: TObject);
+begin
+  if OperationRunning then Exit;
+  if EditProdSettings(ProdSettings) then
+    LogPrint(STR_PROD_SAVED);
+end;
+
+//Серийное производство: прошиваем микросхемы одну за другой, считая
+//результат. Каждая итерация это снятие защиты, стирание, запись с проверкой
+procedure TMainForm.MenuRunBatchClick(Sender: TObject);
+var
+  Done, Passed, Failed: integer;
+  Reply: integer;
+begin
+  if OperationRunning then Exit;
+
+  if MPHexEditorEx.DataSize = 0 then
+  begin
+    LogPrint(STR_ERASE_RANGE_EMPTY);
+    Exit;
+  end;
+
+  if not ProdSettings.BatchEnabled then
+  begin
+    LogPrint(STR_BATCH_DISABLED);
+    Exit;
+  end;
+
+  Done := 0;
+  Passed := 0;
+  Failed := 0;
+
+  LogPrint(STR_BATCH_START + IntToStr(ProdSettings.BatchTarget));
+
+  while Done < ProdSettings.BatchTarget do
+  begin
+    Reply := MessageDlg('AsProgrammer',
+      Format(STR_BATCH_INSERT, [Done + 1, ProdSettings.BatchTarget]),
+      mtConfirmation, [mbOk, mbCancel], 0);
+
+    if Reply <> mrOk then Break;
+
+    ButtonCancel.Tag := 0;
+
+    if ButtonBlock.Enabled then ButtonBlockClick(ComboItem1);
+    if ButtonCancel.Tag = 0 then ButtonEraseClick(ComboItem1);
+    if ButtonCancel.Tag = 0 then ButtonWriteClick(ComboItem1);
+
+    Inc(Done);
+
+    //Прерывание или ошибка выставляют Tag, отдельного кода возврата нет
+    if ButtonCancel.Tag <> 0 then
+    begin
+      Inc(Failed);
+      LogPrint(Format(STR_BATCH_UNIT_FAIL, [Done]));
+    end
+    else
+    begin
+      Inc(Passed);
+      LogPrint(Format(STR_BATCH_UNIT_OK, [Done]));
+    end;
+  end;
+
+  LogPrint(Format(STR_BATCH_SUMMARY, [Done, Passed, Failed]));
+end;
+
+//Уникальный номер микросхемы и регистры безопасности(OTP).
+//Регистры OTP можно залочить навсегда, поэтому запись сюда закрыта
+//подтверждением, а бит блокировки не трогается вообще
+procedure TMainForm.MenuSecRegClick(Sender: TObject);
+const
+  SecRegAddr: array[0..2] of longword = ($001000, $002000, $003000);
+var
+  UID: array[0..7] of byte;
+  Auth: array[0..48] of byte;
+  Reg: array[0..255] of byte;
+  i, j, k: integer;
+  s: string;
+  Blank: boolean;
+begin
+  if OperationRunning then Exit;
+
+  if (not RadioSPI.Checked) or (ComboSPICMD.ItemIndex <> SPI_CMD_25) then
+  begin
+    LogPrint(STR_SECTOR_SPI25_ONLY);
+    Exit;
+  end;
+
+try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then Exit;
+  LockControl();
+
+  EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
+
+  //Уникальный номер, опкод 4Bh
+  FillByte(UID, SizeOf(UID), $FF);
+  UsbAsp25_ReadUniqueID(UID);
+
+  s := '';
+  for i := 0 to 7 do s := s + IntToHex(UID[i], 2);
+  LogPrint(STR_UNIQUE_ID + s);
+
+  //W74M Authentication Flash: единственная команда семейства, не требующая
+  //подписи HMAC. Все остальные(9Bh) без корневого ключа выполнить нельзя
+  FillByte(Auth, SizeOf(Auth), $FF);
+  UsbAsp25_ReadAuthStatus(Auth, SizeOf(Auth));
+
+  //FF во всех байтах означает, что микросхема команду не поняла
+  Blank := True;
+  for i := 0 to High(Auth) do
+    if Auth[i] <> $FF then
+    begin
+      Blank := False;
+      Break;
+    end;
+
+  if Blank then
+    LogPrint(STR_AUTH_NOT_SUPPORTED)
+  else
+  begin
+    LogPrint(STR_AUTH_STATUS + IntToHex(Auth[0], 2) +
+             ' (bit0 busy=' + IntToStr(Auth[0] and 1) + ')');
+
+    s := '';
+    for i := 13 to 16 do s := s + IntToHex(Auth[i], 2);
+    LogPrint(STR_AUTH_COUNTER + s);
+    LogPrint(STR_AUTH_NEEDS_KEY);
+  end;
+
+  //Три страницы регистров безопасности по 256 байт
+  for i := 0 to 2 do
+  begin
+    FillByte(Reg, SizeOf(Reg), $FF);
+    UsbAsp25_ReadSecReg(SecRegAddr[i], Reg, SizeOf(Reg));
+
+    Blank := True;
+    for j := 0 to 255 do
+      if Reg[j] <> $FF then
+      begin
+        Blank := False;
+        Break;
+      end;
+
+    if Blank then
+      LogPrint(Format(STR_SECREG_BLANK, [i + 1, SecRegAddr[i]]))
+    else
+    begin
+      LogPrint(Format(STR_SECREG_HEADER, [i + 1, SecRegAddr[i]]));
+
+      //Печатаем по 16 байт в строке, как в редакторе
+      for j := 0 to 15 do
+      begin
+        s := '  ' + IntToHex(j * 16, 4) + ': ';
+        for k := 0 to 15 do
+          s := s + IntToHex(Reg[j * 16 + k], 2) + ' ';
+        LogPrint(s);
+      end;
+    end;
+  end;
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+end;
+
+//Перестановка байт в 16-битных словах. Нужно для образов, снятых с шины,
+//у которой порядок байт обратный
+procedure TMainForm.MenuSwapBytesClick(Sender: TObject);
+var
+  Stream: TMemoryStream;
+  Data: array of byte;
+  i, Size: integer;
+  t: byte;
+begin
+  if OperationRunning then Exit;
+
+  Size := MPHexEditorEx.DataSize;
+  if Size < 2 then
+  begin
+    LogPrint(STR_CHECKSUM_EMPTY);
+    Exit;
+  end;
+
+  Stream := TMemoryStream.Create;
+  try
+    MPHexEditorEx.SaveToStream(Stream);
+    Stream.Position := 0;
+    SetLength(Data, Size);
+    Stream.ReadBuffer(Data[0], Size);
+
+    i := 0;
+    while i + 1 < Size do
+    begin
+      t := Data[i];
+      Data[i] := Data[i + 1];
+      Data[i + 1] := t;
+      Inc(i, 2);
+    end;
+
+    Stream.Clear;
+    Stream.WriteBuffer(Data[0], Size);
+    Stream.Position := 0;
+    MPHexEditorEx.LoadFromStream(Stream);
+  finally
+    Stream.Free;
+  end;
+
+  LogPrint(STR_SWAP_DONE + IntToStr(Size div 2));
+end;
+
+//Сравнение буфера с содержимым микросхемы с отчетом по диапазонам,
+//в отличие от проверки, которая останавливается на первом расхождении
+procedure TMainForm.MenuCompareChipClick(Sender: TObject);
+var
+  ChipData, BufStream: TMemoryStream;
+  A, B: array of byte;
+  Size, i: integer;
+  DiffCount, RangeCount: integer;
+  RangeStart: integer;
+  InRange: boolean;
+begin
+  if OperationRunning then Exit;
+
+  if (not RadioSPI.Checked) or (ComboSPICMD.ItemIndex <> SPI_CMD_25) then
+  begin
+    LogPrint(STR_SECTOR_SPI25_ONLY);
+    Exit;
+  end;
+
+  if MPHexEditorEx.DataSize = 0 then
+  begin
+    LogPrint(STR_CHECKSUM_EMPTY);
+    Exit;
+  end;
+
+  ChipData := TMemoryStream.Create;
+  BufStream := TMemoryStream.Create;
+try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then Exit;
+  LockControl();
+
+  if OpUI.ChipSize = 0 then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+
+  Size := MPHexEditorEx.DataSize;
+  if cardinal(Size) > OpUI.ChipSize then Size := OpUI.ChipSize;
+
+  LogPrint(STR_COMPARE_READING);
+  EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
+  TimeCounter := Time();
+
+  ReadFlash25(ChipData, 0, cardinal(Size));
+  if ChipData.Size < Size then Exit;
+
+  MPHexEditorEx.SaveToStream(BufStream);
+
+  SetLength(A, Size);
+  SetLength(B, Size);
+  ChipData.Position := 0;   ChipData.ReadBuffer(A[0], Size);
+  BufStream.Position := 0;  BufStream.ReadBuffer(B[0], Size);
+
+  DiffCount := 0;
+  RangeCount := 0;
+  InRange := False;
+  RangeStart := 0;
+
+  for i := 0 to Size - 1 do
+  begin
+    if A[i] <> B[i] then
+    begin
+      Inc(DiffCount);
+      if not InRange then
+      begin
+        InRange := True;
+        RangeStart := i;
+        Inc(RangeCount);
+        if RangeCount = 1 then LogPrint(STR_COMPARE_RANGES);
+      end;
+    end
+    else
+      if InRange then
+      begin
+        InRange := False;
+        if RangeCount <= 20 then
+          LogPrint('  0x' + IntToHex(RangeStart, 8) + ' - 0x' + IntToHex(i - 1, 8) +
+                   '  (' + IntToStr(i - RangeStart) + ' bytes)');
+      end;
+  end;
+
+  if InRange and (RangeCount <= 20) then
+    LogPrint('  0x' + IntToHex(RangeStart, 8) + ' - 0x' + IntToHex(Size - 1, 8) +
+             '  (' + IntToStr(Size - RangeStart) + ' bytes)');
+
+  if DiffCount = 0 then
+    LogPrint(STR_COMPARE_EQUAL)
+  else
+    LogPrint(STR_COMPARE_DIFF + IntToStr(DiffCount) + ' / ' + IntToStr(Size) +
+             ',  ranges: ' + IntToStr(RangeCount));
+
+  LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+  ChipData.Free;
+  BufStream.Free;
+end;
+end;
+
+procedure TMainForm.ButtonCancelClick(Sender: TObject);
+begin
+  ButtonCancel.Tag:= 1;
+  ScriptEngine.Stop:= true;
+end;
+
+procedure TMainForm.I2C_DevAddrChange(Sender: TObject);
+begin
+  if TToggleBox(Sender).State = cbUnchecked then
+  TToggleBox(Sender).Caption:= '0';
+  if TToggleBox(Sender).State = cbChecked then
+  TToggleBox(Sender).Caption:= '1';
+end;
+
+procedure TMainForm.ScriptsMenuItemClick(Sender: TObject);
+begin
+  ScriptEditForm.Show;
+end;
+
+procedure TMainForm.DebugconsoleMenuItemClick(Sender: TObject);
+begin
+     ExecuteProcess('cmd.exe', '/c start tail -F buzzpirathlp.log', []);
+end;
+
+procedure TMainForm.BzHelpMenuItemClick(Sender: TObject);
+begin
+     ExecuteProcess('cmd.exe', '/c start https://github.com/therealdreg/asprogrammer-dregmod', []);
+end;
+
+procedure TMainForm.CreditsMenuItemClick(Sender: TObject);
+var
+  credits: string;
+begin
+  credits := 'nofeletru https://github.com/nofeletru, Dreg @therealdreg https://github.com/therealdreg';
+  LogPrint(credits);
+  ShowMessage(credits);
+end;
+
+procedure TMainForm.ListcomportsMenuItemClick(Sender: TObject);
+begin
+     ExecuteProcess('cmd.exe', '/c start cmd /k mode', []);
+end;
+
+procedure TMainForm.SpeedButton1Click(Sender: TObject);
+begin
+  if ComboBox_chip_scriptrun.Items.Capacity < 1 then Exit;;
+  if not OpenDevice() then exit;
+  if RunScriptFromFile(CurrentICParam.Script, ComboBox_chip_scriptrun.Text) then Exit;
+end;
+
+procedure TMainForm.StartAddressEditChange(Sender: TObject);
+begin
+  if StartAddressEdit.Text = '' then StartAddressEdit.Text := '0';
+  if Hex2Dec('$'+StartAddressEdit.Text) > 0 then
+     StartAddressEdit.Color:= clYellow
+  else
+     StartAddressEdit.Color:= clDefault;
+end;
+
+procedure TMainForm.StartAddressEditKeyPress(Sender: TObject; var Key: char);
+begin
+  Key := UpCase(Key);
+  if not(Key in['A'..'F', '0'..'9', Char(VK_BACK)]) then Key := Char('');
+end;
+
+procedure LoadChipList(XMLfile: TXMLDocument);
+var
+  Node: TDOMNode;
+  j, i: integer;
+begin
+  if XMLfile <> nil then
+  begin
+
+    Node := XMLfile.DocumentElement.FirstChild;
+
+    while Assigned(Node) do
+    begin
+
+     if (LowerCase(Node.NodeName) = 'options') or (LowerCase(Node.NodeName) = 'locale') then
+     begin
+       Node := Node.NextSibling;
+       continue;
+     end;
+
+     MainForm.MenuChip.Add(NewItem(UTF16ToUTF8(Node.NodeName), 0, False, True, nil, 0, '')); //Раздел(SPI, I2C...)
+
+     // Используем свойство ChildNodes
+     with Node.ChildNodes do
+     try
+       for j := 0 to (Count - 1) do
+       begin
+         MainForm.MenuChip.Find(UTF16ToUTF8(Node.NodeName)).Add(NewItem(UTF16ToUTF8(Item[j].NodeName) ,0, False, True, nil, 0, '')); //Раздел Фирма
+
+         for i := 0 to (Item[j].ChildNodes.Count - 1) do
+           MainForm.MenuChip.Find(UTF16ToUTF8(Node.NodeName)).
+             Find(UTF16ToUTF8(Item[j].NodeName)).
+               Add(NewItem(UTF16ToUTF8(Item[j].ChildNodes.Item[i].NodeName), 0, False, True, @MainForm.ChipClick, 0, '' )); //Чип
+       end;
+     finally
+       Free;
+     end;
+     Node := Node.NextSibling;
+    end;
+  end;
+
+end;
+
+{ TMainForm }
+
+procedure TMainForm.FormCreate(Sender: TObject);
+begin
+  AsProgrammer := TAsProgrammer.Create;
+  AsProgrammer.AddHW(TUsbAspHardware.Create);
+  AsProgrammer.AddHW(TCH341Hardware.Create);
+  AsProgrammer.AddHW(TAvrispHardware.Create);
+  AsProgrammer.AddHW(TArduinoHardware.Create);
+  AsProgrammer.AddHW(TBuzzpiratHardware.Create);
+  AsProgrammer.AddHW(TFT232HHardware.Create);
+  AsProgrammer.AddHW(TCH347Hardware.Create);
+
+  SelectHW(CHW_BUZZPIRAT); // dreg's dirty hack
+
+  LoadChipList(ChipListFile);
+  RomF := TMemoryStream.Create;
+  ScriptEngine := TPasCalc.Create;
+  ScriptsFunc.SetScriptFunctions(ScriptEngine);
+
+  MPHexEditorEx.NoSizeChange := true;
+  MPHexEditorEx.InsertMode := false;
+  DefaultProdSettings(ProdSettings);
+  LoadOptions(SettingsFile);
+  LoadLangList();
+
+  LoadModernIcons;
+  ApplyTheme(MenuDarkTheme.Checked);
+end;
+
+procedure TMainForm.FormDestroy(Sender: TObject);
+begin
+  AsProgrammer.Free;
+  MainForm.MPHexEditorEx.Free;
+  RomF.Free;
+  SaveOptions(SettingsFile);
+  ChipListFile.Free;
+  SettingsFile.Free;
+  ScriptEngine.Free;
+end;
+
+procedure TMainForm.ButtonReadClick(Sender: TObject);
+var
+  I2C_DevAddr: byte;
+  I2C_ChunkSize: word = 65535;
+  CRC32: Cardinal;
+begin
+try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then exit;
+  LockControl();
+
+  if RunScriptFromFile(CurrentICParam.Script, 'read') then Exit;
+
+  LogPrint(TimeToStr(Time()));
+
+  if (not IsNumber(ComboChipSize.Text)) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+
+  //SPI
+  if RadioSPI.Checked then
+  begin
+    EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+    TimeCounter := Time();
+
+    if  ComboSPICMD.ItemIndex = SPI_CMD_KB then
+    begin
+      ReadFlashKB(RomF, 0, StrToInt(ComboChipSize.Text));
+    end;
+
+    if  ComboSPICMD.ItemIndex = SPI_CMD_25 then
+      ReadFlash25(RomF, Hex2Dec('$'+StartAddressEdit.Text), StrToInt(ComboChipSize.Text));
+    if  ComboSPICMD.ItemIndex = SPI_CMD_45 then
+    begin
+      if (not IsNumber(ComboPageSize.Text)) then
+      begin
+        LogPrint(STR_CHECK_SETTINGS);
+        Exit;
+      end;
+      ReadFlash45(RomF, 0, StrToInt(ComboPageSize.Text), StrToInt(ComboChipSize.Text));
+    end;
+
+    if  ComboSPICMD.ItemIndex = SPI_CMD_95 then
+      ReadFlash95(RomF, Hex2Dec('$'+StartAddressEdit.Text), StrToInt(ComboChipSize.Text));
+
+    RomF.Position := 0;
+    MPHexEditorEx.LoadFromStream(RomF);
+    StatusBar.Panels.Items[2].Text := LabelChipName.Caption;
+  end;
+  //I2C
+  if RadioI2C.Checked then
+  begin
+    if ComboAddrType.ItemIndex < 0 then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    EnterProgModeI2c();
+
+    //Адрес микросхемы по чекбоксам
+    I2C_DevAddr := SetI2CDevAddr();
+
+    if CheckBox_I2C_ByteRead.Checked then I2C_ChunkSize := 1;
+
+    if UsbAspI2C_BUSY(I2C_DevAddr) then
+    begin
+      LogPrint(STR_I2C_NO_ANSWER);
+      exit;
+    end;
+    TimeCounter := Time();
+    ReadFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), StrToInt(ComboChipSize.Text), I2C_ChunkSize, I2C_DevAddr);
+
+    RomF.Position := 0;
+    MPHexEditorEx.LoadFromStream(RomF);
+    StatusBar.Panels.Items[2].Text := LabelChipName.Caption;
+  end;
+  //Microwire
+  if RadioMw.Checked then
+  begin
+    if (not IsNumber(ComboMWBitLen.Text)) then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then Exit;
+    TimeCounter := Time();
+    ReadFlashMW(RomF, StrToInt(ComboMWBitLen.Text), 0, StrToInt(ComboChipSize.Text));
+
+    RomF.Position := 0;
+    MPHexEditorEx.LoadFromStream(RomF);
+    StatusBar.Panels.Items[2].Text := LabelChipName.Caption;
+  end;
+
+  LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+
+  CRC32 := UpdateCRC32($FFFFFFFF, Romf.Memory, Romf.Size);
+  LogPrint('CRC32 = 0x'+IntToHex(CRC32, 8));
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+end;
+
+procedure TMainForm.ClearLogMenuItemClick(Sender: TObject);
+begin
+  Log.Lines.Clear;
+end;
+
+procedure TMainForm.ComboSPICMDChange(Sender: TObject);
+begin
+  RadioSPI.OnChange(Sender);
+end;
+
+procedure TMainForm.CopyLogMenuItemClick(Sender: TObject);
+begin
+  Log.CopyToClipboard;
+end;
+
+procedure TMainForm.AllowInsertItemClick(Sender: TObject);
+begin
+  MPHexEditorEx.NoSizeChange := not AllowInsertItem.Checked;
+  MPHexEditorEx.InsertMode := AllowInsertItem.Checked;
+end;
+
+procedure TMainForm.FormCloseQuery(Sender: TObject; var CanClose: boolean);
+begin
+  ButtonCancel.Tag := 1;
+
+  //В фоновом режиме окно остается живым, поэтому его можно закрыть прямо
+  //посреди работы с микросхемой. Сначала операция должна завершиться
+  if OperationRunning then
+  begin
+    CanClose := False;
+    Exit;
+  end;
+
+  ScriptEditForm.FormCloseQuery(Sender, CanClose);
+end;
+
+procedure TMainForm.ButtonEraseClick(Sender: TObject);
+var
+  I2C_DevAddr: byte;
+begin
+try
+  ButtonCancel.Tag := 0;
+  if not OpenDevice() then exit;
+  if Sender <> ComboItem1 then
+    if MessageDlg('AsProgrammer', STR_START_ERASE, mtConfirmation, [mbYes, mbNo], 0)
+      <> mrYes then Exit;
+  LockControl();
+
+  if RunScriptFromFile(CurrentICParam.Script, 'erase') then Exit;
+
+  LogPrint(TimeToStr(Time()));
+
+  //SPI
+  if RadioSPI.Checked then
+  begin
+    EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+
+    if not VerifyChipID then Exit;
+    if not AutoBackupChip then Exit;
+
+    if ComboSPICMD.ItemIndex <> SPI_CMD_KB then
+      IsLockBitsEnabled;
+    TimeCounter := Time();
+
+    LogPrint(STR_ERASING_FLASH);
+
+    if ComboSPICMD.ItemIndex = SPI_CMD_KB then
+    begin
+
+      if (not IsNumber(ComboChipSize.Text)) then
+      begin
+        LogPrint(STR_CHECK_SETTINGS);
+        Exit;
+      end;
+
+      if (not IsNumber(ComboPageSize.Text)) then
+      begin
+        LogPrint(STR_CHECK_SETTINGS);
+        Exit;
+      end;
+
+      EraseFlashKB(StrToInt(ComboChipSize.Text), StrToInt(ComboPageSize.Text));
+    end;
+
+    if ComboSPICMD.ItemIndex = SPI_CMD_25 then
+    begin
+      ProgressBar.Style:= pbstMarquee;
+      ProgressBar.Max:= 1;
+      ProgressBar.Position:= 1;
+
+      ChipErase25;
+
+      ProgressBar.Style:= pbstNormal;
+      ProgressBar.Position:= 0;
+    end;
+
+    if ComboSPICMD.ItemIndex = SPI_CMD_95 then
+      begin
+        if ( (not IsNumber(ComboChipSize.Text)) or (not IsNumber(ComboPageSize.Text))) then
+        begin
+          LogPrint(STR_CHECK_SETTINGS);
+          Exit;
+        end;
+
+      EraseEEPROM25(0, StrToInt(ComboChipSize.Text), StrToInt(ComboPageSize.Text), StrToInt(ComboChipSize.Text));
+    end;
+
+    if ComboSPICMD.ItemIndex = SPI_CMD_45 then
+    begin
+      UsbAsp45_ChipErase();
+
+      while UsbAsp45_Busy() do
+      begin
+        Application.ProcessMessages;
+        if UserCancel then Exit;
+      end;
+    end;
+
+  end;
+
+  //I2C
+  if RadioI2C.Checked then
+  begin
+  if ( (ComboAddrType.ItemIndex < 0) or (not IsNumber(ComboPageSize.Text)) ) then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    EnterProgModeI2C();
+
+    //Адрес микросхемы по чекбоксам
+    I2C_DevAddr := SetI2CDevAddr();
+
+    if UsbAspI2C_BUSY(I2C_DevAddr) then
+    begin
+      LogPrint(STR_I2C_NO_ANSWER);
+      exit;
+    end;
+
+    TimeCounter := Time();
+
+    if StrToInt(ComboPageSize.Text) < 1 then ComboPageSize.Text := '1';
+
+    EraseFlashI2C(0, StrToInt(ComboChipSize.Text), StrToInt(ComboPageSize.Text), I2C_DevAddr);
+  end;
+
+  //Microwire
+  if RadioMW.Checked then
+  begin
+    if (not IsNumber(ComboMWBitLen.Text)) then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+    TimeCounter := Time();
+    LogPrint(STR_ERASING_FLASH);
+    UsbAspMW_Ewen(StrToInt(ComboMWBitLen.Text));
+    UsbAspMW_ChipErase(StrToInt(ComboMWBitLen.Text));
+
+     while UsbAspMW_Busy do
+     begin
+       Application.ProcessMessages;
+       if UserCancel then Exit;
+     end;
+
+  end;
+
+
+  LogPrint(STR_DONE);
+  LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+end;
+
+procedure TMainForm.BlankCheckMenuItemClick(Sender: TObject);
+begin
+  VerifyFlash(true);
+end;
+
+//Стирание только тех секторов, которые попадают в диапазон
+//Начало - "Начальный адрес", длина - размер данных в редакторе
+//Tag пункта меню задает размер сектора, 0 - взять из chiplist.xml/SFDP
+procedure TMainForm.MenuEraseRangeClick(Sender: TObject);
+var
+  SectorSize, RangeLen, StartAddr: cardinal;
+  Opcode: byte;
+begin
+  if OperationRunning then Exit;
+try
+  ButtonCancel.Tag := 0;
+
+  if (not RadioSPI.Checked) or (ComboSPICMD.ItemIndex <> SPI_CMD_25) then
+  begin
+    LogPrint(STR_SECTOR_SPI25_ONLY);
+    Exit;
+  end;
+
+  SectorSize := CurrentSectorSize;
+  Opcode := CurrentSectorOpcode;
+
+  if Sender is TMenuItem then
+    if TMenuItem(Sender).Tag > 0 then
+    begin
+      SectorSize := cardinal(TMenuItem(Sender).Tag);
+      Opcode := SectorEraseOpcode(SectorSize);
+    end;
+
+  StartAddr := Hex2Dec('$' + StartAddressEdit.Text);
+  RangeLen := MPHexEditorEx.DataSize;
+  if RangeLen = 0 then RangeLen := SectorSize;
+
+  //Вызов из "умной записи" уже подтвержден пользователем
+  if Sender <> MenuSmartWrite then
+    if MessageDlg('AsProgrammer', STR_ERASE_RANGE_Q + LineEnding +
+       '0x' + IntToHex(StartAddr, 8) + ' + ' + IntToStr(RangeLen) + ' bytes',
+       mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
+
+  if not OpenDevice() then Exit;
+  LockControl();
+
+  LogPrint(TimeToStr(Time()));
+  EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
+
+  if not VerifyChipID then Exit;
+  if not AutoBackupChip then Exit;
+
+  IsLockBitsEnabled;
+  TimeCounter := Time();
+
+  if EraseRange25(StartAddr, RangeLen, SectorSize, Opcode) then
+    LogPrint(STR_DONE);
+
+  LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+end;
+
+//Снять защиту -> стереть только нужные сектора -> записать -> проверить
+procedure TMainForm.MenuSmartWriteClick(Sender: TObject);
+var
+  CheckTemp: boolean;
+begin
+  if OperationRunning then Exit;
+
+  if MPHexEditorEx.DataSize = 0 then
+  begin
+    LogPrint(STR_ERASE_RANGE_EMPTY);
+    Exit;
+  end;
+
+  if (not RadioSPI.Checked) or (ComboSPICMD.ItemIndex <> SPI_CMD_25) then
+  begin
+    LogPrint(STR_SECTOR_SPI25_ONLY);
+    Exit;
+  end;
+
+  if MessageDlg('AsProgrammer', STR_COMBO_WARN, mtConfirmation, [mbYes, mbNo], 0)
+    <> mrYes then Exit;
+
+  if ButtonBlock.Enabled then
+    ButtonBlockClick(ComboItem1);
+
+  MenuEraseRangeClick(MenuSmartWrite);
+
+  if ButtonCancel.Tag <> 0 then Exit;
+
+  CheckTemp := MenuAutoCheck.Checked;
+  MenuAutoCheck.Checked := True;
+
+  ButtonWriteClick(ComboItem1);
+
+  MenuAutoCheck.Checked := CheckTemp;
+end;
+
+//Переключение фонового режима выполнения операций
+procedure TMainForm.MenuBackgroundOpsClick(Sender: TObject);
+begin
+  UseWorkerThread := MenuBackgroundOps.Checked;
+end;
+
+procedure TMainForm.MenuDarkThemeClick(Sender: TObject);
+begin
+  ApplyTheme(MenuDarkTheme.Checked);
+end;
+
+//Контрольные суммы содержимого редактора
+procedure TMainForm.MenuChecksumClick(Sender: TObject);
+var
+  Stream: TMemoryStream;
+  Data: array of byte;
+  crc, sum32: cardinal;
+  i: integer;
+begin
+  if OperationRunning then Exit;
+
+  if MPHexEditorEx.DataSize = 0 then
+  begin
+    LogPrint(STR_CHECKSUM_EMPTY);
+    Exit;
+  end;
+
+  Stream := TMemoryStream.Create;
+  try
+    MPHexEditorEx.SaveToStream(Stream);
+    Stream.Position := 0;
+    SetLength(Data, MPHexEditorEx.DataSize);
+    if Length(Data) = 0 then Exit;
+    Stream.ReadBuffer(Data[0], Length(Data));
+  finally
+    Stream.Free;
+  end;
+
+  crc := UpdateCRC32($FFFFFFFF, @Data[0], Length(Data));
+
+  sum32 := 0;
+  for i := 0 to High(Data) do
+    sum32 := sum32 + Data[i];
+
+  LogPrint(STR_CHECKSUM +
+           'size=' + IntToStr(Length(Data)) +
+           '  CRC32=' + IntToHex(crc, 8) +
+           '  SUM32=' + IntToHex(sum32, 8) +
+           '  SUM16=' + IntToHex(sum32 and $FFFF, 4));
+end;
+
+//Определение параметров микросхемы через SFDP (JESD216)
+procedure TMainForm.MenuSFDPDetectClick(Sender: TObject);
+var
+  Info: TSFDPInfo;
+  i: integer;
+  ESize: cardinal;
+  EOpcode: byte;
+begin
+  if OperationRunning then Exit;
+try
+  ButtonCancel.Tag := 0;
+
+  if not RadioSPI.Checked then
+  begin
+    LogPrint(STR_SECTOR_SPI25_ONLY);
+    Exit;
+  end;
+
+  if not OpenDevice() then Exit;
+  LockControl();
+
+  LogPrint(STR_SFDP_READING);
+  EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
+
+  if not SFDPDetect(Info) then
+  begin
+    LogPrint(STR_SFDP_NOT_FOUND);
+    Exit;
+  end;
+
+  LogPrint(STR_SFDP_FOUND + ' (JESD216 rev ' + IntToStr(Info.MajorRev) + '.' +
+           IntToStr(Info.MinorRev) + ')');
+  LogPrint('  Size: ' + IntToStr(Info.Density) + ' bytes');
+  LogPrint('  Page: ' + IntToStr(Info.PageSize) + ' bytes');
+  LogPrint('  Address bytes: ' + SFDPAddrBytesStr(Info));
+
+  for i := 1 to 4 do
+    if Info.EraseTypes[i].Size > 0 then
+      LogPrint('  Erase type ' + IntToStr(i) + ': ' + IntToStr(Info.EraseTypes[i].Size) +
+               ' bytes, opcode 0x' + IntToHex(Info.EraseTypes[i].Opcode, 2));
+
+  //Заполняем настройки. Порядок важен: RadioSPIChange очищает поля
+  ComboSPICMD.ItemIndex := SPI_CMD_25;
+  RadioSPI.Checked := True;
+  RadioSPIChange(MainForm);
+
+  ComboChipSize.Text := IntToStr(Info.Density);
+  ComboPageSize.Text := IntToStr(Info.PageSize);
+  LabelChipName.Caption := 'SFDP ' + IntToStr(Info.Density div 1024) + 'K';
+
+  CurrentICParam.Name := LabelChipName.Caption;
+  CurrentICParam.Size := Info.Density;
+  CurrentICParam.Page := Info.PageSize;
+  CurrentICParam.SpiCmd := SPI_CMD_25;
+  CurrentICParam.Script := '';
+  ComboBox_chip_scriptrun.Items.Clear;
+
+  if SFDPSmallestErase(Info, ESize, EOpcode) then
+  begin
+    CurrentICParam.Sector := ESize;
+    CurrentICParam.SectorOpcode := EOpcode;
+  end
+  else
+  begin
+    CurrentICParam.Sector := 0;
+    CurrentICParam.SectorOpcode := 0;
+  end;
+
+  LogPrint(STR_SFDP_APPLIED);
+
+finally
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  UnlockControl();
+end;
+end;
+
+procedure SaveOptions(XMLfile: TXMLDocument);
+var
+  Node, ParentNode: TDOMNode;
+begin
+  if XMLfile <> nil then
+  begin
+    //Удаляем старую запись
+    Node := XMLfile.DocumentElement.FindNode('locale');
+    if (Node <> nil) then XMLfile.DocumentElement.RemoveChild(Node);
+    //Создаем новую
+    Node:= XMLfile.DocumentElement;
+    ParentNode := XMLfile.CreateElement('locale');
+    TDOMElement(ParentNode).SetAttribute('lang', CurrentLang);
+    Node.Appendchild(parentNode);
+
+    //Удаляем старую запись
+    Node := XMLfile.DocumentElement.FindNode('options');
+    if (Node <> nil) then XMLfile.DocumentElement.RemoveChild(Node);
+
+    Node:= XMLfile.DocumentElement;
+    ParentNode := XMLfile.CreateElement('options');
+
+    if MainForm.MenuAutoCheck.Checked then
+      TDOMElement(ParentNode).SetAttribute('verify', '1') else
+        TDOMElement(ParentNode).SetAttribute('verify', '0');
+
+    if MainForm.MenuSkipFF.Checked then
+      TDOMElement(ParentNode).SetAttribute('skipff', '1') else
+        TDOMElement(ParentNode).SetAttribute('skipff', '0');
+
+    if MainForm.MenuSendAB.Checked then
+      TDOMElement(ParentNode).SetAttribute('sendab', '1') else
+        TDOMElement(ParentNode).SetAttribute('sendab', '0');
+
+    if MainForm.MenuBackgroundOps.Checked then
+      TDOMElement(ParentNode).SetAttribute('background_ops', '1') else
+        TDOMElement(ParentNode).SetAttribute('background_ops', '0');
+
+    if MainForm.MenuDarkTheme.Checked then
+      TDOMElement(ParentNode).SetAttribute('dark_theme', '1') else
+        TDOMElement(ParentNode).SetAttribute('dark_theme', '0');
+
+    if MainForm.MenuCheckIDBefore.Checked then
+      TDOMElement(ParentNode).SetAttribute('check_id', '1') else
+        TDOMElement(ParentNode).SetAttribute('check_id', '0');
+
+    if MainForm.MenuAutoBackup.Checked then
+      TDOMElement(ParentNode).SetAttribute('auto_backup', '1') else
+        TDOMElement(ParentNode).SetAttribute('auto_backup', '0');
+
+    if MainForm.Menu3Mhz.Checked then
+      TDOMElement(ParentNode).SetAttribute('spi_speed', '3Mhz');
+    if MainForm.Menu1_5Mhz.Checked then
+      TDOMElement(ParentNode).SetAttribute('spi_speed', '1_5Mhz');
+    if MainForm.Menu750Khz.Checked then
+      TDOMElement(ParentNode).SetAttribute('spi_speed', '750Khz');
+    if MainForm.Menu375Khz.Checked then
+      TDOMElement(ParentNode).SetAttribute('spi_speed', '375Khz');
+    if MainForm.Menu187_5Khz.Checked then
+      TDOMElement(ParentNode).SetAttribute('spi_speed', '187_5Khz');
+    if MainForm.Menu93_75Khz.Checked then
+      TDOMElement(ParentNode).SetAttribute('spi_speed', '93_75Khz');
+    if MainForm.Menu32Khz.Checked then
+      TDOMElement(ParentNode).SetAttribute('spi_speed', '32Khz');
+
+    if MainForm.MenuCH347SPIClock60MHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('ch347_spi_speed', '60Mhz');
+    if MainForm.MenuCH347SPIClock30MHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('ch347_spi_speed', '30Mhz');
+    if MainForm.MenuCH347SPIClock15MHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('ch347_spi_speed', '15Mhz');
+    if MainForm.MenuCH347SPIClock7_5MHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('ch347_spi_speed', '7_5Mhz');
+    if MainForm.MenuCH347SPIClock3_75MHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('ch347_spi_speed', '3_75Mhz');
+    if MainForm.MenuCH347SPIClock1_875MHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('ch347_spi_speed', '1_875MHz');
+    if MainForm.MenuCH347SPIClock937_5KHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('ch347_spi_speed', '937_5KHz');
+    if MainForm.MenuCH347SPIClock468_75KHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('ch347_spi_speed', '468_75KHz');
+
+    if MainForm.MenuMW32Khz.Checked then
+      TDOMElement(ParentNode).SetAttribute('mw_speed', '32Khz');
+    if MainForm.MenuMW16Khz.Checked then
+      TDOMElement(ParentNode).SetAttribute('mw_speed', '16Khz');
+    if MainForm.MenuMW8Khz.Checked then
+      TDOMElement(ParentNode).SetAttribute('mw_speed', '8Khz');
+
+    if MainForm.MenuHWUSBASP.Checked then
+      TDOMElement(ParentNode).SetAttribute('hw', 'usbasp');
+    if MainForm.MenuHWCH341A.Checked then
+      TDOMElement(ParentNode).SetAttribute('hw', 'ch341a');
+    if MainForm.MenuHWCH347.Checked then
+      TDOMElement(ParentNode).SetAttribute('hw', 'ch347');
+    if MainForm.MenuHWAVRISP.Checked then
+      TDOMElement(ParentNode).SetAttribute('hw', 'avrisp');
+    if MainForm.MenuHWARDUINO.Checked then
+      TDOMElement(ParentNode).SetAttribute('hw', 'arduino');
+    if MainForm.MenuHWBUZZPIRAT.Checked then
+      TDOMElement(ParentNode).SetAttribute('hw', 'buzzpirat');
+    if MainForm.MenuHWFT232H.Checked then
+      TDOMElement(ParentNode).SetAttribute('hw', 'ft232h');
+
+    //Автонумерация и партия
+    TDOMElement(ParentNode).SetAttribute('sn_enabled', BoolToStr(ProdSettings.SNEnabled, '1', '0'));
+    TDOMElement(ParentNode).SetAttribute('sn_address', IntToHex(ProdSettings.SNAddress, 6));
+    TDOMElement(ParentNode).SetAttribute('sn_length', IntToStr(ProdSettings.SNLength));
+    TDOMElement(ParentNode).SetAttribute('sn_mode', IntToStr(Ord(ProdSettings.SNMode)));
+    TDOMElement(ParentNode).SetAttribute('sn_value', IntToStr(ProdSettings.SNValue));
+    TDOMElement(ParentNode).SetAttribute('sn_step', IntToStr(ProdSettings.SNStep));
+    TDOMElement(ParentNode).SetAttribute('sn_bigendian', BoolToStr(ProdSettings.SNBigEndian, '1', '0'));
+    TDOMElement(ParentNode).SetAttribute('sn_logfile', ProdSettings.SNLogFile);
+    TDOMElement(ParentNode).SetAttribute('batch_enabled', BoolToStr(ProdSettings.BatchEnabled, '1', '0'));
+    TDOMElement(ParentNode).SetAttribute('batch_target', IntToStr(ProdSettings.BatchTarget));
+
+    TDOMElement(ParentNode).SetAttribute('arduino_comport', Arduino_COMPort);
+    TDOMElement(ParentNode).SetAttribute('arduino_baudrate', IntToStr(Arduino_BaudRate));
+
+    Node.Appendchild(parentNode);
+
+    WriteXMLFile(XMLfile, SettingsFileName);
+  end;
+
+end;
+
+procedure LoadOptions(XMLfile: TXMLDocument);
+var
+    Node: TDOMNode;
+    OptVal: string;
+begin
+  if XMLfile <> nil then
+  begin
+    Node := XMLfile.DocumentElement.FindNode('options');
+
+    if (Node <> nil) then
+    if (Node.HasAttributes) then
+    begin
+
+      if  Node.Attributes.GetNamedItem('verify') <> nil then
+      begin
+        if Node.Attributes.GetNamedItem('verify').NodeValue = '1' then
+          MainForm.MenuAutoCheck.Checked := true;
+      end;
+
+      if  Node.Attributes.GetNamedItem('sendab') <> nil then
+      begin
+        if Node.Attributes.GetNamedItem('sendab').NodeValue = '1' then
+          MainForm.MenuSendAB.Checked := true;
+      end;
+
+      if  Node.Attributes.GetNamedItem('skipff') <> nil then
+      begin
+        if Node.Attributes.GetNamedItem('skipff').NodeValue = '1' then
+          MainForm.MenuSkipFF.Checked := true;
+      end;
+
+      if  Node.Attributes.GetNamedItem('background_ops') <> nil then
+      begin
+        if Node.Attributes.GetNamedItem('background_ops').NodeValue = '1' then
+          MainForm.MenuBackgroundOps.Checked := true;
+        UseWorkerThread := MainForm.MenuBackgroundOps.Checked;
+      end;
+
+      if  Node.Attributes.GetNamedItem('dark_theme') <> nil then
+        MainForm.MenuDarkTheme.Checked :=
+          Node.Attributes.GetNamedItem('dark_theme').NodeValue = '1';
+
+      if  Node.Attributes.GetNamedItem('check_id') <> nil then
+        MainForm.MenuCheckIDBefore.Checked :=
+          Node.Attributes.GetNamedItem('check_id').NodeValue = '1';
+
+      if  Node.Attributes.GetNamedItem('auto_backup') <> nil then
+        MainForm.MenuAutoBackup.Checked :=
+          Node.Attributes.GetNamedItem('auto_backup').NodeValue = '1';
+
+      //Автонумерация и партия
+      if Node.Attributes.GetNamedItem('sn_enabled') <> nil then
+        ProdSettings.SNEnabled := Node.Attributes.GetNamedItem('sn_enabled').NodeValue = '1';
+
+      if Node.Attributes.GetNamedItem('sn_address') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('sn_address').NodeValue);
+        if IsNumber('$' + OptVal) then ProdSettings.SNAddress := StrToInt('$' + OptVal);
+      end;
+
+      if Node.Attributes.GetNamedItem('sn_length') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('sn_length').NodeValue);
+        if IsNumber(OptVal) then ProdSettings.SNLength := StrToInt(OptVal);
+      end;
+
+      if Node.Attributes.GetNamedItem('sn_mode') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('sn_mode').NodeValue);
+        if IsNumber(OptVal) and (StrToInt(OptVal) in [0..2]) then
+          ProdSettings.SNMode := TSerialMode(StrToInt(OptVal));
+      end;
+
+      if Node.Attributes.GetNamedItem('sn_value') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('sn_value').NodeValue);
+        if IsNumber(OptVal) then ProdSettings.SNValue := StrToQWord(OptVal);
+      end;
+
+      if Node.Attributes.GetNamedItem('sn_step') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('sn_step').NodeValue);
+        if IsNumber(OptVal) then ProdSettings.SNStep := StrToInt(OptVal);
+      end;
+
+      if Node.Attributes.GetNamedItem('sn_bigendian') <> nil then
+        ProdSettings.SNBigEndian := Node.Attributes.GetNamedItem('sn_bigendian').NodeValue = '1';
+
+      if Node.Attributes.GetNamedItem('sn_logfile') <> nil then
+        ProdSettings.SNLogFile := UTF16ToUTF8(Node.Attributes.GetNamedItem('sn_logfile').NodeValue);
+
+      if Node.Attributes.GetNamedItem('batch_enabled') <> nil then
+        ProdSettings.BatchEnabled := Node.Attributes.GetNamedItem('batch_enabled').NodeValue = '1';
+
+      if Node.Attributes.GetNamedItem('batch_target') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('batch_target').NodeValue);
+        if IsNumber(OptVal) then ProdSettings.BatchTarget := StrToInt(OptVal);
+      end;
+
+      if  Node.Attributes.GetNamedItem('spi_speed') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('spi_speed').NodeValue);
+
+        if OptVal = '3Mhz' then MainForm.Menu3Mhz.Checked := true;
+        if OptVal = '1_5Mhz' then MainForm.Menu1_5Mhz.Checked := true;
+        if OptVal = '750Khz' then MainForm.Menu750Khz.Checked := true;
+        if OptVal = '375Khz' then MainForm.Menu375Khz.Checked := true;
+        if OptVal = '187_5Khz' then MainForm.Menu187_5Khz.Checked := true;
+        if OptVal = '93_75Khz' then MainForm.Menu93_75Khz.Checked := true;
+        if OptVal = '32Khz' then MainForm.Menu32Khz.Checked := true;
+      end;
+
+      if  Node.Attributes.GetNamedItem('ch347_spi_speed') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('ch347_spi_speed').NodeValue);
+
+        if OptVal = '60Mhz' then MainForm.MenuCH347SPIClock60MHz.Checked := true;
+        if OptVal = '30Mhz' then MainForm.MenuCH347SPIClock30MHz.Checked := true;
+        if OptVal = '15Mhz' then MainForm.MenuCH347SPIClock15MHz.Checked := true;
+        if OptVal = '7_5Mhz' then MainForm.MenuCH347SPIClock7_5MHz.Checked := true;
+        if OptVal = '3_75Mhz' then MainForm.MenuCH347SPIClock3_75MHz.Checked := true;
+        if OptVal = '1_875MHz' then MainForm.MenuCH347SPIClock1_875MHz.Checked := true;
+        if OptVal = '937_5KHz' then MainForm.MenuCH347SPIClock937_5KHz.Checked := true;
+        if OptVal = '468_75KHz' then MainForm.MenuCH347SPIClock468_75KHz.Checked := true;
+      end;
+
+
+      if  Node.Attributes.GetNamedItem('mw_speed') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('mw_speed').NodeValue);
+
+        if OptVal = '32Khz' then MainForm.MenuMW32Khz.Checked := true;
+        if OptVal = '16Khz' then MainForm.MenuMW16Khz.Checked := true;
+        if OptVal = '8Khz' then MainForm.MenuMW8Khz.Checked := true;
+      end;
+
+      if  Node.Attributes.GetNamedItem('hw') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('hw').NodeValue);
+
+        if OptVal = 'usbasp' then
+        begin
+          MainForm.MenuHWUSBASP.Checked := true;
+          SelectHW(CHW_USBASP);
+        end;
+
+        if OptVal = 'ch341a' then
+        begin
+          MainForm.MenuHWCH341A.Checked := true;
+          SelectHW(CHW_CH341);
+        end;
+
+        if OptVal = 'ch347' then
+        begin
+          MainForm.MenuHWCH347.Checked := true;
+          SelectHW(CHW_CH347);
+        end;
+
+        if OptVal = 'avrisp' then
+        begin
+          MainForm.MenuHWAVRISP.Checked := true;
+          SelectHW(CHW_AVRISP);
+        end;
+
+        if OptVal = 'arduino' then
+        begin
+          MainForm.MenuHWArduino.Checked := true;
+          SelectHW(CHW_ARDUINO);
+        end;
+
+        if OptVal = 'buzzpirat' then
+        begin
+          MainForm.MenuHWBuzzpirat.Checked := true;
+          SelectHW(CHW_BUZZPIRAT);
+        end;
+
+        if OptVal = 'ft232h' then
+        begin
+          MainForm.MenuHWFT232H.Checked := true;
+          SelectHW(CHW_FT232H);
+        end;
+
+
+      end;
+
+      if  Node.Attributes.GetNamedItem('arduino_comport') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('arduino_comport').NodeValue);
+
+        Arduino_COMPort := OptVal;
+        MainForm.MenuArduinoCOMPort.Caption := 'Arduino COMPort: '+ Arduino_COMPort;
+      end;
+
+      if  Node.Attributes.GetNamedItem('arduino_baudrate') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('arduino_baudrate').NodeValue);
+
+        Arduino_BaudRate := StrToInt(OptVal);
+      end;
+
+    end;
+  end;
+
+end;
+
+initialization
+  UIProxy := TUIProxy.Create;
+
+finalization
+  UIProxy.Free;
+
+end.

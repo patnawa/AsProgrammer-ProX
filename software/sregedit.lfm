@@ -1,0 +1,274 @@
+object sregeditForm: TsregeditForm
+  Left = 669
+  Height = 313
+  Top = 342
+  Width = 431
+  Align = alCustom
+  BorderStyle = bsToolWindow
+  Caption = 'SREG'
+  ClientHeight = 313
+  ClientWidth = 431
+  FormStyle = fsStayOnTop
+  OnShow = FormShow
+  Position = poOwnerFormCenter
+  LCLVersion = '2.2.6.0'
+  object ButtonReadSreg: TButton
+    Left = 69
+    Height = 25
+    Top = 272
+    Width = 75
+    Caption = 'Прочитать'
+    OnClick = ButtonReadSregClick
+    TabOrder = 0
+  end
+  object ButtonWriteSreg: TButton
+    Left = 288
+    Height = 25
+    Top = 272
+    Width = 75
+    Caption = 'Записать'
+    OnClick = ButtonWriteSregClick
+    TabOrder = 1
+  end
+  object ComboBoxSRType: TComboBox
+    Left = 16
+    Height = 23
+    Top = 8
+    Width = 100
+    ItemHeight = 15
+    ItemIndex = 0
+    Items.Strings = (
+      'Winbond'
+      'GigaDevice'
+      'Macronix'
+    )
+    OnChange = ComboBoxSRTypeChange
+    ReadOnly = True
+    TabOrder = 2
+    Text = 'Winbond'
+  end
+  object GroupBoxSREG1: TGroupBox
+    Left = 16
+    Height = 210
+    Top = 48
+    Width = 128
+    Caption = 'SREG1'
+    ClientHeight = 190
+    ClientWidth = 124
+    TabOrder = 3
+    object CheckBoxSB7: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 168
+      Width = 29
+      Caption = '7:'
+      TabOrder = 0
+    end
+    object CheckBoxSB6: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 144
+      Width = 29
+      Caption = '6:'
+      TabOrder = 1
+    end
+    object CheckBoxSB5: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 120
+      Width = 29
+      Caption = '5:'
+      TabOrder = 2
+    end
+    object CheckBoxSB4: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 96
+      Width = 29
+      Caption = '4:'
+      TabOrder = 3
+    end
+    object CheckBoxSB3: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 72
+      Width = 29
+      Caption = '3:'
+      TabOrder = 4
+    end
+    object CheckBoxSB2: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 48
+      Width = 29
+      Caption = '2:'
+      TabOrder = 5
+    end
+    object CheckBoxSB1: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 24
+      Width = 55
+      Caption = '1: WEL'
+      Enabled = False
+      TabOrder = 6
+    end
+    object CheckBoxSB0: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 0
+      Width = 60
+      Caption = '0: BUSY'
+      Enabled = False
+      TabOrder = 7
+    end
+  end
+  object GroupBoxSREG2: TGroupBox
+    Left = 152
+    Height = 210
+    Top = 48
+    Width = 128
+    Caption = 'SREG2'
+    ClientHeight = 190
+    ClientWidth = 124
+    TabOrder = 4
+    object CheckBoxSB15: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 168
+      Width = 20
+      AutoSize = False
+      TabOrder = 0
+    end
+    object CheckBoxSB14: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 144
+      Width = 82
+      Caption = '14: CMP/TB'
+      TabOrder = 1
+    end
+    object CheckBoxSB13: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 120
+      Width = 20
+      AutoSize = False
+      TabOrder = 2
+    end
+    object CheckBoxSB12: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 96
+      Width = 20
+      AutoSize = False
+      TabOrder = 3
+    end
+    object CheckBoxSB11: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 72
+      Width = 20
+      AutoSize = False
+      TabOrder = 4
+    end
+    object CheckBoxSB10: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 48
+      Width = 20
+      AutoSize = False
+      TabOrder = 5
+    end
+    object CheckBoxSB9: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 24
+      Width = 47
+      Caption = '9: QE'
+      TabOrder = 6
+    end
+    object CheckBoxSB8: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 0
+      Width = 14
+      AutoSize = False
+      TabOrder = 7
+    end
+  end
+  object GroupBoxSREG3: TGroupBox
+    Left = 288
+    Height = 210
+    Top = 48
+    Width = 128
+    Caption = 'SREG3'
+    ClientHeight = 190
+    ClientWidth = 124
+    TabOrder = 5
+    object CheckBoxSB23: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 168
+      Width = 20
+      AutoSize = False
+      TabOrder = 0
+    end
+    object CheckBoxSB22: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 144
+      Width = 20
+      AutoSize = False
+      TabOrder = 1
+    end
+    object CheckBoxSB21: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 120
+      Width = 20
+      AutoSize = False
+      TabOrder = 2
+    end
+    object CheckBoxSB20: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 96
+      Width = 20
+      AutoSize = False
+      TabOrder = 3
+    end
+    object CheckBoxSB19: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 72
+      Width = 20
+      AutoSize = False
+      TabOrder = 4
+    end
+    object CheckBoxSB18: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 48
+      Width = 20
+      AutoSize = False
+      TabOrder = 5
+    end
+    object CheckBoxSB17: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 24
+      Width = 20
+      AutoSize = False
+      TabOrder = 6
+    end
+    object CheckBoxSB16: TCheckBox
+      Left = 8
+      Height = 19
+      Top = 0
+      Width = 14
+      AutoSize = False
+      TabOrder = 7
+    end
+  end
+end

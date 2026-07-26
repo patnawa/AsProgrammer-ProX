@@ -1,0 +1,1546 @@
+object MainForm: TMainForm
+  Left = 501
+  Height = 541
+  Top = 209
+  Width = 853
+  ActiveControl = RadioSPI
+  Caption = 'AsProgrammer ProX v4 - Stop all current operations: keep pressing ESC key - Launch Console: keep pressing F1 key'
+  ClientHeight = 541
+  ClientWidth = 853
+  Constraints.MinHeight = 300
+  Constraints.MinWidth = 300
+  Menu = MainMenu
+  OnCloseQuery = FormCloseQuery
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  Position = poDesktopCenter
+  LCLVersion = '3.2.0.0'
+  object ProgressBar: TProgressBar
+    Left = 0
+    Height = 20
+    Top = 426
+    Width = 853
+    Align = alBottom
+    Max = 0
+    ParentFont = False
+    TabOrder = 0
+    BarShowText = True
+  end
+  object ToolBar: TToolBar
+    Left = 0
+    Height = 34
+    Top = 0
+    Width = 853
+    ButtonHeight = 32
+    ButtonWidth = 32
+    Caption = 'ToolBar'
+    Images = ImageList
+    ParentFont = False
+    TabOrder = 1
+    object ButtonRead: TToolButton
+      Left = 81
+      Hint = 'Прочитать'
+      Top = 2
+      ImageIndex = 1
+      OnClick = ButtonReadClick
+      ParentShowHint = False
+      ShowHint = True
+    end
+    object ButtonWrite: TToolButton
+      Left = 117
+      Hint = 'Записать'
+      Top = 2
+      DropdownMenu = DropDownMenu
+      ImageIndex = 0
+      OnClick = ButtonWriteClick
+      ParentShowHint = False
+      ShowHint = True
+      Style = tbsDropDown
+    end
+    object ButtonErase: TToolButton
+      Left = 165
+      Hint = 'Стереть'
+      Top = 2
+      DropdownMenu = EraseDropDownMenu
+      ImageIndex = 5
+      OnClick = ButtonEraseClick
+      ParentShowHint = False
+      ShowCaption = False
+      ShowHint = True
+      Style = tbsDropDown
+    end
+    object ButtonVerify: TToolButton
+      Left = 201
+      Hint = 'Сравнить содержимое'
+      Top = 2
+      DropdownMenu = BlankCheckDropDownMenu
+      ImageIndex = 6
+      OnClick = ButtonVerifyClick
+      ParentShowHint = False
+      ShowHint = True
+      Style = tbsDropDown
+    end
+    object ToolButton1: TToolButton
+      Left = 249
+      Height = 32
+      Top = 2
+      Caption = 'ToolButton1'
+      Style = tbsSeparator
+    end
+    object ButtonReadID: TToolButton
+      Left = 257
+      Hint = 'Прочитать индификатор'
+      Top = 2
+      ImageIndex = 2
+      OnClick = ButtonReadIDClick
+      ParentShowHint = False
+      ShowHint = True
+    end
+    object ButtonBlock: TToolButton
+      Left = 293
+      Hint = 'Снять защиту'
+      Top = 2
+      DropdownMenu = DropdownMenuLock
+      ImageIndex = 7
+      OnClick = ButtonBlockClick
+      ParentShowHint = False
+      ShowCaption = False
+      ShowHint = True
+      Style = tbsDropDown
+    end
+    object ToolButton3: TToolButton
+      Left = 73
+      Height = 32
+      Top = 2
+      Caption = 'ToolButton3'
+      Style = tbsSeparator
+    end
+    object RadioSPI: TRadioButton
+      Left = 393
+      Height = 19
+      Top = 2
+      Width = 34
+      Caption = 'SPI'
+      Checked = True
+      ParentFont = False
+      TabOrder = 0
+      TabStop = True
+      OnChange = RadioSPIChange
+    end
+    object RadioI2C: TRadioButton
+      Left = 427
+      Height = 19
+      Top = 2
+      Width = 35
+      Caption = 'I2C'
+      ParentFont = False
+      TabOrder = 1
+      OnChange = RadioI2CChange
+    end
+    object RadioMw: TRadioButton
+      Left = 462
+      Height = 19
+      Top = 2
+      Width = 105
+      Caption = 'Microwire(16bit)'
+      ParentFont = False
+      TabOrder = 2
+      OnChange = RadioMwChange
+    end
+    object ToolButton2: TToolButton
+      Left = 341
+      Height = 32
+      Top = 2
+      Caption = 'ToolButton2'
+      Style = tbsSeparator
+    end
+    object ButtonOpenHex: TToolButton
+      Left = 1
+      Hint = 'Загрузить прошивку в редактор'
+      Top = 2
+      ImageIndex = 4
+      OnClick = ButtonOpenHexClick
+      ParentShowHint = False
+      ShowCaption = False
+      ShowHint = True
+    end
+    object ButtonSaveHex: TToolButton
+      Left = 37
+      Hint = 'Сохранить прошивку из редактора'
+      Top = 2
+      ImageIndex = 3
+      OnClick = ButtonSaveHexClick
+      ParentShowHint = False
+      ShowCaption = False
+      ShowHint = True
+    end
+    object ButtonCancel: TToolButton
+      Left = 349
+      Hint = 'Прервать текущею операцию'
+      Top = 2
+      ImageIndex = 8
+      OnClick = ButtonCancelClick
+      ParentShowHint = False
+      ShowHint = True
+    end
+    object ToolButton5: TToolButton
+      Left = 385
+      Height = 32
+      Top = 2
+      Caption = 'ToolButton5'
+      Style = tbsSeparator
+    end
+    object ToolButton4: TToolButton
+      Left = 567
+      Height = 32
+      Top = 2
+      Caption = 'ToolButton4'
+      Style = tbsSeparator
+    end
+  end
+  object GroupChipSettings: TGroupBox
+    Left = 0
+    Height = 369
+    Top = 34
+    Width = 160
+    Align = alLeft
+    ClientHeight = 349
+    ClientWidth = 156
+    ParentFont = False
+    TabOrder = 2
+    object ComboChipSize: TComboBox
+      Left = 24
+      Height = 23
+      Hint = 'Размер чипа в байтах'
+      Top = 56
+      Width = 100
+      ItemHeight = 15
+      MaxLength = 10
+      ParentFont = False
+      ParentShowHint = False
+      ShowHint = True
+      TabOrder = 0
+      Text = 'Chip size'
+    end
+    object Label2: TLabel
+      Left = 24
+      Height = 16
+      Top = 40
+      Width = 100
+      Alignment = taCenter
+      AutoSize = False
+      Caption = 'Размер'
+      ParentColor = False
+      ParentFont = False
+    end
+    object ComboPageSize: TComboBox
+      Left = 24
+      Height = 23
+      Hint = 'Размер страницы'
+      Top = 96
+      Width = 100
+      ItemHeight = 15
+      Items.Strings = (
+        '4'
+        '8'
+        '16'
+        '32'
+        '64'
+        '128'
+        '256'
+        '264'
+        '512'
+        '528'
+        '1024'
+        '1056'
+      )
+      MaxLength = 10
+      ParentFont = False
+      ParentShowHint = False
+      ShowHint = True
+      TabOrder = 1
+      Text = 'Page size'
+    end
+    object Label1: TLabel
+      Left = 24
+      Height = 16
+      Top = 80
+      Width = 100
+      Alignment = taCenter
+      AutoSize = False
+      Caption = 'Страница'
+      ParentColor = False
+      ParentFont = False
+    end
+    object Label4: TLabel
+      Left = 24
+      Height = 16
+      Top = 120
+      Width = 100
+      Alignment = taCenter
+      AutoSize = False
+      Caption = 'Тип адреса'
+      ParentColor = False
+      ParentFont = False
+      Visible = False
+    end
+    object ComboAddrType: TComboBox
+      Left = 24
+      Height = 23
+      Hint = 'Тип адресации к памяти'
+      Top = 136
+      Width = 100
+      ItemHeight = 15
+      Items.Strings = (
+        '7BIT'
+        '1BYTE'
+        '1BYTE_1BIT'
+        '1BYTE_2BIT'
+        '1BYTE_3BIT'
+        '2BYTE'
+        '2BYTE_1BIT'
+      )
+      ParentFont = False
+      ParentShowHint = False
+      ShowHint = True
+      Style = csDropDownList
+      TabOrder = 2
+      Visible = False
+    end
+    object ComboMWBitLen: TComboBox
+      Left = 24
+      Height = 23
+      Hint = 'Длинна адреса в битах'
+      Top = 96
+      Width = 100
+      ItemHeight = 15
+      Items.Strings = (
+        '6'
+        '8'
+        '10'
+        '11'
+        '12'
+      )
+      ParentFont = False
+      ParentShowHint = False
+      ShowHint = True
+      TabOrder = 3
+      Text = 'MW addr len'
+      Visible = False
+    end
+    object Label5: TLabel
+      Left = 24
+      Height = 16
+      Top = 80
+      Width = 100
+      Alignment = taCenter
+      AutoSize = False
+      Caption = 'Длина адреса'
+      ParentColor = False
+      ParentFont = False
+      Visible = False
+    end
+    object Label3: TLabel
+      Left = 8
+      Height = 15
+      Top = 0
+      Width = 52
+      Caption = 'EEPROM: '
+      ParentColor = False
+      ParentFont = False
+    end
+    object LabelChipName: TLabel
+      Left = 8
+      Height = 22
+      Top = 16
+      Width = 144
+      AutoSize = False
+      Font.Style = [fsBold]
+      ParentColor = False
+      ParentFont = False
+    end
+    object ComboSPICMD: TComboBox
+      Left = 24
+      Height = 23
+      Top = 136
+      Width = 100
+      ItemHeight = 15
+      ItemIndex = 0
+      Items.Strings = (
+        '25xx'
+        '45xx'
+        'KB9012'
+        '95xx'
+      )
+      ParentFont = False
+      Style = csDropDownList
+      TabOrder = 4
+      Text = '25xx'
+      OnChange = ComboSPICMDChange
+    end
+    object LabelSPICMD: TLabel
+      Left = 24
+      Height = 16
+      Top = 120
+      Width = 100
+      Alignment = taCenter
+      AutoSize = False
+      Caption = 'Команды SPI'
+      ParentColor = False
+      ParentFont = False
+    end
+    object Panel_I2C_DevAddr: TPanel
+      Left = 8
+      Height = 64
+      Top = 168
+      Width = 144
+      BevelOuter = bvNone
+      ClientHeight = 64
+      ClientWidth = 144
+      ParentFont = False
+      TabOrder = 5
+      UseDockManager = False
+      Visible = False
+      object Label_I2C_DevAddr: TLabel
+        Left = 0
+        Height = 15
+        Top = 0
+        Width = 140
+        Alignment = taCenter
+        AutoSize = False
+        Caption = 'Адрес устройства'
+        ParentColor = False
+        ParentFont = False
+      end
+      object CheckBox_I2C_DevA7: TToggleBox
+        Left = 0
+        Height = 20
+        Top = 17
+        Width = 20
+        Caption = '1'
+        Checked = True
+        ParentFont = False
+        State = cbChecked
+        TabOrder = 0
+        OnChange = I2C_DevAddrChange
+      end
+      object CheckBox_I2C_DevA6: TToggleBox
+        Left = 20
+        Height = 20
+        Top = 17
+        Width = 20
+        Caption = '0'
+        ParentFont = False
+        TabOrder = 1
+        OnChange = I2C_DevAddrChange
+      end
+      object CheckBox_I2C_DevA5: TToggleBox
+        Left = 40
+        Height = 20
+        Top = 17
+        Width = 20
+        Caption = '1'
+        Checked = True
+        ParentFont = False
+        State = cbChecked
+        TabOrder = 2
+        OnChange = I2C_DevAddrChange
+      end
+      object CheckBox_I2C_DevA4: TToggleBox
+        Left = 60
+        Height = 20
+        Top = 17
+        Width = 20
+        Caption = '0'
+        ParentFont = False
+        TabOrder = 3
+        OnChange = I2C_DevAddrChange
+      end
+      object CheckBox_I2C_A2: TToggleBox
+        Left = 80
+        Height = 20
+        Top = 17
+        Width = 20
+        Caption = '0'
+        ParentFont = False
+        TabOrder = 4
+        OnChange = I2C_DevAddrChange
+      end
+      object CheckBox_I2C_A1: TToggleBox
+        Left = 100
+        Height = 20
+        Top = 17
+        Width = 20
+        Caption = '0'
+        ParentFont = False
+        TabOrder = 5
+        OnChange = I2C_DevAddrChange
+      end
+      object CheckBox_I2C_A0: TToggleBox
+        Left = 120
+        Height = 20
+        Top = 17
+        Width = 20
+        Caption = '0'
+        ParentFont = False
+        TabOrder = 6
+        OnChange = I2C_DevAddrChange
+      end
+      object CheckBox_I2C_ByteRead: TCheckBox
+        Left = 0
+        Height = 19
+        Top = 40
+        Width = 126
+        Caption = 'Побайтовое чтение'
+        ParentFont = False
+        TabOrder = 7
+      end
+    end
+    object ComboBox_chip_scriptrun: TComboBox
+      Left = 15
+      Height = 23
+      Top = 248
+      Width = 100
+      ItemHeight = 15
+      Style = csDropDownList
+      TabOrder = 6
+    end
+    object SpeedButton1: TSpeedButton
+      Left = 124
+      Height = 22
+      Hint = 'Выполнить скрипт'
+      Top = 248
+      Width = 23
+      Caption = '->'
+      OnClick = SpeedButton1Click
+      ShowHint = True
+      ParentShowHint = False
+    end
+    object Label_chip_scripts: TLabel
+      Left = 15
+      Height = 15
+      Top = 233
+      Width = 97
+      Alignment = taCenter
+      AutoSize = False
+      Caption = 'Скрипты'
+      ParentColor = False
+    end
+    object StartAddressEdit: TEdit
+      Left = 24
+      Height = 23
+      Top = 296
+      Width = 63
+      MaxLength = 8
+      TabOrder = 7
+      Text = '000000'
+      OnChange = StartAddressEditChange
+      OnKeyPress = StartAddressEditKeyPress
+    end
+    object Label6: TLabel
+      Left = 8
+      Height = 15
+      Top = 304
+      Width = 12
+      Caption = '0x'
+      ParentColor = False
+    end
+    object Label_StartAddress: TLabel
+      Left = 8
+      Height = 15
+      Top = 275
+      Width = 138
+      Alignment = taCenter
+      AutoSize = False
+      Caption = 'Начальный адрес'
+      ParentColor = False
+    end
+  end
+  object MPHexEditorEx: TMPHexEditorEx
+    Cursor = crIBeam
+    Left = 160
+    Height = 369
+    Top = 34
+    Width = 693
+    CreateBackup = False
+    BackupExtension = '.bak'
+    SupportsOtherClipFormats = False
+    PrintOptions.MarginLeft = 20
+    PrintOptions.MarginTop = 15
+    PrintOptions.MarginRight = 25
+    PrintOptions.MarginBottom = 25
+    PrintOptions.Flags = [pfSelectionBold, pfMonochrome]
+    PrintFont.Height = -15
+    PrintFont.Name = 'Courier New'
+    ZoomOnWheel = False
+    Align = alClient
+    Anchors = []
+    BorderStyle = bsNone
+    Font.CharSet = RUSSIAN_CHARSET
+    Font.Color = clBlack
+    Font.Height = -13
+    Font.Name = 'Courier New'
+    Font.Pitch = fpFixed
+    Font.Quality = fqDraft
+    Font.Style = [fsBold]
+    ParentFont = False
+    PopupMenu = EditorPopupMenu
+    TabOrder = 3
+    BytesPerRow = 16
+    BytesPerColumn = 1
+    Translation = tkASCII
+    OffsetFormat = '8!10:0x|'
+    Colors.Background = clWindow
+    Colors.ChangedBackground = 11075583
+    Colors.ChangedText = clMaroon
+    Colors.CursorFrame = clNavy
+    Colors.Offset = clBlack
+    Colors.OddColumn = clNavy
+    Colors.EvenColumn = clNavy
+    Colors.CurrentOffsetBackground = clBtnShadow
+    Colors.OffsetBackground = clBtnFace
+    Colors.CurrentOffset = clBtnHighlight
+    Colors.Grid = clBtnFace
+    Colors.NonFocusCursorFrame = clAqua
+    Colors.ActiveFieldBackground = clWindow
+    FocusFrame = True
+    NoSizeChange = True
+    DrawGridLines = True
+    Version = 'september 30, 2007; � markus stephany, vcl[at]mirkes[dot]de'
+    OnChange = MPHexEditorExChange
+    DrawGutter3D = False
+    ShowRuler = True
+    BytesPerBlock = 8
+    SeparateBlocksInCharField = False
+    ColWidths = (
+      109
+      6
+      8
+      16
+      8
+      16
+      8
+      16
+      8
+      16
+      8
+      16
+      8
+      16
+      8
+      16
+      8
+      24
+      8
+      16
+      8
+      16
+      8
+      16
+      8
+      16
+      8
+      16
+      8
+      16
+      8
+      16
+      8
+      16
+      8
+      9
+      9
+      9
+      9
+      9
+      9
+      9
+      9
+      9
+      9
+      9
+      9
+      9
+      9
+      9
+      17
+    )
+    RowHeights = (
+      21
+      0
+      18
+    )
+  end
+  object StatusBar: TStatusBar
+    Left = 0
+    Height = 23
+    Top = 403
+    Width = 853
+    Panels = <    
+      item
+        Width = 120
+      end    
+      item
+        Width = 80
+      end    
+      item
+        Width = 500
+      end    
+      item
+        Alignment = taRightJustify
+        Width = 50
+      end>
+    ParentFont = False
+    SimplePanel = False
+    SizeGrip = False
+  end
+  object Log: TMemo
+    Left = 0
+    Height = 90
+    Top = 451
+    Width = 853
+    Align = alBottom
+    Lines.Strings = (
+      'AsProgrammer ProX v4'
+      'https://github.com/patnawa/AsProgrammer-ProX'
+      'based on AsProgrammer dregmod by @therealdreg and UsbAsp-flash by nofeletru'
+    )
+    ParentFont = False
+    PopupMenu = LogPopupMenu
+    ReadOnly = True
+    ScrollBars = ssVertical
+    TabOrder = 5
+  end
+  object Splitter1: TSplitter
+    Cursor = crVSplit
+    Left = 0
+    Height = 5
+    Top = 446
+    Width = 853
+    Align = alBottom
+    Anchors = [akBottom]
+    ResizeAnchor = akBottom
+  end
+  object OpenDialog: TOpenDialog
+    Filter = 'All firmware|*.bin;*.rom;*.hex;*.ihx;*.s19;*.s28;*.s37;*.srec;*.mot;*.sre|Binary|*.bin;*.rom|Intel HEX|*.hex;*.ihx|Motorola S-record|*.s19;*.s28;*.s37;*.srec;*.mot;*.sre|All files|*.*'
+    Options = [ofFileMustExist, ofEnableSizing, ofViewDetail]
+    Left = 312
+    Top = 128
+  end
+  object SaveDialog: TSaveDialog
+    Filter = 'Binary|*.bin|Intel HEX|*.hex|Motorola S-record|*.s19|All files|*.*'
+    Options = [ofOverwritePrompt, ofEnableSizing, ofViewDetail]
+    Left = 272
+    Top = 128
+  end
+  object MainMenu: TMainMenu
+    Left = 336
+    Top = 64
+    object MenuChip: TMenuItem
+      Caption = 'Микросхема'
+      object MenuFindChip: TMenuItem
+        Caption = 'Поиск'
+        OnClick = MenuFindChipClick
+      end
+      object MenuSFDPDetect: TMenuItem
+        Caption = 'Detect chip via SFDP'
+        OnClick = MenuSFDPDetectClick
+      end
+      object MenuChecksum: TMenuItem
+        Caption = 'Buffer checksum (CRC32 / SUM)'
+        OnClick = MenuChecksumClick
+      end
+      object MenuCompareChip: TMenuItem
+        Caption = 'Compare buffer with chip'
+        OnClick = MenuCompareChipClick
+      end
+      object MenuOpenProject: TMenuItem
+        Caption = 'Open project...'
+        OnClick = MenuOpenProjectClick
+      end
+      object MenuSaveProject: TMenuItem
+        Caption = 'Save project...'
+        OnClick = MenuSaveProjectClick
+      end
+      object MenuRunBatch: TMenuItem
+        Caption = 'Run production batch...'
+        OnClick = MenuRunBatchClick
+      end
+      object MenuSecReg: TMenuItem
+        Caption = 'Read unique ID and security registers'
+        OnClick = MenuSecRegClick
+      end
+    end
+    object MenuOptions: TMenuItem
+      Caption = 'Настройки'
+      object MenuAutoCheck: TMenuItem
+        AutoCheck = True
+        Caption = 'Проверка записи'
+      end
+      object MenuCheckIDBefore: TMenuItem
+        AutoCheck = True
+        Caption = 'Check chip ID before write / erase'
+        Checked = True
+      end
+      object MenuAutoBackup: TMenuItem
+        AutoCheck = True
+        Caption = 'Back up the chip before write / erase (slow)'
+      end
+      object MenuProdConfig: TMenuItem
+        Caption = 'Serial number and production...'
+        OnClick = MenuProdConfigClick
+      end
+      object MenuBackgroundOps: TMenuItem
+        AutoCheck = True
+        Caption = 'Run operations in background (GUI stays responsive)'
+        OnClick = MenuBackgroundOpsClick
+      end
+      object MenuDarkTheme: TMenuItem
+        AutoCheck = True
+        Caption = 'Dark theme'
+        OnClick = MenuDarkThemeClick
+      end
+      object MenuSPI: TMenuItem
+        Caption = 'SPI'
+        object MenuCH347SPIClock: TMenuItem
+          Caption = 'Частота'
+          object MenuCH347SPIClock60MHz: TMenuItem
+            AutoCheck = True
+            Caption = '60 MHz'
+            Checked = True
+            RadioItem = True
+          end
+          object MenuCH347SPIClock30MHz: TMenuItem
+            Tag = 1
+            AutoCheck = True
+            Caption = '30 MHz'
+            RadioItem = True
+          end
+          object MenuCH347SPIClock15MHz: TMenuItem
+            Tag = 2
+            AutoCheck = True
+            Caption = '15 MHz'
+            RadioItem = True
+          end
+          object MenuCH347SPIClock7_5MHz: TMenuItem
+            Tag = 3
+            AutoCheck = True
+            Caption = '7.5 MHz'
+            RadioItem = True
+          end
+          object MenuCH347SPIClock3_75MHz: TMenuItem
+            Tag = 4
+            AutoCheck = True
+            Caption = '3.75 MHz'
+            RadioItem = True
+          end
+          object MenuCH347SPIClock1_875MHz: TMenuItem
+            Tag = 5
+            AutoCheck = True
+            Caption = '1.875 MHz'
+            RadioItem = True
+          end
+          object MenuCH347SPIClock937_5KHz: TMenuItem
+            Tag = 6
+            AutoCheck = True
+            Caption = '937.5 KHz'
+            RadioItem = True
+          end
+          object MenuCH347SPIClock468_75KHz: TMenuItem
+            Tag = 7
+            AutoCheck = True
+            Caption = '468.75 KHz'
+            RadioItem = True
+          end
+        end
+        object MenuArduinoSPIClock: TMenuItem
+          Caption = 'Частота'
+          object MenuArduinoISP8MHz: TMenuItem
+            AutoCheck = True
+            Caption = '8 MHz'
+            Checked = True
+            RadioItem = True
+          end
+          object MenuArduinoISP4MHz: TMenuItem
+            Tag = 1
+            AutoCheck = True
+            Caption = '4 MHz'
+            RadioItem = True
+          end
+          object MenuArduinoISP2MHz: TMenuItem
+            Tag = 2
+            AutoCheck = True
+            Caption = '2 MHz'
+            RadioItem = True
+          end
+          object MenuArduinoISP1MHz: TMenuItem
+            Tag = 3
+            AutoCheck = True
+            Caption = '1 MHz'
+            RadioItem = True
+          end
+        end
+        object MenuSPIClock: TMenuItem
+          Caption = 'Частота'
+          object Menu3Mhz: TMenuItem
+            Tag = 13
+            AutoCheck = True
+            Caption = '3 MHz'
+            RadioItem = True
+          end
+          object Menu1_5Mhz: TMenuItem
+            Tag = 12
+            AutoCheck = True
+            Caption = '1.5 MHz'
+            Checked = True
+            RadioItem = True
+          end
+          object Menu750Khz: TMenuItem
+            Tag = 11
+            AutoCheck = True
+            Caption = '750 kHz'
+            RadioItem = True
+          end
+          object Menu375Khz: TMenuItem
+            Tag = 10
+            AutoCheck = True
+            Caption = '375 kHz'
+            RadioItem = True
+          end
+          object Menu187_5Khz: TMenuItem
+            Tag = 9
+            AutoCheck = True
+            Caption = '187.5 kHz'
+            RadioItem = True
+          end
+          object Menu93_75Khz: TMenuItem
+            Tag = 8
+            AutoCheck = True
+            Caption = '93.75 kHz'
+            RadioItem = True
+          end
+          object Menu32Khz: TMenuItem
+            Tag = 7
+            AutoCheck = True
+            Caption = '32 kHz (soft)'
+            RadioItem = True
+          end
+        end
+        object MenuAVRISPSPIClock: TMenuItem
+          Caption = 'Частота'
+          object MenuAVRISP8MHz: TMenuItem
+            AutoCheck = True
+            Caption = '8(4) MHz'
+            Checked = True
+            RadioItem = True
+          end
+          object MenuAVRISP4MHz: TMenuItem
+            Tag = 1
+            AutoCheck = True
+            Caption = '4 MHz'
+            RadioItem = True
+          end
+          object MenuAVRISP2MHz: TMenuItem
+            Tag = 2
+            AutoCheck = True
+            Caption = '2 MHz'
+            RadioItem = True
+          end
+          object MenuAVRISP1MHz: TMenuItem
+            Tag = 3
+            AutoCheck = True
+            Caption = '1 MHz'
+            RadioItem = True
+          end
+          object MenuAVRISP500KHz: TMenuItem
+            Tag = 4
+            AutoCheck = True
+            Caption = '500 KHz'
+            RadioItem = True
+          end
+          object MenuAVRISP250KHz: TMenuItem
+            Tag = 5
+            AutoCheck = True
+            Caption = '250 KHz'
+            RadioItem = True
+          end
+          object MenuAVRISP125KHz: TMenuItem
+            Tag = 6
+            AutoCheck = True
+            Caption = '125 KHz'
+            RadioItem = True
+          end
+        end
+        object MenuFT232SPIClock: TMenuItem
+          Caption = 'Частота'
+          object MenuFT232SPI30Mhz: TMenuItem
+            Tag = 1
+            AutoCheck = True
+            Caption = '30 Mhz'
+            Checked = True
+            RadioItem = True
+          end
+          object MenuFT232SPI6Mhz: TMenuItem
+            AutoCheck = True
+            Caption = '6 Mhz'
+            RadioItem = True
+          end
+        end
+        object MenuIgnoreBusyBit: TMenuItem
+          AutoCheck = True
+          Caption = 'Не проверять Busy бит'
+        end
+        object MenuSkipFF: TMenuItem
+          AutoCheck = True
+          Caption = 'Не писать FF'
+        end
+        object MenuSendAB: TMenuItem
+          AutoCheck = True
+          Caption = 'Выводить чип из сна'
+        end
+        object MenuItemBenchmark: TMenuItem
+          Caption = 'Benchmark'
+          OnClick = MenuItemBenchmarkClick
+        end
+      end
+      object MenuMicrowire: TMenuItem
+        Caption = 'Microwire (soft)'
+        object MenuMWClock: TMenuItem
+          Caption = 'Частота'
+          object MenuMW32Khz: TMenuItem
+            Tag = 7
+            AutoCheck = True
+            Caption = '32 kHz'
+            Checked = True
+            RadioItem = True
+          end
+          object MenuMW16Khz: TMenuItem
+            Tag = 6
+            AutoCheck = True
+            Caption = '16 kHz'
+            RadioItem = True
+          end
+          object MenuMW8Khz: TMenuItem
+            Tag = 5
+            AutoCheck = True
+            Caption = '8 kHz'
+            RadioItem = True
+          end
+        end
+      end
+      object MenuArduinoCOMPort: TMenuItem
+        Caption = 'Arduino COMPort:'
+        OnClick = MenuArduinoCOMPortClick
+      end
+    end
+    object MenuItemHardware: TMenuItem
+	  Caption = 'Программатор'
+      object MenuHWBUZZPIRAT: TMenuItem
+	    Checked = True
+        AutoCheck = True
+        Caption = 'Buzzpirat / Buspirate'
+        RadioItem = True
+        OnClick = MenuHWBUZZPIRATClick
+      end
+      object MenuHWUSBASP: TMenuItem
+        AutoCheck = True
+        Caption = 'UsbAsp'
+        RadioItem = True
+        OnClick = MenuHWUSBASPClick
+      end
+      object MenuHWCH341A: TMenuItem
+        AutoCheck = True
+        Caption = 'CH341a'
+        RadioItem = True
+        OnClick = MenuHWCH341AClick
+      end
+      object MenuHWCH347: TMenuItem
+        AutoCheck = True
+        Caption = 'CH347T'
+        RadioItem = True
+        OnClick = MenuHWCH347Click
+      end
+      object MenuHWAVRISP: TMenuItem
+        AutoCheck = True
+        Caption = 'AVRISP-MKII'
+        RadioItem = True
+        OnClick = MenuHWAVRISPClick
+      end
+      object MenuHWARDUINO: TMenuItem
+        AutoCheck = True
+        Caption = 'Arduino'
+        RadioItem = True
+        OnClick = MenuHWARDUINOClick
+      end
+      object MenuHWFT232H: TMenuItem
+        AutoCheck = True
+        Caption = 'FT232H'
+        RadioItem = True
+        OnClick = MenuHWFT232HClick
+      end
+    end
+    object ScriptsMenuItem: TMenuItem
+      Caption = 'Скрипты'
+      OnClick = ScriptsMenuItemClick
+    end
+    object LangMenuItem: TMenuItem
+      Caption = 'Language'
+    end
+	object MenuBuzzpirat: TMenuItem
+        Caption = 'Buzzpirat / Buspirate'
+		object MenuBuzzpiratCOMPort: TMenuItem
+          Caption = 'Buzzpirat / Buspirate COMPort:'
+          OnClick = MenuBuzzpiratCOMPortClick
+        end
+		object MenuBuzzpiratSPIBUG: TMenuItem
+          AutoCheck = True
+          Caption = 'Fix SPI Firmware Bug'
+        end
+		object MenuBuzzpiratPullups: TMenuItem
+          AutoCheck = True
+          Caption = 'Pull UPs ON (buzzif check)'
+        end
+        object MenuBuzzpiratPower: TMenuItem
+		  Checked = True
+          AutoCheck = True
+          Caption = 'Power ON (buzzif check)'
+        end
+		object MenuBuzzpiratLessdbg: TMenuItem
+		  Checked = True
+          AutoCheck = True
+          Caption = 'Less debug (TO-DO)'
+        end
+		object MenuBuzzpiratResetEach: TMenuItem
+		  Checked = True
+          AutoCheck = True
+          Caption = 'Reset on each init (unselect for chip programming)'
+        end
+		object MenuBuzzpiratSubI2C: TMenuItem
+			Caption = 'I2C'
+			object MenuBuzzpiratI2CClock: TMenuItem
+			  Caption = 'Clock'
+			  object MenuBuzzpiratI2C400KHz: TMenuItem
+				AutoCheck = True
+				Caption = '400 KHz (not recommended)'
+				RadioItem = True
+			  end
+			  object MenuBuzzpiratI2C100KHz: TMenuItem
+				AutoCheck = True
+				Caption = '100 KHz'
+				RadioItem = True
+			  end
+			  object MenuBuzzpiratI2C50KHz: TMenuItem
+				AutoCheck = True
+				Caption = '50 KHz'
+				Checked = True
+				RadioItem = True
+			  end
+			  object MenuBuzzpiratI2C5KHz: TMenuItem
+				AutoCheck = True
+				Caption = '5 KHz'
+				RadioItem = True
+			  end
+			end
+			object MenuBuzzpiratJustI2CScan: TMenuItem
+			  Checked = False
+			  AutoCheck = True
+			  Caption = 'Just I2C Scanner'
+			end
+		end
+		object MenuBuzzpiratSubSPI: TMenuItem
+			Caption = 'SPI'
+			object MenuBuzzpiratSPINormal: TMenuItem
+				AutoCheck = True
+				Caption = 'Output Normal (H=3.3V)'
+				Checked = True
+				RadioItem = True
+			end
+			object MenuBuzzpiratSPIHiz: TMenuItem
+				Tag = 1
+				AutoCheck = True
+				Caption = 'Output Open drain (H=Hi-Z) (buzzif check)'
+				RadioItem = True
+			end  
+			object MenuBuzzpiratSPIClock: TMenuItem
+			  Caption = 'Clock'
+			  object MenuBuzzpiratSPI8MHz: TMenuItem
+				AutoCheck = True
+				Caption = '8 MHz (not recommended)'
+				RadioItem = True
+			  end
+			  object MenuBuzzpiratSPI4MHz: TMenuItem
+				AutoCheck = True
+				Caption = '4 MHz (not recommended)'
+				RadioItem = True
+			  end
+			  object MenuBuzzpiratSPI2P6MHz: TMenuItem
+				AutoCheck = True
+				Caption = '2.6 MHz (not recommended)'
+				RadioItem = True
+			  end
+			  object MenuBuzzpiratSPI2MHz: TMenuItem
+				AutoCheck = True
+				Caption = '2 MHz (not recommended)'
+				RadioItem = True
+			  end
+			  object MenuBuzzpiratSPI1MHz: TMenuItem
+				AutoCheck = True
+				Caption = '1 MHz (not recommended)'
+				RadioItem = True
+			  end
+			  object MenuBuzzpiratSPI250KHz: TMenuItem
+				AutoCheck = True
+				Caption = '250 KHz'
+				RadioItem = True
+			  end
+			  object MenuBuzzpiratSPI125KHz: TMenuItem
+				AutoCheck = True
+				Caption = '125 KHz'
+				Checked = True
+				RadioItem = True
+			  end
+			  object MenuBuzzpiratSPI30KHz: TMenuItem
+				AutoCheck = True
+				Caption = '30 KHz (1v8)'
+				RadioItem = True
+			  end
+			end
+		end
+		object DebugconsoleMenuItem: TMenuItem
+		  Caption = 'Launch Console'
+		  OnClick = DebugconsoleMenuItemClick
+		end
+		object ClearBuzzlogMenuItem: TMenuItem
+		  Caption = 'kill tail and clear log on init'
+		  Checked = True
+          AutoCheck = True
+		end
+		object BzHelpMenuItem: TMenuItem
+			Caption = 'Help'
+		OnClick = BzHelpMenuItemClick
+    end
+    end
+	object ListcomportsMenuItem: TMenuItem
+      Caption = 'List FREE COM Ports'
+      OnClick = ListcomportsMenuItemClick
+    end
+	object CreditsMenuItem: TMenuItem
+      Caption = 'Credits'
+      OnClick = CreditsMenuItemClick
+    end
+  end
+  object ImageList: TImageList
+    Height = 32
+    Width = 32
+    Left = 400
+    Top = 64
+    Bitmap = {
+      4C7A090000002000000020000000281700000000000078DAED9D075855C7B6C7
+      49BC89BD80D849B1DCFBBEDCBC77EFBB31268258308822767A97DE142C514145
+      9A8835A8D1C4AEC4286AEC60A5A34893A6410541145014915E54E4FEDF9A3980
+      80700A1C4CBEFBCEE1FB7D7BF63E67D67F664DD9B38E73B600E4204346134A8A
+      8BE4ABAAAA7ABC7EFDFAA3674F9F0CAAADADFD0B3BD6D5D57DF8ACE0C9E07FFF
+      FBDF1F3C799C37941D9F163C1E2C6DFDC41B912A897131DFE63ECCFE2CF874E0
+      BCDC870F3EBB7CFEB759798F1E7E7AE1F4D179F9798F942E9E393AF7C9E3FCA1
+      97CF1D9F5D5C5C2CCFCAD251DD376FDE74090A0ED65AB77E9DAB879787872F1D
+      3DBD3DD6F8ACF559E5E5EDE9EEE9EDB9C6D3CB63CDEA356BBCD8B9FB1A772F6F
+      1F4FF755EEABBDF7EEDF67C9FCD55E6D56FE9898EB2A5BB66FC5961F89EDCD71
+      5BED8AD59EAB797AF33BF8C3CBC71BACCDDAA35DFCE2B9C29D5B49FF58ECB260
+      AB91A9310C4C0C61606C007D237D420F7A867AD035D085AEBE0E74F4E6415B77
+      1EE6E9CCC15CEDD9983B6F16E6CC9D090B7363A4A7DDFCE78BA2C2FE92EABF28
+      7ADEFF5A44889AC57C13CC9C3D035A33A7633A63862634B5A661DAF4A998AAA9
+      81A9D3A64063AA3AA6684C86FA14357CA73E0993BF9B08B5C913A03D6F26988D
+      A2E7858A92EA979795F6B9979EF6A5A3830DB466690974674C7B577B1A694FFD
+      0EEA0DFAA43D99B4D5268F8799890132C8465969495F49F5D9D88A0CB930C5CC
+      D4A0B1CE9A5A53B936F38711D966DAD3A66B60D66C2DEEEFA67557531B8F7973
+      6620E2EA058DF68CC717E4B3B4A4B8D136D6F31BEBCCB4CCCC4DB0CA7D25B6F8
+      6F86B3CB02AC5DE7033B7B1B2C5EE2C2B527D76B4F9AA40A23431D301B45854F
+      07309BA3945E40ECFE57FC423E262A6CA229D553E0EF29DCDF9B366FA4BACE82
+      DF86753875E624162C7444C0E1007A4FFDADB69A2AE98F83367DEE3AD9287E51
+      A4C0B425D167F3DB639A53EC6C2DB936F335EB671696E658EEBA0CB676D6BCDE
+      F3A8BF3358DB337D06ABFBC4892A986F668CFCDC879F34684BA2FFF041D6F0AB
+      C1276798900F79FFA63E369DFA9FDBAA1558E3E90E1F5F2FEE831FB6FD0057B7
+      E534D63DB0E4FB45B0B6B18089A921264C50C1DC395A68AA2D0E0DFA7534EF3D
+      CCC9FEDC92C65FC3D862FE37A6F6B0B034C3F7CB96900FAC60EF608BE9D42F1D
+      9DECE0E0680BA705F6D09A3195F49525D66EAA9F939D3982D5DF98EADF30AED9
+      D1D26A3E68FE85AFDF5AEA8BC670F7580D1B5B2BDEDECCE7ACDE13C62B63FCF8
+      B1D09E33B3DDFA6CEECD79903DDC9CDAF03BF589BC6F337D2B6B0BAAA303F7B5
+      A3933D8C8CF561423E11682B376A8F57FD16C634473EC8BE3FA23DEDFFE07EC6
+      A8B08BA7A79B1AEBD5CF2713A041EDB092E67C5F1A73CB572C85DBCA1554774B
+      2C5ABC104B972D82969606E98E852A69AB8EFB063A34FF855D3AA3999579F7AF
+      92EAB3FA6767DD1FC9C65FC39852A73660FA0E8E76D40EE6B0B436A73630E2ED
+      6E676F4D7517688F23ED712A636048F786ACFB99A31AEEC312D53F2B6364C4A5
+      B39AACFEBC6D09756A87D534F7D8DA5962A1B323D765C7EF972DE6BE67756ED0
+      5651FE1ABA741F8AB8726E6A76E6BDBFB6E7DE7B9FDAC098F41BFA156B0757B7
+      65BC8F339F37946129F505A6CF7555BEE6DA2A6347439FEE8B9919F7FED69E75
+      08EBFF5157CF6BB0FA33DBBC4F35C0DAB7BE8D05751ED3586715E5D150266DE5
+      6FBF82AEF62C448706A93FB87F6F94A4FA6C5D57DFFFA3985EA366BD6E839FDF
+      EA7E2DD01DFB15C67EFB2F8E11EFFFD92398ADF6AC416A6A6ABAADF3F375A5F1
+      BDC7CED6628FD97CD3A3B6B6967BCCCD4D82EDECAC769B991A25DBDBDBECB2B4
+      343B6067674DE786C9B6F4591313FDFB5656F3F7FBAEF37563363AB2FE63EBA7
+      E78585032E9D3B313B3F2F4F29EE5AF8F8C4F81BDF24C6462BC7C644ABA424DE
+      1813117A593D2D39E12BB6D6484B8A1F1D722948B3ACACAC0FCB2B8D3528E349
+      7EDE307E5FA47511B35B5A52DCAFAAAAB247457959EF72D2AA282FEFCDD619D5
+      74AD84D6BEB29845860C19B2F85F16FFCBE27F59FCFF6788FF5B32E3DC08BCAF
+      F8BF2DFDB6CA20CDF8BFB68D39A041BFB5324823FE6F6A5F1C9AADFFA510FF4B
+      AADFB40CD288FF3B527F69C6FF6DDD8784B5BFB4E37F49FB7F67C4FF928C7F59
+      FCFFA789FFF107C7FF7C7C53FC0F8AFF41F13F28FE07C5FFA0F81F14FF83E27F
+      3AB7A673437ADF8AC6A33E28FEA771E20B59FC2F43860C19B2F85F16FFB72BFE
+      C77F52FC2FCEDABFB3E27F61B187738B32483BFE6FABBE6D5D9776FC2FCCD7AD
+      F940DAF1BFA4FAEF23FE17E67F69FDFBFFD5E0533372B232478AD275EE84F8DF
+      8462E31CAA07B3254E9D5BC63FD2F8F7FF508AA1B35BC43FA2B43B3BFE1747BF
+      33E37F71EBDFD9F1FF1FF5EFFFE2D6BFB3E27F71F465F1BF2CFE97C5FF32FE08
+      64AFB7AF4DB346ADF3D31A5EEB37FD7330E44C92A546834DBFE9C36B37CE18E9
+      D39AFE7AD2CEB971168F53C39019F51B2C4EBE84E1B18EC3EC24066EC4AD733B
+      9178D40FAC8EADE9B3F23D498B40E426539C5A360DBD3D2A21E756D561989D23
+      0EAA38EFAA89D4535B05BE6D43BFE056047F3FC04E1539B9B9282A2EEE30CCCE
+      DEF9A3B9DDD493A2F423917E762B0EDA28F37CC5A5A51D86D9D96DF615120F7B
+      91FE0F42F59FDE8EC2F5AD96A4AFC2F399D39AFC62D8D576C3F2333B7BCC46E3
+      A2FB2CA4FEB645B8FEEF5188D96E8D83B6E378BE8ACACA0EC3FD6F3E1A973CE6
+      20E5B7CD42F59FFD1E8D1B3FDAE250BD7E754D4D8711B4FFD7B8EC3917292736
+      09D74FBF86D89D768DFD6FBE45C7FCCFF20BF4C7E08AB736524F6C14A91FFFB3
+      0302ECC7F37CB56FDE741866679FC51884ACD545CAF10D42F50BEF5C47C22EA7
+      467D5AD37418AE6FF90D427DF5487FBD08FD6B48DCB300BF384C90AAFFF75B7E
+      8B303F03D2F713AE9F1E8D9B7B9DF18BE344A9D67FBFD5B7085F6F8494C07522
+      FA7F1492F62FC26129EB1FB01E8B888DC6483DE62B5CFF7604920F2CC6918593
+      793E6971D05699DF57528FAD153EFFDC0AE3FA577C0DA80C6A38EC344900F983
+      C1DA85F50D06EBA36F51E563F690DD383E77300E725428AD82732B293EDA628E
+      D44011FA69215CFF1DA84D92F6B9E0E63E67DE3F12F72C44C2EE057CACC4FFEC
+      C8C76CDC4FF67CEE88DD614B73980D9F4763B659F1F9FC1AC3DF42A47E41CA95
+      66BA3FB85941D7400FDAFABA62C3BEAF5DEBA48D53CB3571DA550B67A9EEA17E
+      86BC1CA9C77C84EA3F49BEDC4C5F976CC52425E06E7626B21EE5E0D1E33C3C7E
+      5680C21745746F2BC1F3E2223C7DFE0C8F9F16E0517E1E321F6421F9561AFFEE
+      3861D742C4EF7146ECEE85B8E8A5CBFD911AE82D5C3FE962337D569F8C9C2C9C
+      BA1A0C27174718999970D87790E9991948F9FD166293131115771D57A3C27085
+      C8C8BECFF3C5FFEC446DE288A483CB11B2CE88DF57D202BD84EA3FBE19FC8E7E
+      566E0ECE855DE2E9AB3EDA348FEBF0744AFA2DC4356A872338F432C2AE47E25E
+      56267F3F6137F58D5D8E48FD7535C2379A226EA73DD28EB6A9FF31D74F0C7A47
+      3F273F1797AF85F374D466330EB79F9A8C6B09B108BD16890B615778FDA3E362
+      1AF5591F4DA43E7AFBB80FC23799F13E9A16E8D9A0DFBB89F6078422BB9E1F7F
+      F61DFDDC27F98888BFCED371AC7F533D58FAC6CD7884DF88C6E588105C22226E
+      5C431CF5958C2C81FF6FB2F1426325FDF446446C99CFC74ADAD146FDA144B77A
+      FDAEC430763D2FEE0C6E1FF36CA6CFFA5B6C4A224F37BD1E45756DF43BF92026
+      310E49B7521BDBBF61CCDE0BDA8A281A7BCC1F4DEA3F82E8D34C5F6B44E18995
+      3AAF1F450752193C1A750AA87F27535BDB3BD9C1D8D4883084858DC53B7E4F48
+      4DC2EDBBE9484DBFDDACAC19C1DB11BDD58ACF1DB7C86EBDFEC826FADCFFA314
+      7B7CB5566B64E609B779AF1F5D3B8687D14705FA85CFF0FCC50B14163D472E1B
+      6354BF3B1977699CA592BF13119F7C13892949FCFC261DA36F08DAEACE998DB8
+      737A3DB2430F20F1901BF5036F2405B862BDD608B6FE1FD6C4FF0D3E18FCB781
+      3DFFB94E6B647643BCC2EC18D0587E8B5E23FA867A4DCE9B7F86E57B1BF3BC85
+      629C371ED3866F6B52F7A6AF8F88BEC4005696FA3E224D06110A2DEADDD6EB43
+      A28B9491BD64AF3FED4BCFD870B338EB0B1D03BD3A7D13837DD2D6D735314A5F
+      B1611D7CF7EE128AC78E6D303033ADD435303095B67EC6C38738151A82C08B17
+      DAE47C64247E0E3C025D23FD4A5D5DDDE1D2D43F1F118E55DBFD4572E8EC19EC
+      3A7AA4CEDAD1BE76BE8D158CCC4D9B61C8FE1D9FFF5BBE11A85DA1676440E535
+      E0EDA76B6C78BA2DFD7361A162E933FC0F07E0F8E54B381972B519ECDAE1A0F3
+      3870E634769D38861F8F1CC6968083F0DBB7079E3BB743C750AF5A1CFD659BD6
+      C396D679FA540703D3B630160B66C36EE9222CF5F315A9EFB6750BC7C17D25EB
+      EB78433174475FCC06B365B7D2951DDBD0374C3F4B7D6FF9E60D1CF3C5CEBCBD
+      9ED35AFB1EADA91819C2C8CE6A93C2A2226ECBD47941DBFAC686E9A7AE5CC112
+      F211C3CC45A0FFA2A4043979B406A5B60DA2FEDF3617DFE17248081EE6E5918D
+      626ECB64A19350FDE3172EC0D9C78B63426565794ACBCB51F0EC99680A9B52D8
+      8CD2B2326ECBD8C9B14D7D1DD23F161C0C470F778E319595E5A9ACAC4431F9E0
+      FA8D1B08A7B12F092C0FFB0EB0B2AA8ADB327272685BDF483F3D302888FA881B
+      C788CACAF2D4BC7CC9F3B74A7535A74A042FC906B365E8406B7721FA47CF9F87
+      D5F2651C0307C13A9FF5DDDADA5AA4A4A4203E3E5E3409098DA4A4A6F2EFA0DE
+      D4D5715BFA76B642F58F9C3B07F3258B397AF6763C4F1DE56565900456DEA6B0
+      6B3C36B6B569535F9BF40FD39C65E2BC90A3CB3ECBFC5F53C3F656B549A51854
+      D5B7BFAE8D75DBFA867AE9078E1F27BF3B70B4ADAC04FD9FFA2EEB7FD1D7AFC1
+      7E81A344DF05B485AEA1FE2B83F9661E4C97E64633BA6724D2B1D6CCCA12FAA6
+      26024C68DE34368235B583A59D0D2CC91FECBE77E65A7487D9B47B17DDA74C2E
+      727D53E3820D3FEDC0A1F367111074AE550E0707E15464044E45454A85656BDC
+      ABE7E9EB2C14E81B05F86CF5AF3B49F6DF17A6561665DA06DAFF62FA730D75A7
+      593A39949DA07BFFFBE057BA3FD35AA086D62E3C26D1D4D4EC4AE7D501178371
+      3C3CACD3F13F7880EEC926094DBF7FA07B72A4DFCE1D08646BAF4EC675AD0F66
+      CE99E5DF34D69B3079D20A5BE70575BF5EBD8223749FEB2C98FDF93496945555
+      CD9A8E7D2525A5BFEA18EA17684BF85D9FC4907D5A0B162B282828B5987EBAD4
+      C7C7EC7B89519D08FBDE45B1FE3B0FD9EB0F7EC9F640C8F8FFB4FF5FD8F3995A
+      EEFF6FF89CB4F6FFB7F5FCA9D6F6FFB7FC6C47F7FF0B7BFE556BFBFF5BFB7C7B
+      F6FF0BD31567FF7FCBBC92ECFF17475B9CFDFF2D6D88B3FF5F5C6D71F7FFB766
+      AFB5FDFF92E84ABAFFBF35DB4DF7FFB7475BD2FDFFAD69B03DC3EDD56ECFFE7F
+      719F2BD7D9CFFF6B4DBBB5FDFF22F7FF4AB8FF5F58DD5BEEFF17F7F7CFE2EEFF
+      97F4D97EE2FEF64A9CFDFFADE934ECD1EE481944EDFF6FAB8E2DF7FFB7B70CC2
+      F6FFB76653D8FEFFF694A1ADFDFFADD91277FFBF2465686DFF7FCBFCEDD9FF2F
+      6E195AEEFF6F99AF23FBFFC5698F96FBFF9B694B61FFBF387EE8ECFDFFE2B483
+      6CFFBF0C193264F1BFECF7FFB2DFFFCB9EFF277BFE9FF49EFFD7D9CFFF6FEFB3
+      DFA4F5FBFF8EE877F6EFFFA51DFF4BF2FB7F69C7FFD278FE5F67FCFEBF23FAEF
+      E3F97FEFFBF9FF7F96DFFFCB9EFF27FBFDBFECF7FF3264C890218BFF65F1BF2C
+      FE97C5FFFF79F1BFA8E7FFBFAFFFFFAFB61D734047E37F8D4420F1399AC5FF71
+      376294030EECB338540F4BB36B9D11FFDFBC79139F1D4263FC1FB07FB7556478
+      28F2F372F1EC690187A5A322C2F0EB2F874C3B23FE6765905B8855ECF97F7131
+      D1484DBE89C3870E62BBFF160E4BA7A524E1EAE5CB888C089FD419CFFFA3328C
+      66CF5BC8CACAC22F07F65B9CFEEDB80EBBC63873FAD4DC7DBB7EB2637ED9B665
+      D31269C5FF6E0F01D5704071231AE27FFE7BA37BF7EEFD577E7EFEB0068D8282
+      82C11BBDDDDDA3432F63D7B6CD2ED28AFF4987FB9EC1E2FFDDEB5C57E5DC4AC0
+      4EDF55AB5AB6F3E695CEEB12C3827060E39AE59D11FF1B9E78407EB88BBE7E77
+      204F0C5AFF3B866EB8ED3C8418B421DD5961FD5D97BE7E7717296EBCB750FFB7
+      47B3A51DFF0FF34BC2B112E06C25708E08AA02826B04B034BB7686082C06FBEC
+      6269C7FF43BCE3B036AB06725B52F117FF3474DD71075D565DE0B034BB26B729
+      05878A80C15E71CBA51DFF0FF1BC0E97D42A4C087F0DF5E83AC8EFCD82DC9839
+      1C9666D754435FC33F1F18B4E6DA4A69C7FF03DD23619D5485EE5B53D167C76D
+      28EE7F00B9694E1C9666D7BAFAA7C2EB018D97D511ABA51DFF0F700B817E6C15
+      2647D44283EADA7FEF7DC8E9AEE6B034BB36897CE37287F4578478493BFE575C
+      7E1133A2ABD0737B1AAFABC2EEBB18B03F8BC3D2EC5AF76D69304F03FA2FBBE0
+      23ED757BFF6541500BABC6941860EA0D4061CF3D28EECBE4B034BBA67E1D9811
+      4BBEF9FEBCAFB4F5C7FB5D82FCA2D3907739C5E94F69C5C56738FDEBAFF763EF
+      515AD5EFD25269EBB339B761BE1705FBEC9F22DE93FDC9FEC4F8F31E560DF589
+      65D0D4286F93E953CBA131A90C3E4AD552ED596E4A55D037A8C09EA057F0DCF7
+      0A5EFB9BE3BD4F8017B136E015D434CAB0EAD32AA994C1755825F4F4CAB1FBDC
+      2B98AFAE861961BAB239266E028CDD2A884A5878D13D604A29567E52898E6957
+      4057B70C3F9D7D0513A6B3B292F49AC3F49A62C470A5F7D654418D97A1A25D65
+      70552A27ED52EC3CF912C62B04361BEDAF788BE1F2262C1360C08EDFB3CF5319
+      BE2BA1B6288764F52E81B66E09769C78F5D65E0BFB064B05E83396BC45777113
+      E8DC604515264D2E263F948A5506CFA12598AB538CADC75EF1FC7A4B84D86F60
+      5125B417D7E32C601E63A1E0A8BBB40A132717C15BA9446419268D7F8A1F025F
+      41C7A5127328EF4CA70ACC5A5089D9743E83ECCD7014A045CCA1F3B9F4192D87
+      4A4CB3AAC00C5BBAE6449FB5A76B3695986E2D6036BDAFED520DE56F0A44EA6B
+      7C578065FEAF307E6E197CBDAB909E5A8BC37B6B6046FDF0E8811A04ECAEE6B0
+      B4A56119942797E0D7BDD5B893568B9D5B6BF08D5A190CA92C81F43ECBC78E9A
+      D3CBA0655949EBE42722F5A7A83D86CBFA57F05955CAE398972FEBF8F1C71F2A
+      DE79A6C2A1BD15A8AD7DF7590BC63682BC5535758DD726A89762ECD87CD1F557
+      CB83D3DA9738B25F60A34FCF5C74ED998F0F3FCA859CDC43C4C554F3EB727239
+      D0185FC0D396A645749E8FA4841A7E3E62482E3F8E5379CA61AF05CEA5B44E7F
+      24525F75EC0368D95563FCD8478D65F75F5F848FE5F3D16DE03324C509FC20D7
+      E329DC960A6C7FF07136FA7D518EEF173FE3E776164FF871B9CB0B0E7BFDFD7F
+      F2F1F967F745EA2BF44DC3D839D5A4F51463FE95D958065BCB5C7CD8E709E90B
+      FC22D7351FAE8BF278BAB77C167A0FAF808B9DA0CCB6F373DF69931E839EA367
+      B75491FA8AF2C91833B31AFFF83215439432D0ABE74D9EDF7531C512BDF270B3
+      513F17B3B432787A83DF13F27F223FB257DF9EF1FCF8E5970974FD0E7A0E2EC4
+      C05115E8D93D59B4BE4202BE502EC299134F9A95FF8BBFA7A14BAF1CA4DF2E11
+      E877A3D8E2E34C3C7F5AFE4E5DBFFCFA51A37E1F9AC3077C5E8A81C3CBD1A37B
+      BC48FDFEF2F1F8DF4915E82B1F070B5AA8337AF48A453FA562F419940B25A528
+      7CF9DFF1E83DE01114C9E7727209D09A9EC619302016DDFBE5A1DF80BB5C5BBE
+      DF55280C2B43FF61C550542A23FD1B22F5FBF58AC668F59790FFB40C7D294F1F
+      96FFB3325E0786E267E550F8A48C8E94FEA484EC96A2CFE052F41A500A793AF6
+      A7F95361A820AD3084F20E2E1130B412DD3F8E12A96F239784218313F1E91795
+      E8AFC4EC17D3B198D78133B49E21F50C16A0C01854CFC0260C20ED41ACED6361
+      F341B258F70023B9580C19148B6123ABC85E8908FB2D502C867CFF06C817FD2B
+      D0A36B0C8C3F8895E81E6824178DC103AF43697815E4154BDAB04F2808E8D780
+      3CD18F5142309F47C3986CB5670D60281781418AD1184AEBB9BEF2252DEC17A3
+      6FDF065EA06F9F7A7A33E8FD3E15E8F65138988D8EAC810CE5AE62A06218F589
+      2AF421BB02FB02FA307AD5D35340EF9E344E7A55E2E32EA1A41D229535A081DC
+      250CE81F8221035E92FD0AB25F4E5A4DE8514F377AAF7B35BA7E7895B42F4975
+      0D6C49F63EFAF010BA7C7044387201B094B2B6ECEF3FF7EFFF002AF32C3B
+    }
+  end
+  object DropDownMenu: TPopupMenu
+    Left = 480
+    Top = 176
+    object ComboItem1: TMenuItem
+      Caption = 'Снять защиту -> стереть -> записать -> проверить'
+      OnClick = ComboItem1Click
+    end
+    object MenuSmartWrite: TMenuItem
+      Caption = 'Unlock -> erase only needed sectors -> write -> verify'
+      OnClick = MenuSmartWriteClick
+    end
+  end
+  object EraseDropDownMenu: TPopupMenu
+    Left = 480
+    Top = 344
+    object MenuEraseChip: TMenuItem
+      Caption = 'Erase whole chip'
+      OnClick = ButtonEraseClick
+    end
+    object MenuEraseSeparator: TMenuItem
+      Caption = '-'
+      Enabled = False
+    end
+    object MenuEraseRangeAuto: TMenuItem
+      Caption = 'Erase range (sector size from chip list / SFDP)'
+      OnClick = MenuEraseRangeClick
+    end
+    object MenuEraseRange4K: TMenuItem
+      Tag = 4096
+      Caption = 'Erase range - 4 KB sectors (20h)'
+      OnClick = MenuEraseRangeClick
+    end
+    object MenuEraseRange32K: TMenuItem
+      Tag = 32768
+      Caption = 'Erase range - 32 KB blocks (52h)'
+      OnClick = MenuEraseRangeClick
+    end
+    object MenuEraseRange64K: TMenuItem
+      Tag = 65536
+      Caption = 'Erase range - 64 KB blocks (D8h)'
+      OnClick = MenuEraseRangeClick
+    end
+  end
+  object EditorPopupMenu: TPopupMenu
+    Left = 448
+    Top = 56
+    object MenuGotoOffset: TMenuItem
+      Caption = 'Перейти по адресу'
+      OnClick = MenuGotoOffsetClick
+    end
+    object MenuFind: TMenuItem
+      Caption = 'Поиск'
+      ShortCut = 16454
+      OnClick = MenuFindClick
+    end
+    object AllowInsertItem: TMenuItem
+      AutoCheck = True
+      Caption = 'Разрешить режим вставки'
+      OnClick = AllowInsertItemClick
+    end
+    object MenuItem1: TMenuItem
+      Caption = '-'
+      Enabled = False
+    end
+    object MenuCopyToClip: TMenuItem
+      Caption = 'Копировать'
+      OnClick = MenuCopyToClipClick
+    end
+    object MenuFillBuffer: TMenuItem
+      Caption = 'Fill buffer...'
+      OnClick = MenuFillBufferClick
+    end
+    object MenuSwapBytes: TMenuItem
+      Caption = 'Swap bytes (16-bit words)'
+      OnClick = MenuSwapBytesClick
+    end
+  end
+  object LogPopupMenu: TPopupMenu
+    Left = 512
+    Top = 56
+    object CopyLogMenuItem: TMenuItem
+      Caption = 'Копировать'
+      OnClick = CopyLogMenuItemClick
+    end
+    object MenuItem4: TMenuItem
+      Caption = '-'
+    end
+    object ClearLogMenuItem: TMenuItem
+      Caption = 'Очистить'
+      OnClick = ClearLogMenuItemClick
+    end
+    object SaveLogMenuItem: TMenuItem
+      Caption = 'Save log to file...'
+      OnClick = SaveLogMenuItemClick
+    end
+  end
+  object DropdownMenuLock: TPopupMenu
+    Left = 480
+    Top = 240
+    object MenuItemLockFlash: TMenuItem
+      Caption = 'Поставить защиту'
+      OnClick = MenuItemLockFlashClick
+    end
+    object MenuItemReadSreg: TMenuItem
+      Caption = 'Прочитать SREG'
+      OnClick = MenuItemReadSregClick
+    end
+    object MenuItemEditSreg: TMenuItem
+      Caption = 'Изменить SREG'
+      OnClick = MenuItemEditSregClick
+    end
+  end
+  object BlankCheckDropDownMenu: TPopupMenu
+    Left = 480
+    Top = 296
+    object BlankCheckMenuItem: TMenuItem
+      Caption = 'Проверка на чистоту'
+      OnClick = BlankCheckMenuItemClick
+    end
+  end
+end

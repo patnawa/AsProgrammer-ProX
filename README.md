@@ -1,0 +1,250 @@
+<div align="center">
+
+# AsProgrammer ProX
+
+**Flash memory programmer for SPI · I²C · MicroWire**
+
+Sector-level erase · SFDP auto-detect · checksums · responsive UI
+
+![version](https://img.shields.io/badge/version-4.0-2BB3F3?style=flat-square)
+![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
+![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
+![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
+
+</div>
+
+---
+
+## What it does
+
+Reads, writes, erases and verifies serial flash and EEPROM chips through cheap USB programmers.
+v4 closes most of the feature gap with the software that ships with expensive commercial
+programmers, while staying free and open source.
+
+| | |
+|---|---|
+| **Sector / block erase** | Erase only the sectors covering a range instead of the whole chip. 4 KB (`20h`), 32 KB (`52h`), 64 KB (`D8h`), or the size declared by the chip. |
+| **Smart write** | Unlock → erase just the needed sectors → write → verify, in one action. Patch a region of a BIOS without touching the rest. |
+| **SFDP auto-detect** | Reads the JEDEC JESD216 parameter table from the chip itself (`5Ah`) and fills in size, page size, address width and erase types. Works on chips missing from the database. |
+| **File formats** | Binary, **Intel HEX** and **Motorola S-record**, both directions. Gaps in a text file load as erased bytes, and record checksums are validated on load. |
+| **Checksums** | CRC32, SUM32 and SUM16 over the buffer, for comparing a dump against a reference image. |
+| **Buffer tools** | Fill buffer, swap bytes (16-bit), find, go to address, copy — plus save the log to a file. |
+| **Chip ID check** | Verifies the JEDEC id against the selected chip before every write and erase. On by default. |
+| **Pre-write backup** | Optionally dumps the chip to `backup\<chip>_<timestamp>.bin` before it is changed, and aborts if the dump fails. |
+| **Compare with chip** | Reports every differing range and a total, instead of stopping at the first mismatch. |
+| **Project files** | One `.apxproj` holds the chip, all settings and the buffer. |
+| **Serial numbers** | Increment, BCD date + increment or random, 1–8 bytes at any address, either endianness, appended to a log file as they are issued. |
+| **Production batch** | Program N chips in a row with a prompt between each and a pass/fail summary. |
+| **Background operations** | Long transfers run on a worker thread; the window stays responsive and Cancel keeps working. |
+| **Dark industrial theme** | Modern flat icon set and a dark palette. Toggle in *Options*. |
+| **Scripting** | Pascal-like scripts per chip for parts that need a custom unlock or programming sequence. |
+| **Editable chip database** | Plain XML. Adding a chip is one line. |
+
+## Supported hardware
+
+| Programmer | SPI | I²C | MicroWire | Notes |
+|---|:--:|:--:|:--:|---|
+| **CH347** | ● | ● | | Fastest option, USB 2.0. Recommended. |
+| **CH341a** | ● | ● | | The ubiquitous black/green dongle. |
+| **FT232H** | ● | ● | | Up to 30 MHz. |
+| **UsbAsp** | ● | ● | ● | |
+| **Buzzpirat / Bus Pirate** | ● | ● | | Slow but flexible; open-drain and pull-ups for 1.8 V parts. |
+| **AVRISP (LUFA)** | ● | | | |
+| **Arduino** | ● | | | |
+
+Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-series I²C EEPROM,
+93-series MicroWire EEPROM, KB9012 EC.
+
+---
+
+## Quick start
+
+1. Download the latest release: **https://github.com/patnawa/AsProgrammer-ProX/releases**
+2. Unzip anywhere and run `AsProgrammer.exe` (keep the whole folder together — see
+   [Runtime files](#runtime-files)).
+3. Pick your programmer under **Hardware**.
+4. Connect the chip, press **Read ID**. If the chip is not in the list, use
+   **Chip → Detect chip via SFDP**.
+5. Press **Read** to dump, or load a file and use the write button's dropdown →
+   *Unlock → erase only needed sectors → write → verify*.
+
+> **Wrong voltage kills chips.** 1.8 V parts must never see 3.3 V or 5 V. Power them from an
+> external 1.8 V supply, tie all grounds together, and set the programmer output to open-drain.
+
+---
+
+## Runtime files
+
+The `.exe` alone will not start. These must sit next to it — the DLL imports are static, so Windows
+resolves them at process start even for hardware you never touch. A missing one produces a
+*"cannot proceed because … .DLL was not found"* system error that looks like a broken build.
+
+| File | Needed for |
+|---|---|
+| `CH341DLL.DLL` | CH341a |
+| `CH347DLL.DLL` | CH347 |
+| `ftd2xx.dll` | FT232H |
+| `libusb0.dll` | UsbAsp / AVRISP |
+| `buzzpirathlp.dll`, `libiconv2.dll`, `libintl3.dll` | Buzzpirat / Bus Pirate |
+
+Data files, resolved relative to the working directory:
+
+```
+AsProgrammer.exe
+chiplist.xml          chip database
+settings.xml          saved options
+lang/                 translations (.po)
+scripts/              per-chip scripts
+icons/modern/         toolbar icon set (falls back to built-in icons if absent)
+```
+
+---
+
+## Chip database
+
+`chiplist.xml` is plain XML, grouped by protocol and manufacturer.
+
+```xml
+<W25Q64BV id="EF4017" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+```
+
+| Attribute | Meaning |
+|---|---|
+| `id` | JEDEC id in hex, as returned by `9Fh` / `90h` / `ABh` / `15h` |
+| `page` | Program page size in bytes. `SSTB` / `SSTW` for SST AAI byte/word mode |
+| `size` | Chip size in bytes |
+| `sector` | *Optional.* Erase sector size in bytes. Defaults to `4096` |
+| `sectorcmd` | *Optional.* Erase opcode in hex. Derived from `sector` when absent |
+| `spicmd` | Command set: `25`, `45`, `95`, `KB` |
+| `script` | Script file in `scripts/` for chips needing a custom sequence |
+
+Unknown ids can be looked up in
+[flashrom's `flashchips.h`](https://chromium.googlesource.com/chromiumos/third_party/flashrom/+/798d2adc9527f724bc5096a646cf99efdbb6b59e/flashchips.h).
+Winbond ids are prefixed `EF`, so `0x6019` becomes `EF6019`. Append `_1.8V` to the name for 1.8 V
+parts. *(Method by Floyd77.)*
+
+---
+
+## Building from source
+
+Requires **32-bit Lazarus** — the project targets `win32` and the 64-bit IDE cannot build it
+without an i386 cross compiler.
+
+```powershell
+git clone https://github.com/patnawa/AsProgrammer-ProX.git
+cd AsProgrammer-ProX
+
+# the hex editor component lives in a zip to keep the tree small
+Expand-Archive mphexeditor.zip -DestinationPath .
+
+lazbuild --add-package-link mphexeditor\src\mphexeditorlaz.lpk
+lazbuild --build-mode=Release software\AsProgrammer.lpi
+```
+
+The binary lands in `software\AsProgrammer.exe`. Copy the runtime DLLs and data files next to it
+before running — they are not kept in the repository.
+
+To work in the IDE instead: open `software\AsProgrammer.lpi`, then *Package → Open package file*,
+select `mphexeditor\src\mphexeditorlaz.lpk` and *Use → Install*.
+
+Regenerate the toolbar icons after editing `tools\make_icons.ps1`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\make_icons.ps1
+```
+
+### Tests
+
+`tests\fftest.lpr` round-trips the Intel HEX and S-record readers and writers and checks sparse
+files, bad checksums and extended linear addressing. It needs no hardware:
+
+```powershell
+copy software\fileformats.pas tests\
+cd tests && fpc -Twin32 -Pi386 -Mobjfpc -Sh fftest.lpr && .\fftest.exe
+```
+
+### Layout
+
+```
+software/
+  main.pas / main.lfm     main window, flash operations, options
+  spi25.pas               25-series SPI primitives
+  spi45.pas spi95.pas     DataFlash and SPI EEPROM
+  i2c.pas microwire.pas   I²C and MicroWire
+  sfdp.pas                JESD216 parameter table parser
+  opthread.pas            worker thread for long operations
+  basehw.pas              hardware abstraction
+  ch341hw ch347hw ft232hhw usbasphw avrisphw arduinohw buzzpirathw
+  pascalc.pas             script interpreter
+tools/make_icons.ps1      icon set generator
+chiplist.xml              chip database
+```
+
+### Debugging `buzzpirathlp.dll`
+
+Build the x86 Debug configuration of `software\buzzpirathlp\buzzpirathlp.sln` in Visual Studio
+2019, run a Release build of the program outside the IDE, then *Debug → Attach to Process* and pick
+`AsProgrammer.exe`. Drop a `__debugbreak();` where you want to stop.
+
+---
+
+## Notes & caveats
+
+- **Background operations** are experimental. Off by default; leave them off until you have tested
+  on a chip you can afford to lose. With the option off the behaviour is identical to v3.
+- With background operations off, long transfers freeze the window. That is expected, not a crash —
+  watch the log and be patient.
+- **Virtual machines and USB hubs cause problems.** Use a native OS and a direct port.
+- Use a **short, good quality USB cable**. On the Bus Pirate keep protocol clocks around 100 kHz;
+  long cables, clip adapters and low voltages all demand slower clocks.
+- Some Bus Pirate firmwares have a binary-SPI bug. *Buzzpirat → Fix SPI Firmware Bug* works around
+  it, and breaks firmwares that don't have the bug. Only enable it if you hit the problem.
+- Reading flash from a Debug build can raise exceptions — use Release.
+
+### Wiring examples
+
+<details>
+<summary>24C256 I²C EEPROM at 5 V</summary>
+
+Feed 5 V to both `VCC` and `VPU`, enable pull-ups in *Buzzpirat → COM Port*, then select
+*IC → I2C → _24Cxxx → _24C256*. *Buzzpirat → I2C → Just I2C Scanner* confirms the chip answers.
+</details>
+
+<details>
+<summary>W25Q64 SPI NOR at 3.3 V</summary>
+
+3.3 V to `VCC`, select the SPI radio button, press **Read ID** and pick `W25Q64BV`.
+</details>
+
+<details>
+<summary>W25Q64FW SPI NOR at 1.8 V</summary>
+
+**Never apply 3.3 V or 5 V.** Power `VCC` and `VPU` from an external 1.8 V supply with all grounds
+tied together, enable pull-ups, set SPI output to open-drain and the clock to 30 kHz.
+</details>
+
+---
+
+## Credits
+
+AsProgrammer ProX stands on:
+
+- **[nofeletru](https://github.com/nofeletru/UsbAsp-flash)** — AsProgrammer / UsbAsp-flash, the original program
+- **[therealdreg](https://github.com/therealdreg/asprogrammer-dregmod)** — the dregmod fork this one started from, and its Buzzpirat / Bus Pirate support
+- **[Ian Lesnet](https://buspirate.com/)** — creator of the Bus Pirate
+- **Floyd77** — the add-an-unknown-chip method
+
+Related: [flashrom-dregmod](https://github.com/therealdreg/flashrom-dregmod) ·
+[flashrom for Windows x64](https://github.com/therealdreg/flashrom_build_windows_x64) ·
+[buzzpirat](https://github.com/therealdreg/buzzpirat)
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright (c) 2015 nofeletru and contributors.
+
+## Issues
+
+https://github.com/patnawa/AsProgrammer-ProX/issues
+
+If the same problem reproduces with the official
+[UsbAsp-flash](https://github.com/nofeletru/UsbAsp-flash), please report it upstream instead.
