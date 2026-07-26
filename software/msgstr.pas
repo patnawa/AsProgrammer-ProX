@@ -124,6 +124,21 @@ resourcestring
                          + 'and highlighted in the editor.';
   STR_DIFF_IN_EDITOR     = 'The editor shows the second side, with the differing bytes highlighted';
   STR_DIFF_TOO_MANY      = 'Too many differences to highlight them all, stopped early';
+  STR_BUSY_TIMEOUT       = 'The chip stayed busy for more than %d seconds. Giving up. '
+                         + 'Check the wiring, the supply voltage and the write protection';
+  STR_PAGE_RETRY         = 'Page verify failed, writing it again. Attempt ';
+  STR_VOLT_WARN          = 'This chip is a 1.8 V part.'#13#10#13#10
+                         + 'The selected programmer does not supply 1.8 V. Powering the chip '
+                         + 'from 3.3 V or 5 V will destroy it.'#13#10#13#10
+                         + 'Only continue if the chip is powered from an external 1.8 V supply '
+                         + 'with all grounds tied together.'#13#10#13#10
+                         + 'Continue?';
+  STR_VOLT_ABORTED       = 'Aborted because of the supply voltage';
+  STR_NOT_BLANK          = 'The chip is not blank at 0x';
+  STR_NOT_BLANK_Q        = 'The area to be written is not erased.'#13#10
+                         + 'Writing over data that is not erased usually fails.'#13#10#13#10
+                         + 'Continue anyway?';
+  STR_BLANK_CHECKING     = 'Checking that the target area is erased...';
   STR_DRIVER_HINT        = 'If the programmer is plugged in, its driver is probably missing. '
                          + 'Install it from ';
   STR_DRIVER_HINT_COM    = 'Check the COM port setting and that no other program is holding '

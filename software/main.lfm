@@ -810,6 +810,10 @@ object MainForm: TMainForm
         Caption = 'Detect the programmer automatically'
         Checked = True
       end
+      object MenuBlankBeforeWrite: TMenuItem
+        AutoCheck = True
+        Caption = 'Check the area is erased before writing'
+      end
       object MenuCheckIDBefore: TMenuItem
         AutoCheck = True
         Caption = 'Check chip ID before write / erase'

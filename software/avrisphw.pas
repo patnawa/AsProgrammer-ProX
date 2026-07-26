@@ -347,9 +347,12 @@ end;
 function TAvrispHardware.I2CWriteByte(data: byte): boolean;
 var
   buff: array[0..1] of byte;
-  status: byte = 1;
+  status: byte;
 begin
   if not FDevOpened then Exit;
+
+  //ค่าเริ่มต้นต้องตั้งตอนรัน ไม่ใช่ตอนประกาศ
+  status := 1;
 
   buff[0] := CMD_I2C_WRITEBYTE;
   buff[1] := data;

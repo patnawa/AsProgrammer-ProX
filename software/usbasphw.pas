@@ -250,9 +250,12 @@ end;
 function TUsbAspHardware.I2CReadByte(ack: boolean): byte;
 var
   data: byte;
-  acknack: byte = 1;
+  acknack: byte;
 begin
   if not FDevOpened then Exit;
+
+  //ค่าเริ่มต้นต้องตั้งตอนรัน ไม่ใช่ตอนประกาศ ไม่งั้นค่าค้างจากการเรียกก่อน
+  acknack := 1;
   if ack then acknack := 0;
   USBSendControlMessage(FDevHandle, USB2PC, USBASP_FUNC_I2C_READBYTE, acknack, 0, 1, data);
   Result := data;

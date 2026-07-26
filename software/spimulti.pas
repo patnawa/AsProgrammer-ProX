@@ -59,8 +59,11 @@ end;
 function UsbAspMulti_ReadReg(RegAddr: Word; var RegData: byte): integer;
 var
   Buff: array[0..4] of byte;
-  ReadyStat: byte = 0;
+  ReadyStat: byte;
 begin
+  //FPC ทำตัวแปร local ที่มีค่าเริ่มต้นให้เป็น static ค่าจะค้างข้ามการเรียก
+  ReadyStat := 0;
+
   Buff[0] := $30;
   Buff[1] := 0;
 
@@ -126,8 +129,9 @@ end;
 
 function UsbAspMulti_Busy(): boolean;
 var
-  sreg: byte = $FF;
+  sreg: byte;
 begin
+  sreg := $FF;
   UsbAspMulti_ReadReg($FEAD, sreg);
   if (sreg and 2) = 0 then Result := False else Result := True;
 end;

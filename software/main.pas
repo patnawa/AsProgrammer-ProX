@@ -69,6 +69,7 @@ type
     ChipView: TPaintBox;
     HwTimer: TTimer;
     MenuAutoDetectHW: TMenuItem;
+    MenuBlankBeforeWrite: TMenuItem;
     MainMenu: TMainMenu;
     Log: TMemo;
     Menu32Khz: TMenuItem;
@@ -1182,14 +1183,36 @@ begin
   if MainForm.ChipView.Height < 160 then MainForm.ChipView.Height := 160;
 end;
 
-//รอจนแฟล็ก Busy ดับ คืน false ถ้าผู้ใช้สั่งยกเลิก
-function WaitNotBusy25: boolean;
+//เวลารอสูงสุดของแต่ละคำสั่ง หน่วยเป็นมิลลิวินาที
+//ตัวเลขเผื่อไว้มากกว่าที่ดาต้าชีตระบุหลายเท่า ถ้าเกินนี้แปลว่าชิปมีปัญหาจริง
+const
+  BUSY_TIMEOUT_PAGE    = 5000;      //เขียนหนึ่งเพจ
+  BUSY_TIMEOUT_SECTOR  = 30000;     //ลบหนึ่งเซกเตอร์หรือบล็อก
+  BUSY_TIMEOUT_CHIP    = 600000;    //ลบทั้งชิป ชิปใหญ่ ๆ ใช้เวลาหลายนาที
+
+  //จำนวนครั้งที่ยอมเขียนเพจเดิมซ้ำเมื่อตรวจแล้วไม่ตรง
+  MaxPageRetry = 3;
+
+//รอจนแฟล็ก Busy ดับ
+//คืน false เมื่อผู้ใช้ยกเลิก หรือเมื่อรอเกินเวลาที่กำหนด
+//เดิมไม่มีเวลาหมดอายุเลย ชิปที่ไม่ตอบสนองจะทำให้โปรแกรมวนรอไม่รู้จบ
+function WaitNotBusy25(TimeoutMs: integer): boolean;
+var
+  Started: TDateTime;
 begin
   Result := True;
+  Started := Now;
+
   while UsbAsp25_Busy() do
   begin
     OpProcessMessages;
     if UserCancel then Exit(False);
+
+    if MilliSecondsBetween(Now, Started) > TimeoutMs then
+    begin
+      LogPrint(Format(STR_BUSY_TIMEOUT, [TimeoutMs div 1000]));
+      Exit(False);
+    end;
   end;
 end;
 
@@ -1253,7 +1276,7 @@ var
       UsbAsp25_WREN();
       UsbAsp25_EraseSector(Opcode, Addr, Use4B);
 
-      if not WaitNotBusy25 then Exit;
+      if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
 
       Inc(Addr, SectorSize);
       Inc(Idx);
@@ -1291,11 +1314,7 @@ procedure ChipErase25;
     LogPrint(STR_ERASE_NOTICE);
     Started := Now;
 
-    while UsbAsp25_Busy() do
-    begin
-      OpProcessMessages;
-      if UserCancel then Exit;
-    end;
+    if not WaitNotBusy25(BUSY_TIMEOUT_CHIP) then Exit;
 
     //การลบทั้งชิปเป็นไปไม่ได้ที่จะเสร็จในเสี้ยววินาที เกือบทุกครั้ง
     //แปลว่าชิปปฏิเสธคำสั่งเพราะยังถูกป้องกันการเขียนอยู่
@@ -1355,6 +1374,70 @@ begin
            ' ABh=' + sAB + ' 15h=' + s15);
 
   Result := MessageDlg('AsProgrammer', STR_ID_MISMATCH_Q, mtWarning, [mbYes, mbNo], 0) = mrYes;
+end;
+
+//เตือนก่อนแตะชิป 1.8 โวลต์ ถ้าเครื่องโปรแกรมจ่ายไฟให้ไม่ได้
+//CH341A จ่าย 3.3-5V, CH347 กับ FT232H จ่าย 3.3V ทั้งหมดสูงเกินไปสำหรับชิป 1.8V
+//ต่อผิดครั้งเดียวชิปพังถาวร จึงต้องถามก่อนทุกครั้ง
+function VoltageWarningOK: boolean;
+begin
+  Result := True;
+
+  //ธรรมเนียมของ chiplist คือใส่ _1.8V ต่อท้ายชื่อรุ่น
+  if Pos('1.8V', UpperCase(CurrentICParam.Name)) = 0 then Exit;
+
+  //Bus Pirate ตั้งขาเป็น open-drain แล้วจ่ายไฟจากภายนอกได้ จึงไม่เตือน
+  if AsProgrammer.Current_HW in [CHW_BUZZPIRAT, CHW_ARDUINO] then Exit;
+
+  Result := MessageDlg('AsProgrammer', STR_VOLT_WARN, mtWarning, [mbYes, mbNo], 0) = mrYes;
+  if not Result then LogPrint(STR_VOLT_ABORTED);
+end;
+
+//ตรวจว่าพื้นที่ที่จะเขียนถูกลบแล้วจริง
+//การเขียนทับข้อมูลเดิมที่ยังไม่ได้ลบ แฟลชจะทำได้แค่เปลี่ยนบิต 1 เป็น 0
+//ผลคือข้อมูลเพี้ยนโดยไม่มีใครแจ้ง จนกว่าจะไปเจอตอน verify
+function BlankCheckBeforeWrite(StartAddress, Len: cardinal): boolean;
+var
+  Chunk: array[0..2047] of byte;
+  Addr, Remain: cardinal;
+  n, i: integer;
+  BlankByte: byte;
+begin
+  Result := True;
+
+  if not MainForm.MenuBlankBeforeWrite.Checked then Exit;
+  if not MainForm.RadioSPI.Checked then Exit;
+  if MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25 then Exit;
+  if Len = 0 then Exit;
+
+  LogPrint(STR_BLANK_CHECKING);
+  BlankByte := $FF;
+  Addr := StartAddress;
+  Remain := Len;
+
+  while Remain > 0 do
+  begin
+    n := SizeOf(Chunk);
+    if cardinal(n) > Remain then n := Remain;
+
+    FillByte(Chunk, SizeOf(Chunk), 0);
+    UsbAsp25_Read($03, Addr, Chunk, n);
+
+    for i := 0 to n - 1 do
+      if Chunk[i] <> BlankByte then
+      begin
+        LogPrint(STR_NOT_BLANK + IntToHex(Addr + cardinal(i), 8));
+        Result := MessageDlg('AsProgrammer', STR_NOT_BLANK_Q,
+                             mtWarning, [mbYes, mbNo], 0) = mrYes;
+        Exit;
+      end;
+
+    Inc(Addr, cardinal(n));
+    Dec(Remain, cardinal(n));
+
+    OpProcessMessages;
+    if UserCancel then Exit(False);
+  end;
 end;
 
 //สำรองเนื้อหาชิปก่อนเขียนหรือลบ
@@ -1699,6 +1782,7 @@ var
   PageSizeTemp: word;
   ProgressPos: integer;
   SkipPage: boolean;
+  Retry, BadOffset: integer;
 
   //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
   //ตัวนับลูปต้องเป็นตัวแปรในตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
@@ -1723,6 +1807,7 @@ var
   SetProgressMax(WriteSize div PageSize);
   SetProgressPos(0);
   ProgressPos := 0;
+  Retry := 0;
 
   if WriteSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
 
@@ -1786,11 +1871,7 @@ var
     end;
 
     if (not OpUI.IgnoreBusy) and (not SkipPage) then  //ข้ามการตรวจสถานะ
-      while UsbAsp25_Busy() do
-      begin
-        OpProcessMessages;
-        if UserCancel then Exit;
-      end;
+      if not WaitNotBusy25(BUSY_TIMEOUT_PAGE) then Exit;
 
     if (OpUI.AutoCheck) and (WriteType = WT_PAGE) then
     begin
@@ -1800,13 +1881,32 @@ var
       else
         UsbAsp25_Read($03, Address, datachunk2, PageSize);
 
-      for i:=0 to PageSize-1 do
+      BadOffset := -1;
+      for i := 0 to PageSize - 1 do
         if DataChunk2[i] <> DataChunk[i] then
         begin
-          LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
-          SetProgressPos(0);
-          Exit;
+          BadOffset := i;
+          Break;
         end;
+
+      //เพจที่ตรวจไม่ผ่านให้ลองเขียนซ้ำก่อน ไม่ใช่ล้มทั้งงานทันที
+      //ความผิดพลาดชั่วคราวบนสาย USB หรือสายที่ยาวเกินไปเกิดขึ้นได้เป็นปกติ
+      if BadOffset >= 0 then
+      begin
+        if Retry < MaxPageRetry then
+        begin
+          Inc(Retry);
+          LogPrint(STR_PAGE_RETRY + IntToStr(Retry) + ' @ 0x' + IntToHex(Address, 8));
+          RomStream.Position := RomStream.Position - PageSize;
+          Continue;
+        end;
+
+        LogPrint(STR_VERIFY_ERROR + IntToHex(Address + cardinal(BadOffset), 8));
+        SetProgressPos(0);
+        Exit;
+      end;
+
+      Retry := 0;
     end;
 
     Inc(Address, PageSize);
@@ -1870,11 +1970,7 @@ begin
     BytesWrite := BytesWrite + UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
 
     if not MainForm.MenuIgnoreBusyBit.Checked then  //ข้ามการตรวจสถานะ
-      while UsbAsp25_Busy() do
-      begin
-        Application.ProcessMessages;
-        if UserCancel then Exit;
-      end;
+      if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
 
     if MainForm.MenuAutoCheck.Checked then
     begin
@@ -1930,11 +2026,7 @@ begin
     BytesWrite := BytesWrite + UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
 
     if not MainForm.MenuIgnoreBusyBit.Checked then  //ข้ามการตรวจสถานะ
-      while UsbAsp25_Busy() do
-      begin
-        Application.ProcessMessages;
-        if UserCancel then Exit;
-      end;
+      if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
 
     if MainForm.MenuAutoCheck.Checked then
     begin
@@ -1995,7 +2087,7 @@ var
   Address, BytesWrite: cardinal;
   i: integer;
   busy: boolean;
-  SkipPage: boolean = false;
+  SkipPage: boolean;
 begin
   if (StartAddress >= WriteSize) or (WriteSize = 0) {or (PageSize > WriteSize)} then
   begin
@@ -2017,7 +2109,9 @@ begin
   while Address < WriteSize do
   begin
 
-    //if (WriteSize - Address) < PageSize then PageSize := (WriteSize - Address);
+    //ต้องรีเซ็ตทุกเพจ ตัวแปรมีค่าค้างจากรอบก่อนได้
+    SkipPage := False;
+
     RomStream.ReadBuffer(DataChunk, PageSize);
 
 
@@ -3259,11 +3353,7 @@ begin
     UsbAsp25_WriteSR(sreg); //ตั้งค่า register
 
     //รอจนกว่าชิปจะพร้อม
-    while UsbAsp25_Busy() do
-    begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
-    end;
+    if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
 
     LogPrint(STR_NEW_SREG+IntToBin(sreg, 8));
   end;
@@ -3278,11 +3368,7 @@ begin
     UsbAsp95_WriteSR(sreg); //ตั้งค่า register
 
     //รอจนกว่าชิปจะพร้อม
-    while UsbAsp25_Busy() do
-    begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
-    end;
+    if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
 
     LogPrint(STR_NEW_SREG+IntToBin(sreg, 8));
   end;
@@ -3433,8 +3519,9 @@ var
   PageSize: word;
   WriteType: byte;
   I2C_DevAddr: byte;
-  I2C_ChunkSize: Word = 65535;
+  I2C_ChunkSize: Word;
 begin
+  I2C_ChunkSize := 65535;
 try
   ButtonCancel.Tag := 0;
   if not OpenDevice() then exit;
@@ -3464,8 +3551,10 @@ try
   begin
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
 
+    if not VoltageWarningOK then Exit;
     if not VerifyChipID then Exit;
     if not AutoBackupChip then Exit;
+    if not BlankCheckBeforeWrite(Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize) then Exit;
 
     if ComboSPICMD.ItemIndex <> SPI_CMD_KB then
       IsLockBitsEnabled;
@@ -3627,10 +3716,11 @@ end;
 procedure TMainForm.VerifyFlash(BlankCheck: boolean = false);
 var
   I2C_DevAddr: byte;
-  I2C_ChunkSize: Word = 65535;
+  I2C_ChunkSize: Word;
   i: Longword;
   BlankByte: byte;
 begin
+  I2C_ChunkSize := 65535;
 try
   ButtonCancel.Tag := 0;
   if not OpenDevice() then exit;
@@ -3792,11 +3882,7 @@ try
     UsbAsp25_WriteSR(sreg); //ล้างค่า register
 
     //รอจนกว่าชิปจะพร้อม
-    while UsbAsp25_Busy() do
-    begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
-    end;
+    if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
 
     UsbAsp25_ReadSR(sreg); //อ่าน register
     LogPrint(STR_NEW_SREG+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+')'));
@@ -3812,11 +3898,7 @@ try
     UsbAsp95_WriteSR(sreg); //ล้างค่า register
 
     //รอจนกว่าชิปจะพร้อม
-    while UsbAsp25_Busy() do
-    begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
-    end;
+    if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
 
     UsbAsp95_ReadSR(sreg); //อ่าน register
     LogPrint(STR_NEW_SREG+IntToBin(sreg, 8));
@@ -5306,9 +5388,10 @@ end;
 procedure TMainForm.ButtonReadClick(Sender: TObject);
 var
   I2C_DevAddr: byte;
-  I2C_ChunkSize: word = 65535;
+  I2C_ChunkSize: word;
   CRC32: Cardinal;
 begin
+  I2C_ChunkSize := 65535;
 try
   ButtonCancel.Tag := 0;
   if not OpenDevice() then exit;
@@ -5469,6 +5552,7 @@ try
   begin
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
 
+    if not VoltageWarningOK then Exit;
     if not VerifyChipID then Exit;
     if not AutoBackupChip then Exit;
 
@@ -5642,6 +5726,7 @@ try
   LogPrint(TimeToStr(Time()));
   EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
 
+  if not VoltageWarningOK then Exit;
   if not VerifyChipID then Exit;
   if not AutoBackupChip then Exit;
 
@@ -5871,6 +5956,10 @@ begin
       TDOMElement(ParentNode).SetAttribute('auto_detect_hw', '1') else
         TDOMElement(ParentNode).SetAttribute('auto_detect_hw', '0');
 
+    if MainForm.MenuBlankBeforeWrite.Checked then
+      TDOMElement(ParentNode).SetAttribute('blank_before_write', '1') else
+        TDOMElement(ParentNode).SetAttribute('blank_before_write', '0');
+
     if MainForm.MenuCheckIDBefore.Checked then
       TDOMElement(ParentNode).SetAttribute('check_id', '1') else
         TDOMElement(ParentNode).SetAttribute('check_id', '0');
@@ -5996,6 +6085,10 @@ begin
       if  Node.Attributes.GetNamedItem('dark_theme') <> nil then
         MainForm.MenuDarkTheme.Checked :=
           Node.Attributes.GetNamedItem('dark_theme').NodeValue = '1';
+
+      if  Node.Attributes.GetNamedItem('blank_before_write') <> nil then
+        MainForm.MenuBlankBeforeWrite.Checked :=
+          Node.Attributes.GetNamedItem('blank_before_write').NodeValue = '1';
 
       if  Node.Attributes.GetNamedItem('auto_detect_hw') <> nil then
         MainForm.MenuAutoDetectHW.Checked :=
