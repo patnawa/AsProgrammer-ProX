@@ -65,6 +65,7 @@ type
     Label_I2C_DevAddr: TLabel;
     LabelSPICMD: TLabel;
     LabelChipName: TLabel;
+    LabelChipInfo: TLabel;
     MainMenu: TMainMenu;
     Log: TMemo;
     Menu32Khz: TMenuItem;
@@ -720,6 +721,8 @@ end;
 
 const
   IconDirName = 'icons' + DirectorySeparator + 'modern' + DirectorySeparator;
+  IconPixelSize = 40;         //ขนาดไฟล์ไอคอนใน icons\modern
+  ToolButtonSize = 48;        //ขนาดปุ่มบนแถบเครื่องมือ
 
   //TColor เก็บเป็น $00BBGGRR ลำดับไบต์จึงกลับด้านกับโค้ดสี HTML
 
@@ -760,7 +763,11 @@ begin
     if Files.Count < MainForm.ImageList.Count then Exit;
     Files.Sort;
 
+    //ไอคอนชุดนี้เป็น 40x40 ต้องตั้งขนาดก่อนใส่ ไม่งั้นจะถูกย่อลงเป็น 32
     MainForm.ImageList.Clear;
+    MainForm.ImageList.Width := IconPixelSize;
+    MainForm.ImageList.Height := IconPixelSize;
+
     for i := 0 to Files.Count - 1 do
     begin
       png := TPortableNetworkGraphic.Create;
@@ -800,6 +807,16 @@ begin
   MainForm.Color := ChromeColor;
   MainForm.ToolBar.Color := ChromeColor;
   MainForm.ToolBar.Flat := True;
+
+  //ปุ่มบนแถบเครื่องมือต้องใหญ่พอกับไอคอน 40 พิกเซล
+  MainForm.ToolBar.ButtonWidth := ToolButtonSize;
+  MainForm.ToolBar.ButtonHeight := ToolButtonSize;
+  MainForm.ToolBar.Height := ToolButtonSize + 8;
+
+  //ตัวเลือกโปรโตคอลอยู่บนแถบเดียวกัน ต้องจัดให้อยู่กลางแนวตั้ง
+  MainForm.RadioSPI.Top := (MainForm.ToolBar.Height - MainForm.RadioSPI.Height) div 2;
+  MainForm.RadioI2C.Top := MainForm.RadioSPI.Top;
+  MainForm.RadioMw.Top  := MainForm.RadioSPI.Top;
   MainForm.StatusBar.Color := ChromeColor;
   MainForm.Panel_I2C_DevAddr.Color := ChromeColor;
   MainForm.GroupChipSettings.Color := ChromeColor;
@@ -827,6 +844,10 @@ begin
     if C is TCheckBox then TCheckBox(C).Font.Color := TextColor;
     if C is TGroupBox then TGroupBox(C).Font.Color := TextColor;
   end;
+
+  //บล็อกสรุปข้อมูลชิปใช้ฟอนต์ความกว้างคงที่ ตัวเลขจะได้เรียงตรงกัน
+  MainForm.LabelChipInfo.Font.Name := 'Consolas';
+  MainForm.LabelChipInfo.Font.Color := TextColor;
 
   MainForm.LabelChipName.Font.Color := AccentColor;
   MainForm.LabelChipName.Font.Style := [fsBold];
@@ -1034,6 +1055,88 @@ begin
     Result := CurrentICParam.SectorOpcode
   else
     Result := SectorEraseOpcode(CurrentSectorSize);
+end;
+
+//สรุปข้อมูลชิปที่เลือกไว้ ลงในช่องว่างของแผงด้านซ้าย
+//เป็นข้อมูลที่ต้องดูบ่อยที่สุดตอนทำงานจริง
+procedure UpdateChipInfo;
+var
+  s, v: string;
+begin
+  s := '';
+
+  if CurrentICParam.ID <> '' then
+  begin
+    s := 'ID      ' + CurrentICParam.ID;
+
+    if (Length(CurrentICParam.ID) >= 2) and IsNumber('$' + Copy(CurrentICParam.ID, 1, 2)) then
+    begin
+      v := JedecVendor(StrToInt('$' + Copy(CurrentICParam.ID, 1, 2)));
+      if v <> '' then s := s + LineEnding + v;
+    end;
+  end;
+
+  if CurrentICParam.Size > 0 then
+  begin
+    if s <> '' then s := s + LineEnding;
+    s := s + 'Size    ' + IntToStr(CurrentICParam.Size div 1024) + ' KB';
+  end;
+
+  if CurrentICParam.Size > 0 then
+  begin
+    s := s + LineEnding + 'Sector  ' + IntToStr(CurrentSectorSize div 1024) + ' KB (' +
+         IntToHex(CurrentSectorOpcode, 2) + 'h)';
+  end;
+
+  if s = '' then s := STR_NO_CHIP_SELECTED;
+
+  MainForm.LabelChipInfo.Caption := s;
+end;
+
+//แผงด้านซ้ายในไฟล์ฟอร์มถูกวางไว้แบบพิกัดตายตัวและแคบเกินไป
+//จัดตำแหน่งใหม่ตอนรัน ให้กว้างขึ้นและทุกอย่างอยู่กึ่งกลาง
+procedure LayoutLeftPanel;
+const
+  PanelW = 200;
+  ComboW = 116;
+var
+  cx: integer;
+begin
+  MainForm.GroupChipSettings.Width := PanelW;
+  cx := (PanelW - ComboW) div 2;
+
+  MainForm.LabelChipName.Left := 8;
+  MainForm.LabelChipName.Width := PanelW - 16;
+
+  MainForm.Label2.Left := cx;         MainForm.Label2.Width := ComboW;
+  MainForm.ComboChipSize.Left := cx;  MainForm.ComboChipSize.Width := ComboW;
+
+  MainForm.Label1.Left := cx;         MainForm.Label1.Width := ComboW;
+  MainForm.ComboPageSize.Left := cx;  MainForm.ComboPageSize.Width := ComboW;
+
+  MainForm.LabelSPICMD.Left := cx;    MainForm.LabelSPICMD.Width := ComboW;
+  MainForm.ComboSPICMD.Left := cx;    MainForm.ComboSPICMD.Width := ComboW;
+
+  MainForm.Label4.Left := cx;         MainForm.Label4.Width := ComboW;
+  MainForm.ComboAddrType.Left := cx;  MainForm.ComboAddrType.Width := ComboW;
+
+  MainForm.Label5.Left := cx;         MainForm.Label5.Width := ComboW;
+  MainForm.ComboMWBitLen.Left := cx;  MainForm.ComboMWBitLen.Width := ComboW;
+
+  MainForm.Panel_I2C_DevAddr.Left := (PanelW - MainForm.Panel_I2C_DevAddr.Width) div 2;
+
+  //บล็อกข้อมูลชิปกินความกว้างเต็มแผง ข้อความจะได้ไม่ห่อบรรทัดถี่เกินไป
+  MainForm.LabelChipInfo.Left := 12;
+  MainForm.LabelChipInfo.Width := PanelW - 24;
+
+  MainForm.Label_chip_scripts.Left := cx;
+  MainForm.ComboBox_chip_scriptrun.Left := cx;
+  MainForm.ComboBox_chip_scriptrun.Width := ComboW - 28;
+  MainForm.SpeedButton1.Left := cx + ComboW - 23;
+
+  MainForm.Label_StartAddress.Left := cx;
+  MainForm.Label6.Left := cx;
+  MainForm.StartAddressEdit.Left := cx + 20;
 end;
 
 //รอจนแฟล็ก Busy ดับ คืน false ถ้าผู้ใช้สั่งยกเลิก
@@ -1348,6 +1451,7 @@ begin
     CurrentICParam.SectorOpcode := 0;
   end;
 
+  UpdateChipInfo;
   LogPrint(STR_SFDP_APPLIED);
 end;
 
@@ -2803,6 +2907,7 @@ begin
   Result := findchip.SelectChip(ChipListFile, AName);
   if not Result then
     Result := findchip.SelectChip(ChipListFile2, AName);
+  UpdateChipInfo;
 end;
 
 procedure TMainForm.ChipClick(Sender: TObject);
@@ -3094,6 +3199,7 @@ end;
 
 procedure TMainForm.RadioI2CChange(Sender: TObject);
 begin
+  LabelChipInfo.Visible       := False;
   Label1.Visible              := True;
   Label4.Visible              := True;
   ComboAddrType.Visible       := True;
@@ -3115,6 +3221,7 @@ end;
 
 procedure TMainForm.RadioMwChange(Sender: TObject);
 begin
+  LabelChipInfo.Visible       := False;
   Label1.Visible              := False;
   ComboPageSize.Visible       := False;
   ComboAddrType.Visible       := False;
@@ -3170,6 +3277,7 @@ begin
   ComboAddrType.Visible       := False;
 
   Panel_I2C_DevAddr.Visible  := False;
+  LabelChipInfo.Visible      := True;
 
   ComboMWBitLen.Text:= 'MW addr len';
   ComboAddrType.Text:= '';
@@ -4395,7 +4503,9 @@ begin
   LoadLangList();
 
   LoadModernIcons;
+  LayoutLeftPanel;
   ApplyTheme(MenuDarkTheme.Checked);
+  UpdateChipInfo;
 end;
 
 procedure TMainForm.FormDestroy(Sender: TObject);

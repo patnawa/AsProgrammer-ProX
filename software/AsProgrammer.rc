@@ -1,0 +1,17 @@
+/* Resource script for AsProgrammer ProX
+ *
+ * Rebuild AsProgrammer.res after changing the icon or the version:
+ *   windres -i AsProgrammer.rc -o AsProgrammer.res -O res
+ *
+ * lazbuild does not regenerate the .res, only the Lazarus IDE does, so the
+ * file is compiled by hand and committed.
+ */
+
+MAINICON ICON "AsProgrammer.ico"
+
+/* RT_MANIFEST, so Windows uses themed controls and treats the app as
+   DPI aware, both of which the project options ask for */
+1 24 "AsProgrammer.manifest"
+
+/* No VERSIONINFO here on purpose: lazbuild builds its own from the
+   VersionInfo block in AsProgrammer.lpi, and two of them would collide. */

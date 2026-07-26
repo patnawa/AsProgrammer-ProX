@@ -24,10 +24,9 @@
     </i18n>
     <VersionInfo>
       <UseVersionInfo Value="True"/>
-      <AutoIncrementBuild Value="True"/>
-      <MajorVersionNr Value="2"/>
-      <BuildNr Value="15"/>
-      <Language Value="0419"/>
+      <MajorVersionNr Value="4"/>
+      <Language Value="0409"/>
+      <StringTable CompanyName="AsProgrammer ProX" FileDescription="Serial flash and EEPROM programmer" InternalName="AsProgrammer" LegalCopyright="MIT. Based on AsProgrammer by nofeletru and dregmod by therealdreg" OriginalFilename="AsProgrammer.exe" ProductName="AsProgrammer ProX" ProductVersion="4.0.0.0"/>
     </VersionInfo>
     <MacroValues Count="2">
       <Macro1 Name="LCLWidgetType" Value="win32"/>
