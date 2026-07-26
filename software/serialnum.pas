@@ -29,6 +29,12 @@ type
 
     BatchEnabled: boolean;
     BatchTarget: integer;   //จะเขียนกี่ตัวต่อหนึ่งรอบการผลิต
+
+    //--- การตามรอยการผลิต ---
+    ProdLogFile: string;    //ไฟล์ CSV บันทึกทีละตัว เว้นว่างคือไม่บันทึก
+    Operator_: string;      //ชื่อผู้ปฏิบัติงาน ลงไปในบันทึกด้วย
+    JobFile: string;        //ไฟล์งานที่กำหนด CRC32 ของภาพที่อนุมัติแล้ว
+    CheckUID: boolean;      //ไม่ยอมเขียนชิปที่เคยผ่านไปแล้ว ดูจากเลขประจำตัว
   end;
 
 //ค่าเริ่มต้น
@@ -59,6 +65,11 @@ begin
 
   S.BatchEnabled := False;
   S.BatchTarget := 10;
+
+  S.ProdLogFile := '';
+  S.Operator_ := '';
+  S.JobFile := '';
+  S.CheckUID := False;
 end;
 
 function ToBCD(V: byte): byte;

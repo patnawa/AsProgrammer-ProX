@@ -611,7 +611,6 @@
       <BR25H160 page="16" size="2048" spicmd="95"/>
       <BR25H320 page="32" size="4096" spicmd="95"/>
       <BR25L010 page="16" size="128" spicmd="95"/>
-      <BR25L010 page="16" size="128" spicmd="95"/>
       <BR25L020 page="16" size="256" spicmd="95"/>
       <BR25L040 page="16" size="512" spicmd="95"/>
       <BR25L080 page="16" size="1024" spicmd="95"/>
@@ -919,11 +918,11 @@
 	  <XM25QW512C id="204220" page="256" size="67108864"/>
 	</XMC>
     <ZEMPRO>
+      <!-- TS25L010A, TS25L020A, TS25L16AP and TS25L16BP used to be repeated
+           here with exactly the same id and size as the TERRA entries above.
+           Nothing could ever reach the copies: picking by name takes the
+           first match, and detecting by id finds the first match too. -->
       <TS25L512A id="372010" page="256" size="65536"/>
-      <TS25L010A id="373011" page="256" size="131072"/>
-      <TS25L020A id="373012" page="256" size="262144"/>
-      <TS25L16AP id="202015" page="256" size="2097152"/>
-      <TS25L16BP id="202015" page="256" size="2097152"/>
       <TS25L16P id="372015" page="256" size="2097152"/>
     </ZEMPRO>
 	<Zbit>

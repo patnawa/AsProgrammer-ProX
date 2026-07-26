@@ -25,7 +25,11 @@ programmers, while staying free and open source.
 |---|---|
 | **Sector / block erase** | Erase only the sectors covering a range instead of the whole chip. 4 KB (`20h`), 32 KB (`52h`), 64 KB (`D8h`), or the size declared by the chip. |
 | **Smart write** | Unlock → erase just the needed sectors → write → verify, in one action. Patch a region of a BIOS without touching the rest. |
-| **SFDP auto-detect** | Reads the JEDEC JESD216 parameter table from the chip itself (`5Ah`) and fills in size, page size, address width and erase types. Works on chips missing from the database. |
+| **SFDP auto-detect** | Reads the JEDEC JESD216 parameter table from the chip itself (`5Ah`) and fills in size, page size, address width and erase types. Works on chips missing from the database. Also reads the **4-byte address instruction table** (`FF84h`), **DWORD-16** (how *this* chip enters 4-byte mode, and whether its status register needs `06h` or `50h`) and the **sector map** (`FF81h`), so parts with boot blocks of a different size are reported instead of silently mis-erased. |
+| **Write protection guard** | Before every erase and write, the status register is decoded and the protected range compared against the target. A locked chip accepts the command and silently ignores it, which otherwise shows up much later as an unexplained verify failure. |
+| **Save a detected chip** | A chip found only through SFDP can be written into `chiplist-user.xml` and is picked up from then on. Kept separate from the shipped list so a program update never overwrites it. |
+| **Production traceability** | Each chip's factory unique id (`4Bh`) is logged with a timestamp, the image CRC32 and pass/fail. Optionally refuses a chip whose id already passed, so nothing is programmed or shipped twice. |
+| **Job files** | A one-line `crc32=` file pins the approved image. If the loaded buffer does not match, the write is refused — the cheapest guard against programming the wrong revision. |
 | **File formats** | Binary, **Intel HEX** and **Motorola S-record**, both directions. Gaps in a text file load as erased bytes, and record checksums are validated on load. |
 | **Checksums** | CRC32, SUM32 and SUM16 over the buffer, for comparing a dump against a reference image. |
 | **Buffer tools** | Fill buffer, swap bytes (16-bit), find, go to address, copy — plus save the log to a file. |
@@ -77,9 +81,8 @@ Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-
 ## Command line
 
 Any `--switch` puts the program into command line mode: the window is never
-shown, output goes to the calling console, and the exit code is 0 on success.
-The work runs through the same code as the buttons, so there is no second
-implementation to keep in step.
+shown, output goes to the calling console. The work runs through the same code
+as the buttons, so there is no second implementation to keep in step.
 
 ```
 AsProgrammer.exe --detect
@@ -90,10 +93,52 @@ AsProgrammer.exe --read dump.bin  --sfdp
 AsProgrammer.exe --help
 ```
 
-`--hw` forces a programmer (`ch341`, `ch347`, `ft232h`, `usbasp`, `avrisp`);
-without it the one that is plugged in is used. `--sfdp` takes the chip
-parameters from the chip itself instead of the database. File format follows
-the extension, so `.bin`, `.hex` and S-record all work.
+**Exit codes** — the contract a production line relies on:
+
+| Code | Meaning |
+|:--:|---|
+| `0` | The operation succeeded |
+| `1` | The operation failed: verify mismatch, chip still protected, busy timeout, no programmer |
+| `2` | Wrong usage: unknown switch, missing file, no chip selected |
+
+`--hw` forces a programmer (`ch341`, `ch347`, `ft232h`, `usbasp`, `avrisp`,
+`arduino`, `buzzpirat`); without it the one that is plugged in is used.
+`--sfdp` takes the chip parameters from the chip itself instead of the
+database. File format follows the extension, so `.bin`, `.hex` and S-record
+all work. An unrecognised switch is an error rather than being ignored.
+
+`--json` prints one machine-readable line, so a test jig does not have to
+parse the log:
+
+```json
+{"action":"write","ok":false,"chip":"W25Q64BV","size":8388608,"bytes":4096,
+ "uid":"AABBCCDDEEFF0011","error":"the page did not read back as written","address":4096}
+```
+
+### Production switches
+
+```
+AsProgrammer.exe --write fw.bin --chip W25Q64BV --erase --verify \
+                 --job product-a.job --log line1.csv --operator somchai
+```
+
+| Switch | Effect |
+|---|---|
+| `--job FILE` | Refuse to write unless the buffer matches the job file |
+| `--log FILE` | Append one CSV row per chip: time, chip, unique id, serial, operator, size, CRC32, result |
+| `--operator NAME` | Recorded in the log |
+| `--force` | Proceed even when the target area is write protected, or the chip already passed |
+| `--save-chip NAME` | Save the SFDP-detected chip into `chiplist-user.xml` |
+
+A job file is plain `key=value`; `#` starts a comment. Any key may be omitted,
+and only the keys present are checked:
+
+```
+# the approved image for product A
+chip=W25Q64BV
+size=8388608
+crc32=0xDEADBEEF
+```
 
 ## Runtime files
 
@@ -114,6 +159,7 @@ Data files, resolved relative to the working directory:
 ```
 AsProgrammer.exe
 chiplist.xml          chip database
+chiplist-user.xml     chips you saved yourself (created on demand)
 settings.xml          saved options
 lang/                 translations (.po)
 scripts/              per-chip scripts
@@ -149,6 +195,11 @@ searched together.
 > keeps flashrom's licence and copyright notices. It is kept as a separate data file, read at run
 > time and never linked, so the program itself stays MIT. Delete the file if you would rather ship
 > MIT-only, and everything still works — the built-in list and SFDP detection cover the rest.
+
+A third list, `chiplist-user.xml`, holds chips you saved yourself. After **Chip → Detect chip via
+SFDP** the program offers to store what it found there, and `--save-chip NAME` does the same from
+the command line. It is deliberately a separate file: the shipped list is replaced on every update,
+this one is not.
 
 Unknown ids can be looked up in
 [flashrom's `flashchips.h`](https://chromium.googlesource.com/chromiumos/third_party/flashrom/+/798d2adc9527f724bc5096a646cf99efdbb6b59e/flashchips.h).
@@ -187,27 +238,44 @@ powershell -ExecutionPolicy Bypass -File tools\make_icons.ps1
 
 ### Tests
 
-`tests\fftest.lpr` round-trips the Intel HEX and S-record readers and writers and checks sparse
-files, bad checksums and extended linear addressing. It needs no hardware:
+`tools\build.ps1` runs everything below before it compiles the program, so a broken
+invariant stops the build rather than reaching a chip. None of it needs hardware.
 
-```powershell
-copy software\fileformats.pas tests\
-cd tests && fpc -Twin32 -Pi386 -Mobjfpc -Sh fftest.lpr && .\fftest.exe
-```
+| Suite | Covers |
+|---|---|
+| `tests\fftest.lpr` | Intel HEX and S-record round trips, sparse files, bad checksums, extended linear addressing |
+| `tests\unittests.lpr` | SFDP parsing (basic table, DWORD-16, `FF84h`, sector maps), write protection decoding, the operation result channel, the production log and job files |
+| `tests\hwtests.lpr` | The real `spi25` protocol layer driven through `tests\mockhw.pas`, a programmer that exists only in memory. Asserts on the exact opcodes sent |
+| `tools\validate_chiplist.py` | Duplicate chip entries, bad ids, page/sector/size sanity across both chip tables |
+
+The two Pascal suites need different versions of `spi25`: the logic tests link a stub that
+serves a synthetic SFDP image, the protocol tests link the real unit. `build.ps1` keeps them
+in separate directories for that reason.
+
+`hwtests` is the interesting one. The bugs that matter in a programmer are not arithmetic
+mistakes, they are *"did we send an opcode this chip has never heard of"* — so the mock
+records every byte and the tests assert on the transcript.
 
 ### Layout
 
 ```
 software/
   main.pas / main.lfm     main window, flash operations, options
-  spi25.pas               25-series SPI primitives
+  spi25.pas               25-series SPI primitives (no LCL, no main — testable)
   spi45.pas spi95.pas     DataFlash and SPI EEPROM
   i2c.pas microwire.pas   I²C and MicroWire
   sfdp.pas                JESD216 parameter table parser
+  protbits.pas            status register / write protection decoding
+  opresult.pas            the result of the last operation, and the exit code
+  prodlog.pas             production CSV log and job files
+  chipsave.pas            writing chips into chiplist-user.xml
   opthread.pas            worker thread for long operations
-  basehw.pas              hardware abstraction
+  basehw.pas              hardware abstraction, owns the AsProgrammer instance
   ch341hw ch347hw ft232hhw usbasphw avrisphw arduinohw buzzpirathw
   pascalc.pas             script interpreter
+tests/mockhw.pas          in-memory programmer for the protocol tests
+tools/build.ps1           validate, test, build, package
+tools/validate_chiplist.py
 tools/make_icons.ps1      icon set generator
 chiplist.xml              chip database
 ```

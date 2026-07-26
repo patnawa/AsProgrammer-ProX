@@ -70,6 +70,15 @@ public
   property Programmer : TBaseHardware read FCurrent_prog;
 end;
 
+var
+  //เครื่องโปรแกรมที่กำลังใช้อยู่
+  //
+  //ตัวแปรนี้เคยอยู่ใน main ซึ่งบังคับให้ทุกหน่วยที่ต้องคุยกับฮาร์ดแวร์
+  //ต้อง uses main ตามไปด้วย และ main ลาก LCL ทั้งกองมาด้วย
+  //ผลคือชั้นโปรโตคอลอย่าง spi25 เอาไปทดสอบโดยไม่มีหน้าจอไม่ได้เลย
+  //ที่นี่คือที่ที่มันควรอยู่ตั้งแต่แรก เพราะชนิดของมันก็ประกาศอยู่ตรงนี้
+  AsProgrammer: TAsProgrammer;
+
 implementation
 
 constructor TAsProgrammer.Create;
@@ -85,6 +94,7 @@ begin
   for i := 0 to FHwList.Count-1 do
     TBaseHardware(FHwList.Items[i]).Free;
   FHwList.Free;
+  inherited Destroy;
 end;
 
 procedure TAsProgrammer.AddHW(HW: pointer);

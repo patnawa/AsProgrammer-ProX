@@ -15,7 +15,7 @@ uses
 
 implementation
 
-uses main;
+uses basehw;
 
 function UsbAspMW_Busy(): boolean;
 begin

@@ -157,6 +157,47 @@ resourcestring
   STR_DRIVER_HINT_COM    = 'Check the COM port setting and that no other program is holding '
                          + 'the port open';
 
+  //--- ด่านตรวจบิตป้องกันการเขียน ---
+  STR_GUARD_BLOCKED      = 'The area to be changed is write protected: 0x%.8x - 0x%.8x';
+  STR_GUARD_Q            = 'Part of the area you are about to change is write protected '
+                         + 'by the status register.'#13#10#13#10
+                         + 'The chip will silently ignore the erase or the write, and the '
+                         + 'result will look like a verify failure.'#13#10#13#10
+                         + 'Press "Unprotect" first. Continue anyway?';
+  STR_GUARD_REFUSED      = 'Refusing to continue while the target area is write protected. '
+                         + 'Press "Unprotect" first, or pass --force';
+  STR_GUARD_SRP1         = 'SRP1 is set: the status register is locked by hardware and '
+                         + 'software cannot unprotect this chip';
+  STR_GUARD_OK           = 'Write protection checked: the target area is writable';
+
+  //--- ผลของงาน ---
+  STR_OP_RESULT          = 'Result: ';
+
+  //--- SFDP เพิ่มเติม ---
+  STR_SFDP_4B_ENTRY      = '  4 byte address mode: ';
+  STR_SFDP_4B_OPCODES    = '  4 byte opcodes: read 0x%.2x, page program 0x%.2x';
+  STR_SFDP_SR_WREN       = '  Status register write enable: 0x%.2x';
+  STR_SFDP_RESET         = '  Soft reset: ';
+  STR_SFDP_MAP_HEADER    = '  Sector map: %d regions, %s';
+  STR_SFDP_MAP_UNIFORM   = 'uniform';
+  STR_SFDP_MAP_MIXED     = 'NOT uniform - this chip has boot blocks of a different size';
+  STR_SFDP_MAP_REGION    = '    region %d: %d bytes, erase %d bytes with 0x%.2x';
+
+  //--- บันทึกชิปลงตารางของผู้ใช้ ---
+  STR_CHIPSAVE_Q         = 'Save this chip into %s so it is picked up next time?';
+  STR_CHIPSAVE_OK        = 'Chip saved into ';
+  STR_CHIPSAVE_FAIL      = 'Could not save the chip: ';
+  STR_CHIPSAVE_NONAME    = 'Name for the new chip entry';
+
+  //--- การตามรอยการผลิต ---
+  STR_PROD_UID_SEEN      = 'This chip has already been programmed and logged as passed. '
+                         + 'Unique ID: ';
+  STR_PROD_LOGGED        = 'Production log updated: ';
+  STR_PROD_LOG_FAIL      = 'Could not write the production log: ';
+  STR_JOB_LOADED         = 'Job file loaded: ';
+  STR_JOB_FAILED         = 'Job file rejected the buffer: ';
+  STR_JOB_OK             = 'Job file check passed';
+
 implementation
 
 end.

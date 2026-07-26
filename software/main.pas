@@ -16,6 +16,7 @@ uses
   XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
   utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, serialnum, jedec, protbits,
+  opresult, prodlog, chipsave,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
 
@@ -321,6 +322,23 @@ type
   procedure PollProgrammer(Announce: boolean);
   function SelectChipAny(const AName: string): boolean;
 
+  //อ่านเลขประจำตัวของชิปที่เสียบอยู่ ต้องเรียกตอนอยู่ในโหมดโปรแกรม
+  //คืนสตริงว่างเมื่อชิปไม่มีเลขประจำตัว
+  function ReadChipUID: string;
+
+  //บันทึกชิปที่ตั้งค่าอยู่ตอนนี้ลง chiplist-user.xml
+  function SaveCurrentChipToUserList(const AName: string): boolean;
+
+  //ด่านตรวจบิตป้องกันการเขียนก่อนลบหรือเขียน
+  //คืน False เมื่อพื้นที่เป้าหมายถูกล็อกอยู่และผู้ใช้ไม่ยืนยัน
+  function ProtectionGuardOK(StartAddr, Len: cardinal): boolean;
+
+  //ตรวจภาพในบัฟเฟอร์กับไฟล์งาน คืน False เมื่อไม่ตรง
+  function JobFileGuardOK(Size: cardinal): boolean;
+
+  //เขียนหนึ่งบรรทัดลงบันทึกการผลิต ใช้ผลของงานล่าสุดเป็นตัวตัดสินผ่านหรือไม่ผ่าน
+  procedure WriteProdLogEntry(Size, CRC: cardinal; const UID: string);
+
 const
   SPI_CMD_25             = 0;
   SPI_CMD_45             = 1;
@@ -331,6 +349,8 @@ const
   //ตารางชิปเพิ่มเติมที่แปลงมาจาก flashrom ไฟล์นี้เป็น GPL ไม่ใช่ MIT
   //จึงแยกไว้ต่างหาก ถ้าไม่มีไฟล์ก็ทำงานได้ตามปกติ
   ChipListFile2Name      = 'chiplist-flashrom.xml';
+  //ชิปที่ผู้ใช้เพิ่มเอง อัปเดตโปรแกรมทับแล้วไม่หาย
+  ChipListFile3Name      = UserChipListName;
   SettingsFileName       = 'settings.xml';
   ScriptsPath            = 'scripts'+DirectorySeparator;
 
@@ -356,12 +376,14 @@ var
   MainForm: TMainForm;
   ChipListFile: TXMLDocument;
   ChipListFile2: TXMLDocument;
+  ChipListFile3: TXMLDocument;
   SettingsFile: TXMLDocument;
   CurrentICParam: TCurrentICParam;
   ScriptEngine: TPasCalc;
   RomF: TMemoryStream;
 
-  AsProgrammer: TAsProgrammer;
+  //AsProgrammer ย้ายไปอยู่ใน basehw ซึ่งเป็นที่ที่ชนิดของมันประกาศอยู่
+  //หน่วยที่คุยกับฮาร์ดแวร์จึงไม่ต้อง uses main อีกต่อไป
 
   Buzzpirat_ClocKhz: integer = 0;
   Buzzpirat_Pulls: integer = 0;
@@ -377,6 +399,25 @@ var
   //หน้าต่างหลักขึ้นแล้วหรือยัง ตรวจชิปอัตโนมัติอาจเปิดไดอะล็อก
   //ซึ่งห้ามเกิดตอนที่หน้าต่างยังสร้างไม่เสร็จ
   AppReady: boolean = False;
+
+  //ทำงานจากบรรทัดคำสั่ง ไม่มีคนนั่งอยู่หน้าจอที่จะตอบไดอะล็อกได้
+  //ทุกจุดที่ปกติจะถาม ต้องตัดสินใจเองแบบปลอดภัยไว้ก่อน
+  CLIMode: boolean = False;
+  //ผู้ใช้สั่ง --force มาแล้ว ยอมข้ามด่านที่ปกติจะปฏิเสธ
+  CLIForce: boolean = False;
+
+  //เลขประจำตัวของชิปที่อ่านได้ครั้งล่าสุด ใช้ตอนเขียนบันทึกการผลิต
+  LastChipUID: string = '';
+
+  //รหัส 9Fh ที่อ่านได้ครั้งล่าสุด ใช้ตอนบันทึกชิปใหม่ลงตารางของผู้ใช้
+  LastID9F: string = '';
+
+  //ไฟล์งานที่โหลดไว้ ถ้ามี
+  CurrentJob: TJobFile;
+
+  //เลขรันนิ่งอัตโนมัติและการผลิตเป็นชุด
+  //อยู่ในส่วน interface เพราะโหมดบรรทัดคำสั่งต้องทับค่าบางตัวได้
+  ProdSettings: TProdSettings;
 implementation
 
 
@@ -411,10 +452,6 @@ var
   //กันการเรียกซ้อน เพราะเมนูไม่เหมือนปุ่มบนแถบเครื่องมือ
   //มันยังคลิกได้อยู่ตอนที่ thread หลักกำลังปั๊ม message
   OperationRunning: boolean = False;
-
-  //เลขรันนิ่งอัตโนมัติและการผลิตเป็นชุด
-  ProdSettings: TProdSettings;
-
 
   //สถานะหน้าจอที่อ่านเก็บไว้บน thread หลักก่อนเริ่มงาน
   //thread เบื้องหลังต้องอ่านจากตรงนี้ ห้ามอ่านจาก control โดยตรง
@@ -578,6 +615,7 @@ begin
   if MainForm.ButtonCancel.Tag <> 0 then
   begin
     LogPrint(STR_USER_CANCEL);
+    OpCancel;
 
     if InWorkerThread then
       UIProxy.ProgressReset
@@ -597,6 +635,7 @@ var
 begin
   ChipListFile := nil;
   ChipListFile2 := nil;
+  ChipListFile3 := nil;
   SettingsFile := nil;
   if FileExists(ChipListFileName) then
   begin
@@ -621,6 +660,20 @@ begin
       begin
         ShowMessage(E.Message);
         ChipListFile2 := nil;
+      end;
+    end;
+  end;
+
+  //ชิปที่ผู้ใช้บันทึกเอง ค้นทีหลังสองไฟล์แรก
+  if FileExists(ChipListFile3Name) then
+  begin
+    try
+      ReadXMLFile(ChipListFile3, ChipListFile3Name);
+    except
+      on E: EXMLReadError do
+      begin
+        ShowMessage(E.Message);
+        ChipListFile3 := nil;
       end;
     end;
   end;
@@ -1300,6 +1353,8 @@ begin
     if MilliSecondsBetween(Now, Started) > TimeoutMs then
     begin
       LogPrint(Format(STR_BUSY_TIMEOUT, [TimeoutMs div 1000]));
+      OpFail(Format('the chip stayed busy for more than %d seconds',
+                    [TimeoutMs div 1000]));
       Exit(False);
     end;
   end;
@@ -1323,6 +1378,7 @@ var
   if (SectorSize = 0) or (RangeLen = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('sector size or range length is zero');
     Exit;
   end;
 
@@ -1331,6 +1387,7 @@ var
   if (ChipSize = 0) or (StartAddress >= ChipSize) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size is not set, or the range starts past the end');
     Exit;
   end;
 
@@ -1407,8 +1464,12 @@ procedure ChipErase25;
 
     //การลบทั้งชิปเป็นไปไม่ได้ที่จะเสร็จในเสี้ยววินาที เกือบทุกครั้ง
     //แปลว่าชิปปฏิเสธคำสั่งเพราะยังถูกป้องกันการเขียนอยู่
+    //นับเป็นความล้มเหลว ไม่ใช่แค่คำเตือน ชิปที่ไม่ได้ถูกลบจริงต้องไม่ผ่านด่าน
     if MilliSecondsBetween(Now, Started) < 1000 then
+    begin
       LogPrint(STR_ERASE_TOO_FAST);
+      OpFail('erase returned too fast, the chip is probably still protected');
+    end;
   end;
 
 begin
@@ -1480,6 +1541,353 @@ begin
 
   Result := MessageDlg('AsProgrammer', STR_VOLT_WARN, mtWarning, [mbYes, mbNo], 0) = mrYes;
   if not Result then LogPrint(STR_VOLT_ABORTED);
+end;
+
+//ถามผู้ใช้ ถ้าไม่มีใครนั่งอยู่ก็ตอบตามค่าที่ปลอดภัย
+//โหมดบรรทัดคำสั่งต้องไม่ค้างรอคนกดปุ่ม เพราะมันรันจากสคริปต์
+function AskUser(const Question: string; DefaultWhenHeadless: boolean): boolean;
+begin
+  if CLIMode then
+  begin
+    if CLIForce then Exit(True);
+    Exit(DefaultWhenHeadless);
+  end;
+
+  Result := MessageDlg('AsProgrammer', Question, mtWarning, [mbYes, mbNo], 0) = mrYes;
+end;
+
+//เลขประจำตัวจากโรงงาน อ่านด้วยคำสั่ง 4Bh
+//ต้องเรียกตอนอยู่ในโหมดโปรแกรมแล้ว คืนสตริงว่างเมื่อชิปไม่มีเลขนี้
+function ReadChipUID: string;
+var
+  Buf: array[0..7] of byte;
+  i: integer;
+  AllFF, AllZero: boolean;
+begin
+  Result := '';
+  if not MainForm.RadioSPI.Checked then Exit;
+  if MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25 then Exit;
+
+  FillByte(Buf, SizeOf(Buf), $FF);
+  UsbAsp25_ReadUniqueID(Buf);
+
+  AllFF := True;
+  AllZero := True;
+  for i := 0 to High(Buf) do
+  begin
+    if Buf[i] <> $FF then AllFF := False;
+    if Buf[i] <> $00 then AllZero := False;
+  end;
+
+  //ชิปที่ไม่รองรับ 4Bh จะปล่อยสายค้างไว้ ได้ FF ล้วนหรือ 00 ล้วน
+  if AllFF or AllZero then Exit;
+
+  for i := 0 to High(Buf) do
+    Result := Result + IntToHex(Buf[i], 2);
+end;
+
+//CRC32 ของสิ่งที่อยู่ใน hex editor ตอนนี้
+//ใช้ทั้งตอนตรวจกับไฟล์งานและตอนเขียนบันทึกการผลิต
+function BufferCRC32: cardinal;
+var
+  Stream: TMemoryStream;
+  Data: array of byte;
+begin
+  Result := 0;
+  if MainForm.MPHexEditorEx.DataSize = 0 then Exit;
+
+  Stream := TMemoryStream.Create;
+  try
+    MainForm.MPHexEditorEx.SaveToStream(Stream);
+    Stream.Position := 0;
+    SetLength(Data, Stream.Size);
+    if Length(Data) = 0 then Exit;
+    Stream.ReadBuffer(Data[0], Length(Data));
+    Result := UpdateCRC32($FFFFFFFF, @Data[0], Length(Data));
+  finally
+    Stream.Free;
+  end;
+end;
+
+//เอาสิ่งที่ SFDP บอกมาใส่ในตัวแปรที่ spi25 ใช้เลือก opcode
+//ทำให้การเข้าโหมด 4 ไบต์และการเขียน status register ใช้วิธีที่ชิปแจ้งเอง
+//แทนที่จะยิงคำสั่งของทุกยี่ห้อใส่ชิปทุกตัว
+procedure ApplySFDPHints(const Info: TSFDPInfo);
+begin
+  Chip25SFDPRead := True;
+
+  if not Info.HasDword16 then Exit;
+
+  if Info.SRWriteEnableOpcode <> 0 then
+    Chip25SRWrenOpcode := Info.SRWriteEnableOpcode;
+
+  if not SFDPNeeds4BSwitch(Info) then
+    Chip25Entry4B := E4B_NONE
+  else if Info.Entry4B.WrenB7 then
+    Chip25Entry4B := E4B_WREN_B7
+  else if Info.Entry4B.B7NoWren then
+    Chip25Entry4B := E4B_B7
+  else if Info.Entry4B.BankReg17 then
+    Chip25Entry4B := E4B_BANK17
+  else if Info.Entry4B.ExtAddrReg then
+    Chip25Entry4B := E4B_EXTC5
+  else if Info.Entry4B.NvConfigB1 then
+    Chip25Entry4B := E4B_NVB1;
+end;
+
+//ให้แน่ใจว่ารู้จักผู้ผลิตก่อนส่งคำสั่งที่ต่างกันตามยี่ห้อ
+//ราคาคือคำสั่ง 9Fh หนึ่งครั้ง ซึ่งชิปตระกูล 25 ทุกตัวรับได้
+procedure EnsureChipHints;
+var
+  ID: MEMORY_ID;
+  Info: TSFDPInfo;
+begin
+  if not MainForm.RadioSPI.Checked then Exit;
+  if MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25 then Exit;
+
+  //รหัสผู้ผลิตกับตาราง SFDP เป็นคนละเรื่อง ต้องดูแยกกัน
+  //ถ้าดูแค่รหัสผู้ผลิต ชิปที่ผ่านการตรวจรหัสมาแล้วจะไม่มีวันได้อ่าน SFDP
+  //และวิธีเข้าโหมด 4 ไบต์ก็จะค้างอยู่ที่ค่าเดา
+  if Chip25ManufID = 0 then
+  begin
+    FillByte(ID.ID9FH, 3, $FF);
+    FillByte(ID.ID90H, 2, $FF);
+    FillByte(ID.IDABH, 1, $FF);
+    FillByte(ID.ID15H, 2, $FF);
+    UsbAsp25_ReadID(ID);
+    LastID9F := UpperCase(IntToHex(ID.ID9FH[0], 2) + IntToHex(ID.ID9FH[1], 2) +
+                          IntToHex(ID.ID9FH[2], 2));
+  end;
+
+  //SFDP บอกวิธีเข้าโหมด 4 ไบต์ที่ถูกต้องของชิปตัวนี้ ถ้ามันมีตาราง
+  if not Chip25SFDPRead then
+    if SFDPDetect(Info) then
+      ApplySFDPHints(Info)
+    else
+      //ไม่มีตาราง ก็ไม่ต้องมาลองใหม่ทุกครั้ง
+      Chip25SFDPRead := True;
+end;
+
+//ด่านตรวจบิตป้องกันการเขียน
+//
+//แฟลชที่ถูกล็อกอยู่จะรับคำสั่งลบหรือเขียนแล้วทิ้งไปเงียบ ๆ ไม่มีสัญญาณผิดพลาด
+//ผู้ใช้จะเห็นแค่ว่า verify ไม่ผ่าน แล้วไปตามหาปัญหาผิดที่ ตรงสายบ้าง ตรงไฟบ้าง
+//ทั้งที่คำตอบอยู่ใน status register มาตั้งแต่ต้น
+function ProtectionGuardOK(StartAddr, Len: cardinal): boolean;
+var
+  SR1, SR2: byte;
+  P: TProtInfo;
+  FromA, ToA, EndAddr: cardinal;
+  ChipSize: cardinal;
+begin
+  Result := True;
+
+  if not MainForm.RadioSPI.Checked then Exit;
+  if MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25 then Exit;
+  if Len = 0 then Exit;
+
+  ChipSize := OpUI.ChipSize;
+  if ChipSize = 0 then ChipSize := CurrentICParam.Size;
+  if ChipSize = 0 then Exit;
+
+  SR1 := 0;
+  SR2 := 0;
+  UsbAsp25_ReadSR(SR1, $05);
+  UsbAsp25_ReadSR(SR2, $35);
+
+  //ชิปที่ไม่มี status register ตัวที่สองจะปล่อยสายค้างไว้ อ่านได้ FF ล้วน
+  //ถ้าเชื่อค่านั้น CMP กับ WPS จะดูเหมือนถูกตั้ง แล้วการตีความจะผิดทั้งหมด
+  if SR2 = $FF then SR2 := 0;
+
+  P := DecodeProt(SR1, SR2);
+
+  //WPS=1 แปลว่าชิปใช้ล็อกรายบล็อกแทนบิต BP ซึ่งอ่านจาก status register ไม่ได้
+  //บอกให้รู้ไว้ แต่ห้ามไม่ได้เพราะไม่รู้จริง ๆ ว่าบล็อกไหนถูกล็อก
+  if P.WPS then
+  begin
+    LogPrint(Format(STR_PROT_HEADER, [SR1, SR2]));
+    LogPrint(STR_PROT_CAVEAT);
+    Exit;
+  end;
+
+  if not ProtectedRange(P, ChipSize, FromA, ToA) then
+  begin
+    LogPrint(STR_GUARD_OK);
+    Exit;
+  end;
+
+  //ช่วงที่ล็อกกับช่วงที่จะแตะทับกันหรือไม่
+  EndAddr := StartAddr + Len - 1;
+  if (ToA < StartAddr) or (FromA > EndAddr) then
+  begin
+    LogPrint(STR_GUARD_OK);
+    Exit;
+  end;
+
+  LogPrint(Format(STR_PROT_HEADER, [SR1, SR2]));
+  LogPrint(Format(STR_GUARD_BLOCKED, [FromA, ToA]));
+
+  //SRP1 ล็อก status register ด้วยฮาร์ดแวร์ ปลดด้วยซอฟต์แวร์ไม่ได้เลย
+  if P.SRP1 then LogPrint(STR_GUARD_SRP1);
+
+  if CLIMode and (not CLIForce) then
+  begin
+    LogPrint(STR_GUARD_REFUSED);
+    OpFail('target area is write protected', FromA);
+    Exit(False);
+  end;
+
+  Result := AskUser(STR_GUARD_Q, False);
+  if not Result then OpFail('target area is write protected', FromA);
+end;
+
+//ตรวจภาพในบัฟเฟอร์กับไฟล์งาน
+//กันการหยิบไฟล์ผิดรุ่น ซึ่งเป็นความผิดพลาดที่พบบ่อยที่สุดในสายการผลิต
+function JobFileGuardOK(Size: cardinal): boolean;
+var
+  ErrMsg: string;
+begin
+  Result := True;
+  if not CurrentJob.Loaded then Exit;
+  if Size = 0 then Exit;
+
+  //อ่านจาก hex editor ไม่ใช่จาก RomF เพราะตอนที่ด่านนี้ทำงาน
+  //RomF ยังเป็นของงานก่อนหน้า ยังไม่ได้ถูกเติมด้วยข้อมูลรอบนี้
+  if not CheckJob(CurrentJob, CurrentICParam.Name, Size, BufferCRC32, ErrMsg) then
+  begin
+    LogPrint(STR_JOB_FAILED + ErrMsg);
+    OpFail('job file mismatch: ' + ErrMsg);
+    Exit(False);
+  end;
+
+  LogPrint(STR_JOB_OK);
+end;
+
+//โหลดไฟล์งานตามที่ตั้งไว้ ต้องเรียกใหม่ทุกครั้งที่ค่านั้นเปลี่ยน
+procedure RefreshJobFile;
+var
+  ErrMsg: string;
+begin
+  FillChar(CurrentJob, SizeOf(CurrentJob), 0);
+  CurrentJob.ChipName := '';
+
+  if ProdSettings.JobFile = '' then Exit;
+
+  if LoadJobFile(ProdSettings.JobFile, CurrentJob, ErrMsg) then
+    LogPrint(STR_JOB_LOADED + ProdSettings.JobFile)
+  else
+    LogPrint(STR_JOB_FAILED + ErrMsg);
+end;
+
+//หนึ่งบรรทัดต่อชิปหนึ่งตัว ผ่านหรือไม่ผ่านเอาจากผลของงานล่าสุด
+procedure WriteProdLogEntry(Size, CRC: cardinal; const UID: string);
+var
+  Rec: TProdRecord;
+begin
+  if ProdSettings.ProdLogFile = '' then Exit;
+
+  Rec.TimeStamp := Now;
+  Rec.ChipName := CurrentICParam.Name;
+  Rec.UID := UID;
+  Rec.Serial := '';
+  if ProdSettings.SNEnabled then Rec.Serial := SerialToStr(ProdSettings);
+  Rec.Operator_ := ProdSettings.Operator_;
+  Rec.Size := Size;
+  Rec.CRC32 := CRC;
+  Rec.Note := '';
+
+  if OpOK then
+    Rec.Outcome := poPass
+  else
+  begin
+    Rec.Outcome := poFail;
+    Rec.Note := LastOp.ErrorText;
+  end;
+
+  if AppendProdLog(ProdSettings.ProdLogFile, Rec) then
+    LogPrint(STR_PROD_LOGGED + ProdSettings.ProdLogFile)
+  else
+    LogPrint(STR_PROD_LOG_FAIL + ProdSettings.ProdLogFile);
+end;
+
+//ชิปตัวนี้เคยเขียนผ่านไปแล้วหรือยัง
+//คืน False เมื่อเคยแล้วและผู้ใช้ไม่ยืนยันให้เขียนซ้ำ
+function DuplicateChipGuardOK(const UID: string): boolean;
+begin
+  Result := True;
+  if not ProdSettings.CheckUID then Exit;
+  if ProdSettings.ProdLogFile = '' then Exit;
+  if UID = '' then Exit;
+
+  if not ProdLogHasPassedUID(ProdSettings.ProdLogFile, UID) then Exit;
+
+  LogPrint(STR_PROD_UID_SEEN + UID);
+
+  if CLIMode and (not CLIForce) then
+  begin
+    OpFail('this chip has already been programmed, unique ID ' + UID);
+    Exit(False);
+  end;
+
+  Result := AskUser(STR_PROD_UID_SEEN + UID + #13#10#13#10 + 'Program it again?', False);
+  if not Result then
+    OpFail('this chip has already been programmed, unique ID ' + UID);
+end;
+
+//ชื่อกลุ่มผู้ผลิตสั้น ๆ สำหรับใช้เป็นชื่อธาตุใน xml
+//JedecVendor คืนข้อความยาวอย่าง 'Spansion / Cypress / Infineon' เอามาทั้งดุ้นไม่ได้
+function ShortVendorTag(ManufID: byte): string;
+var
+  Full: string;
+  p: integer;
+begin
+  Full := JedecVendor(ManufID);
+  if Full = '' then Exit('USER');
+
+  p := Pos(' ', Full);
+  if p > 1 then Full := Copy(Full, 1, p - 1);
+  Result := UpperCase(Full);
+end;
+
+//บันทึกชิปที่ตั้งค่าอยู่ตอนนี้ลงตารางของผู้ใช้
+function SaveCurrentChipToUserList(const AName: string): boolean;
+var
+  P: TSaveChipParams;
+  ErrMsg: string;
+begin
+  Result := False;
+
+  P.Vendor := ShortVendorTag(Chip25ManufID);
+  P.Name := Trim(AName);
+  P.ID := LastID9F;
+  P.Size := CurrentICParam.Size;
+  if P.Size = 0 then P.Size := UIChipSize;
+  if CurrentICParam.Page > 0 then
+    P.Page := cardinal(CurrentICParam.Page)
+  else
+    P.Page := 256;
+  P.Sector := CurrentICParam.Sector;
+  P.SectorCmd := CurrentICParam.SectorOpcode;
+  P.Note := 'added from SFDP';
+
+  if not SaveChipToUserList(ChipListFile3Name, P, ErrMsg) then
+  begin
+    LogPrint(STR_CHIPSAVE_FAIL + ErrMsg);
+    Exit;
+  end;
+
+  LogPrint(STR_CHIPSAVE_OK + ChipListFile3Name);
+
+  //โหลดไฟล์ที่เพิ่งเขียนกลับเข้ามา จะได้ค้นเจอทันทีโดยไม่ต้องปิดโปรแกรม
+  //เมนู IC สร้างครั้งเดียวตอนเปิดโปรแกรม รายการใหม่จึงโผล่ในเมนูรอบหน้า
+  try
+    if ChipListFile3 <> nil then FreeAndNil(ChipListFile3);
+    ReadXMLFile(ChipListFile3, ChipListFile3Name);
+  except
+    ChipListFile3 := nil;
+  end;
+
+  Result := True;
 end;
 
 //ตรวจว่าพื้นที่ที่จะเขียนถูกลบแล้วจริง
@@ -1628,11 +2036,15 @@ end;
 
 //เติมค่าที่อ่านได้จาก SFDP ลงในหน้าจอและใน CurrentICParam
 //ลำดับสำคัญ เพราะ RadioSPIChange จะล้างค่าในช่องต่าง ๆ ทิ้ง
-procedure ApplySFDPInfo(const Info: TSFDPInfo);
+//รายงานทุกอย่างที่อ่านได้จาก SFDP
+//ไม่ใช่แค่ความอยากรู้ ถ้าชิปแจ้งว่าแผนผังเซกเตอร์ไม่สม่ำเสมอ ผู้ใช้ต้องรู้
+//เพราะการลบเป็นช่วงจะพลาดถ้าเชื่อว่าทั้งชิปใช้เซกเตอร์ขนาดเดียว
+procedure LogSFDPDetails(const Info: TSFDPInfo);
 var
-  i: integer;
+  i, t: integer;
   ESize: cardinal;
   EOpcode: byte;
+  s: string;
 begin
   LogPrint(STR_SFDP_FOUND + ' (JESD216 rev ' + IntToStr(Info.MajorRev) + '.' +
            IntToStr(Info.MinorRev) + ')');
@@ -1642,8 +2054,71 @@ begin
 
   for i := 1 to 4 do
     if Info.EraseTypes[i].Size > 0 then
-      LogPrint('  Erase type ' + IntToStr(i) + ': ' + IntToStr(Info.EraseTypes[i].Size) +
-               ' bytes, opcode 0x' + IntToHex(Info.EraseTypes[i].Opcode, 2));
+    begin
+      s := '  Erase type ' + IntToStr(i) + ': ' + IntToStr(Info.EraseTypes[i].Size) +
+           ' bytes, opcode 0x' + IntToHex(Info.EraseTypes[i].Opcode, 2);
+      if Info.EraseTypes[i].Opcode4B <> 0 then
+        s := s + ', 4 byte 0x' + IntToHex(Info.EraseTypes[i].Opcode4B, 2);
+      LogPrint(s);
+    end;
+
+  if Info.HasDword16 then
+  begin
+    LogPrint(STR_SFDP_4B_ENTRY + SFDP4BEntryStr(Info));
+
+    if Info.SRWriteEnableOpcode <> 0 then
+      LogPrint(Format(STR_SFDP_SR_WREN, [Info.SRWriteEnableOpcode]));
+
+    s := '';
+    if Info.SoftReset66_99 then s := '66h then 99h';
+    if Info.SoftResetF0 then
+    begin
+      if s <> '' then s := s + ', ';
+      s := s + 'F0h';
+    end;
+    if s <> '' then LogPrint(STR_SFDP_RESET + s);
+  end;
+
+  if Info.Has4BAIT and ((Info.Read4BOpcode <> 0) or (Info.PageProg4BOpcode <> 0)) then
+    LogPrint(Format(STR_SFDP_4B_OPCODES, [Info.Read4BOpcode, Info.PageProg4BOpcode]));
+
+  if Info.HasSectorMap then
+  begin
+    if Info.Uniform then
+      s := STR_SFDP_MAP_UNIFORM
+    else
+      s := STR_SFDP_MAP_MIXED;
+    LogPrint(Format(STR_SFDP_MAP_HEADER, [Info.RegionCount, s]));
+
+    for i := 0 to Info.RegionCount - 1 do
+    begin
+      ESize := 0;
+      EOpcode := 0;
+      //ขนาดลบที่เล็กที่สุดที่ช่วงนี้ใช้ได้
+      for t := 1 to 4 do
+        if ((Info.Regions[i].EraseTypeMask and (1 shl (t - 1))) <> 0) and
+           (Info.EraseTypes[t].Size > 0) then
+          if (ESize = 0) or (Info.EraseTypes[t].Size < ESize) then
+          begin
+            ESize := Info.EraseTypes[t].Size;
+            EOpcode := Info.EraseTypes[t].Opcode;
+          end;
+
+      LogPrint(Format(STR_SFDP_MAP_REGION,
+                      [i + 1, Info.Regions[i].Size, ESize, EOpcode]));
+    end;
+  end;
+end;
+
+procedure ApplySFDPInfo(const Info: TSFDPInfo);
+var
+  ESize: cardinal;
+  EOpcode: byte;
+begin
+  LogSFDPDetails(Info);
+
+  //เอาวิธีเข้าโหมด 4 ไบต์และคำสั่งปลดล็อกที่ชิปแจ้งมาใช้จริง
+  ApplySFDPHints(Info);
 
   MainForm.ComboSPICMD.ItemIndex := SPI_CMD_25;
   MainForm.RadioSPI.Checked := True;
@@ -1993,6 +2468,8 @@ var
         end;
 
         LogPrint(STR_VERIFY_ERROR + IntToHex(Address + cardinal(BadOffset), 8));
+        OpFail('the page did not read back as written',
+               Address + cardinal(BadOffset));
         SetProgressPos(0);
         Exit;
       end;
@@ -2012,8 +2489,14 @@ var
   if WriteSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
   UsbAsp25_Wrdi(); //สำหรับ sst
 
+  OpProgress(Address - StartAddress, WriteSize);
+
   if BytesWrite <> WriteSize then
-    LogPrint(STR_WRONG_BYTES_WRITE)
+  begin
+    LogPrint(STR_WRONG_BYTES_WRITE);
+    OpFail(Format('wrote %d bytes but the buffer holds %d',
+                  [BytesWrite, WriteSize]));
+  end
   else
     LogPrint(STR_DONE);
 
@@ -2384,8 +2867,16 @@ var
 
   if ChipSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
 
-  if BytesRead <> ChipSize then
-    LogPrint(STR_WRONG_BYTES_READ)
+  OpProgress(Address - StartAddress, ChipSize - StartAddress);
+
+  //ที่ต้องอ่านคือส่วนที่เหลือนับจากจุดเริ่ม ไม่ใช่ทั้งชิป
+  //เทียบกับ ChipSize ตรง ๆ จะรายงานผิดทุกครั้งที่จุดเริ่มไม่ใช่ศูนย์
+  if BytesRead <> integer(ChipSize - StartAddress) then
+  begin
+    LogPrint(STR_WRONG_BYTES_READ);
+    OpFail(Format('read %d bytes but expected %d',
+                  [BytesRead, ChipSize - StartAddress]));
+  end
   else
     LogPrint(STR_DONE);
 
@@ -2592,6 +3083,7 @@ var
     if DataChunk[i] <> DataChunkFile[i] then
     begin
       LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
+      OpFail('the chip does not match the buffer', Address + cardinal(i));
       SetProgressPos(0);
       Exit;
     end;
@@ -2608,8 +3100,13 @@ var
 
   if DataSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
 
+  OpProgress(Address - StartAddress, DataSize);
+
   if (BytesRead <> DataSize) then
-    LogPrint(STR_WRONG_BYTES_READ)
+  begin
+    LogPrint(STR_WRONG_BYTES_READ);
+    OpFail(Format('read %d bytes but expected %d', [BytesRead, DataSize]));
+  end
   else
     LogPrint(STR_DONE);
 
@@ -3181,6 +3678,15 @@ begin
 
   ProgrammerPresent := Present;
 
+  //ถอดหรือเสียบเครื่องโปรแกรม แปลว่าซ็อกเก็ตอาจมีชิปคนละตัวแล้ว
+  //สิ่งที่รู้เกี่ยวกับชิปตัวเก่าต้องทิ้ง ไม่งั้นจะส่ง opcode ของยี่ห้อที่ไม่ใช่
+  if Was <> ProgrammerPresent then
+  begin
+    Reset25ChipHints;
+    LastChipUID := '';
+    LastID9F := '';
+  end;
+
   //พูดเฉพาะตอนสถานะเปลี่ยน ไม่งั้น log จะเต็มไปด้วยข้อความซ้ำทุกสามวินาที
   if Announce or (Was <> ProgrammerPresent) then
   begin
@@ -3246,9 +3752,15 @@ end;
 //เลือกชิปตามชื่อ โดยหาในไฟล์หลักก่อน แล้วค่อยหาในไฟล์เสริม
 function SelectChipAny(const AName: string): boolean;
 begin
+  //เปลี่ยนชิปแล้ว สิ่งที่รู้เกี่ยวกับตัวเก่าใช้ไม่ได้อีก
+  //ถ้าไม่ล้าง opcode ที่เลือกตามยี่ห้อจะเป็นของชิปตัวก่อนหน้า
+  Reset25ChipHints;
+
   Result := findchip.SelectChip(ChipListFile, AName);
   if not Result then
     Result := findchip.SelectChip(ChipListFile2, AName);
+  if not Result then
+    Result := findchip.SelectChip(ChipListFile3, AName);
   UpdateChipInfo;
 end;
 
@@ -3640,12 +4152,21 @@ var
   I2C_ChunkSize: Word;
 begin
   I2C_ChunkSize := 65535;
+  OpBegin(opkWrite);
 try
   ButtonCancel.Tag := 0;
-  if not OpenDevice() then exit;
+  if not OpenDevice() then
+  begin
+    OpFail('the programmer could not be opened');
+    exit;
+  end;
   if Sender <> ComboItem1 then
     if MessageDlg('AsProgrammer', STR_START_WRITE, mtConfirmation, [mbYes, mbNo], 0)
-      <> mrYes then Exit;
+      <> mrYes then
+    begin
+      OpCancel;
+      Exit;
+    end;
   LockControl();
 
   if RunScriptFromFile(CurrentICParam.Script, 'write') then Exit;
@@ -3655,12 +4176,14 @@ try
   if (not IsNumber(ComboChipSize.Text)) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size is not a number');
     Exit;
   end;
 
   if MPHexEditorEx.DataSize > StrToInt(ComboChipSize.Text) - Hex2Dec('$'+StartAddressEdit.Text) then
   begin
     LogPrint(STR_WRONG_FILE_SIZE);
+    OpFail('the buffer does not fit the chip from the given start address');
     Exit;
   end;
 
@@ -3669,10 +4192,36 @@ try
   begin
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
 
-    if not VoltageWarningOK then Exit;
-    if not VerifyChipID then Exit;
-    if not AutoBackupChip then Exit;
-    if not BlankCheckBeforeWrite(Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize) then Exit;
+    if not VoltageWarningOK then
+    begin
+      OpFail('aborted because of the supply voltage');
+      Exit;
+    end;
+    if not VerifyChipID then
+    begin
+      OpFail('the chip in the socket does not match the selected one');
+      Exit;
+    end;
+
+    //ต้องรู้จักชิปก่อน คำสั่งที่ต่างกันตามยี่ห้อและด่านตรวจต่าง ๆ พึ่งข้อมูลนี้
+    EnsureChipHints;
+    LastChipUID := ReadChipUID;
+    if LastChipUID <> '' then LogPrint(STR_UNIQUE_ID + LastChipUID);
+
+    if not DuplicateChipGuardOK(LastChipUID) then Exit;
+    if not JobFileGuardOK(MPHexEditorEx.DataSize) then Exit;
+    if not ProtectionGuardOK(Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize) then Exit;
+
+    if not AutoBackupChip then
+    begin
+      OpFail('the backup could not be made');
+      Exit;
+    end;
+    if not BlankCheckBeforeWrite(Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize) then
+    begin
+      OpFail('the target area is not erased');
+      Exit;
+    end;
 
     if ComboSPICMD.ItemIndex <> SPI_CMD_KB then
       IsLockBitsEnabled;
@@ -3814,12 +4363,19 @@ try
   end;
 
   //เลื่อนตัวนับต่อเมื่อการเขียนทำจนจบจริง
-  if ProdSettings.SNEnabled and (ButtonCancel.Tag = 0) then
+  //เดิมดูแค่ว่าผู้ใช้ไม่ได้กดยกเลิก งานที่ล้มเหลวจึงกินเลขไปฟรี ๆ หนึ่งเลข
+  if ProdSettings.SNEnabled and (ButtonCancel.Tag = 0) and OpOK then
     ProdSettings.SNValue := ProdSettings.SNValue + ProdSettings.SNStep;
 
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 
 finally
+  //บันทึกการผลิตต้องเขียนทั้งตอนผ่านและตอนไม่ผ่าน ของที่ตกก็ต้องตามรอยได้
+  if MPHexEditorEx.DataSize > 0 then
+    WriteProdLogEntry(MPHexEditorEx.DataSize, BufferCRC32, LastChipUID);
+
+  LogPrint(STR_OP_RESULT + OpSummary);
+
   ExitProgMode25;
   AsProgrammer.Programmer.DevClose;
   UnlockControl();
@@ -3839,9 +4395,14 @@ var
   BlankByte: byte;
 begin
   I2C_ChunkSize := 65535;
+  if BlankCheck then OpBegin(opkBlankCheck) else OpBegin(opkVerify);
 try
   ButtonCancel.Tag := 0;
-  if not OpenDevice() then exit;
+  if not OpenDevice() then
+  begin
+    OpFail('the programmer could not be opened');
+    exit;
+  end;
   LockControl();
 
   if RunScriptFromFile(CurrentICParam.Script, 'verify') then Exit;
@@ -3851,12 +4412,14 @@ try
   if not IsNumber(ComboChipSize.Text) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size is not a number');
     Exit;
   end;
 
   if (MPHexEditorEx.DataSize > StrToInt(ComboChipSize.Text) - Hex2Dec('$'+StartAddressEdit.Text)) and (not BlankCheck) then
   begin
     LogPrint(STR_WRONG_FILE_SIZE);
+    OpFail('the buffer does not fit the chip from the given start address');
     Exit;
   end;
 
@@ -3966,6 +4529,7 @@ try
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 
 finally
+  LogPrint(STR_OP_RESULT + OpSummary);
   ExitProgMode25;
   AsProgrammer.Programmer.DevClose;
   UnlockControl();
@@ -4062,9 +4626,15 @@ var
   Vendor, ChipName: string;
   Info: TSFDPInfo;
   SfdpOK: boolean;
+  ManufSaved: byte;
 begin
+  OpBegin(opkDetect);
   try
-    if not OpenDevice() then exit;
+    if not OpenDevice() then
+    begin
+      OpFail('the programmer could not be opened');
+      exit;
+    end;
     LockControl();
 
     FillByte(ID.ID9FH, 3, $FF);
@@ -4091,6 +4661,11 @@ begin
     //อ่าน SFDP ตอนที่ยังอยู่ในโหมดโปรแกรม เผื่อชิปไม่มีในฐานข้อมูล
     SfdpOK := SFDPDetect(Info);
 
+    //การเลือกชิปจากรายการจะล้างสิ่งที่รู้เกี่ยวกับชิปตัวเก่าทิ้ง
+    //ซึ่งรวมถึงสิ่งที่เพิ่งอ่านมาจากชิปตัวจริงเมื่อครู่นี้ด้วย
+    //เก็บไว้ก่อน แล้วค่อยใส่กลับหลังเลือกเสร็จ
+    ManufSaved := Chip25ManufID;
+
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
 
@@ -4108,8 +4683,12 @@ begin
     if IsDeadID(ID.ID9FH) then
     begin
       LogPrint(STR_NO_CHIP);
+      OpFail('no chip answered');
       Exit;
     end;
+
+    //เก็บรหัสไว้ใช้ตอนบันทึกชิปใหม่ลงตารางของผู้ใช้
+    LastID9F := IDstr9FH;
 
     Vendor := JedecVendor(ID.ID9FH[0]);
     if Vendor <> '' then LogPrint(STR_VENDOR + Vendor);
@@ -4120,23 +4699,27 @@ begin
       //ค้นทั้งไฟล์หลักและไฟล์เสริมพร้อมกัน
       FindChipInto(ChipListFile, '', IDstr9FH, Matches);
       FindChipInto(ChipListFile2, '', IDstr9FH, Matches);
+      FindChipInto(ChipListFile3, '', IDstr9FH, Matches);
 
       if Matches.Count = 0 then
       begin
         FindChipInto(ChipListFile, '', IDstr90H, Matches);
         FindChipInto(ChipListFile2, '', IDstr90H, Matches);
+        FindChipInto(ChipListFile3, '', IDstr90H, Matches);
       end;
 
       if Matches.Count = 0 then
       begin
         FindChipInto(ChipListFile, '', IDstrABH, Matches);
         FindChipInto(ChipListFile2, '', IDstrABH, Matches);
+        FindChipInto(ChipListFile3, '', IDstrABH, Matches);
       end;
 
       if Matches.Count = 0 then
       begin
         FindChipInto(ChipListFile, '', IDstr15H, Matches);
         FindChipInto(ChipListFile2, '', IDstr15H, Matches);
+        FindChipInto(ChipListFile3, '', IDstr15H, Matches);
       end;
 
       if Matches.Count = 1 then
@@ -4168,6 +4751,15 @@ begin
     finally
       Matches.Free;
     end;
+
+    //ใส่สิ่งที่อ่านมาจากชิปตัวจริงกลับเข้าไป การเลือกรายการอาจล้างมันไปแล้ว
+    //ถึงชิปจะมีในตารางอยู่แล้ว วิธีเข้าโหมด 4 ไบต์ก็ยังต้องเอาจาก SFDP
+    //เพราะตารางชิปไม่ได้เก็บเรื่องนี้ไว้ และมันต่างกันไปตามยี่ห้อ
+    Chip25ManufID := ManufSaved;
+    if SfdpOK then
+      ApplySFDPHints(Info)
+    else
+      Chip25SFDPRead := True;
 
   finally
     UnlockControl();
@@ -4526,7 +5118,11 @@ procedure TMainForm.MenuProdConfigClick(Sender: TObject);
 begin
   if OperationRunning then Exit;
   if EditProdSettings(ProdSettings) then
+  begin
     LogPrint(STR_PROD_SAVED);
+    //ไฟล์งานอาจเพิ่งถูกตั้งหรือถูกเปลี่ยน อ่านใหม่ทันที
+    RefreshJobFile;
+  end;
 end;
 
 //บันทึกผลการผลิตทีละชิ้นลงไฟล์ CSV เปิดด้วย Excel ได้เลย
@@ -5384,6 +5980,9 @@ begin
               ' chips  (GPL-2.0-or-later)')
       else
         s.Add('chiplist-flashrom.xml  not loaded');
+      if ChipListFile3 <> nil then
+        s.Add('chiplist-user.xml      ' + IntToStr(CountChips(ChipListFile3)) +
+              ' chips  (added by you)');
       s.Add('Unknown chips are still usable through SFDP auto-detect.');
       s.Add('');
       s.Add('--- Programmers ---');
@@ -5603,6 +6202,7 @@ begin
 
   LoadChipList(ChipListFile);
   LoadChipList(ChipListFile2);
+  LoadChipList(ChipListFile3);
   RomF := TMemoryStream.Create;
   ScriptEngine := TPasCalc.Create;
   ScriptsFunc.SetScriptFunctions(ScriptEngine);
@@ -5611,6 +6211,7 @@ begin
   MPHexEditorEx.InsertMode := false;
   DefaultProdSettings(ProdSettings);
   LoadOptions(SettingsFile);
+  RefreshJobFile;
   LoadLangList();
 
   //เลขเวอร์ชันมาจาก appver ที่เดียว แถบชื่อหน้าต่างกับ log จึงไม่มีวันค้างเลขเก่า
@@ -5765,6 +6366,7 @@ begin
   SaveOptions(SettingsFile);
   ChipListFile.Free;
   ChipListFile2.Free;
+  ChipListFile3.Free;
   SettingsFile.Free;
   ScriptEngine.Free;
 end;
@@ -5776,9 +6378,14 @@ var
   CRC32: Cardinal;
 begin
   I2C_ChunkSize := 65535;
+  OpBegin(opkRead);
 try
   ButtonCancel.Tag := 0;
-  if not OpenDevice() then exit;
+  if not OpenDevice() then
+  begin
+    OpFail('the programmer could not be opened');
+    exit;
+  end;
   LockControl();
 
   if RunScriptFromFile(CurrentICParam.Script, 'read') then Exit;
@@ -5788,6 +6395,7 @@ try
   if (not IsNumber(ComboChipSize.Text)) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size is not a number');
     Exit;
   end;
 
@@ -5795,6 +6403,7 @@ try
   if RadioSPI.Checked then
   begin
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+    EnsureChipHints;
     TimeCounter := Time();
 
     if  ComboSPICMD.ItemIndex = SPI_CMD_KB then
@@ -5873,6 +6482,7 @@ try
   LogPrint('CRC32 = 0x'+IntToHex(CRC32, 8));
 
 finally
+  LogPrint(STR_OP_RESULT + OpSummary);
   ExitProgMode25;
   AsProgrammer.Programmer.DevClose;
   UnlockControl();
@@ -5919,12 +6529,21 @@ procedure TMainForm.ButtonEraseClick(Sender: TObject);
 var
   I2C_DevAddr: byte;
 begin
+  OpBegin(opkErase);
 try
   ButtonCancel.Tag := 0;
-  if not OpenDevice() then exit;
+  if not OpenDevice() then
+  begin
+    OpFail('the programmer could not be opened');
+    exit;
+  end;
   if Sender <> ComboItem1 then
     if MessageDlg('AsProgrammer', STR_START_ERASE, mtConfirmation, [mbYes, mbNo], 0)
-      <> mrYes then Exit;
+      <> mrYes then
+    begin
+      OpCancel;
+      Exit;
+    end;
   LockControl();
 
   if RunScriptFromFile(CurrentICParam.Script, 'erase') then Exit;
@@ -5936,9 +6555,28 @@ try
   begin
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
 
-    if not VoltageWarningOK then Exit;
-    if not VerifyChipID then Exit;
-    if not AutoBackupChip then Exit;
+    if not VoltageWarningOK then
+    begin
+      OpFail('aborted because of the supply voltage');
+      Exit;
+    end;
+    if not VerifyChipID then
+    begin
+      OpFail('the chip in the socket does not match the selected one');
+      Exit;
+    end;
+
+    EnsureChipHints;
+
+    //ลบทั้งชิปแตะทุกไบต์ ด่านตรวจจึงครอบทั้งชิป
+    if (ComboSPICMD.ItemIndex = SPI_CMD_25) and (OpUI.ChipSize > 0) then
+      if not ProtectionGuardOK(0, OpUI.ChipSize) then Exit;
+
+    if not AutoBackupChip then
+    begin
+      OpFail('the backup could not be made');
+      Exit;
+    end;
 
     if ComboSPICMD.ItemIndex <> SPI_CMD_KB then
       IsLockBitsEnabled;
@@ -6055,6 +6693,7 @@ try
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 
 finally
+  LogPrint(STR_OP_RESULT + OpSummary);
   ExitProgMode25;
   AsProgrammer.Programmer.DevClose;
   UnlockControl();
@@ -6221,73 +6860,60 @@ end;
 procedure TMainForm.MenuSFDPDetectClick(Sender: TObject);
 var
   Info: TSFDPInfo;
-  i: integer;
-  ESize: cardinal;
-  EOpcode: byte;
+  NewName: string;
 begin
   if OperationRunning then Exit;
+  OpBegin(opkDetect);
 try
   ButtonCancel.Tag := 0;
 
   if not RadioSPI.Checked then
   begin
     LogPrint(STR_SECTOR_SPI25_ONLY);
+    OpFail('SFDP is only available for SPI 25 series chips');
     Exit;
   end;
 
-  if not OpenDevice() then Exit;
+  if not OpenDevice() then
+  begin
+    OpFail('the programmer could not be opened');
+    Exit;
+  end;
   LockControl();
 
   LogPrint(STR_SFDP_READING);
   EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
 
+  //รหัสผู้ผลิตทำให้ตั้งชื่อรายการที่บันทึกได้ตรงยี่ห้อ
+  EnsureChipHints;
+
   if not SFDPDetect(Info) then
   begin
     LogPrint(STR_SFDP_NOT_FOUND);
+    OpFail('this chip has no SFDP table');
     Exit;
   end;
 
-  LogPrint(STR_SFDP_FOUND + ' (JESD216 rev ' + IntToStr(Info.MajorRev) + '.' +
-           IntToStr(Info.MinorRev) + ')');
-  LogPrint('  Size: ' + IntToStr(Info.Density) + ' bytes');
-  LogPrint('  Page: ' + IntToStr(Info.PageSize) + ' bytes');
-  LogPrint('  Address bytes: ' + SFDPAddrBytesStr(Info));
+  //ทางเดียวกับตอนตรวจอัตโนมัติ ไม่มีโค้ดสองชุดที่ต้องดูแลให้ตรงกัน
+  ApplySFDPInfo(Info);
 
-  for i := 1 to 4 do
-    if Info.EraseTypes[i].Size > 0 then
-      LogPrint('  Erase type ' + IntToStr(i) + ': ' + IntToStr(Info.EraseTypes[i].Size) +
-               ' bytes, opcode 0x' + IntToHex(Info.EraseTypes[i].Opcode, 2));
-
-  //เติมค่าลงช่องต่าง ๆ ลำดับสำคัญ เพราะ RadioSPIChange จะล้างค่าทิ้ง
-  ComboSPICMD.ItemIndex := SPI_CMD_25;
-  RadioSPI.Checked := True;
-  RadioSPIChange(MainForm);
-
-  ComboChipSize.Text := IntToStr(Info.Density);
-  ComboPageSize.Text := IntToStr(Info.PageSize);
-  LabelChipName.Caption := 'SFDP ' + IntToStr(Info.Density div 1024) + 'K';
-
-  CurrentICParam.Name := LabelChipName.Caption;
-  CurrentICParam.Size := Info.Density;
-  CurrentICParam.Page := Info.PageSize;
-  CurrentICParam.SpiCmd := SPI_CMD_25;
-  CurrentICParam.Script := '';
-  ComboBox_chip_scriptrun.Items.Clear;
-
-  if SFDPSmallestErase(Info, ESize, EOpcode) then
-  begin
-    CurrentICParam.Sector := ESize;
-    CurrentICParam.SectorOpcode := EOpcode;
-  end
-  else
-  begin
-    CurrentICParam.Sector := 0;
-    CurrentICParam.SectorOpcode := 0;
-  end;
-
-  LogPrint(STR_SFDP_APPLIED);
+  //ชิปที่ไม่มีในตารางใด ๆ เก็บไว้ใช้รอบหน้าได้ ไม่ต้องมาตรวจใหม่ทุกครั้ง
+  if not CLIMode then
+    if MessageDlg('AsProgrammer', Format(STR_CHIPSAVE_Q, [ChipListFile3Name]),
+                  mtConfirmation, [mbYes, mbNo], 0) = mrYes then
+    begin
+      NewName := CurrentICParam.Name;
+      if InputQuery('AsProgrammer', STR_CHIPSAVE_NONAME, NewName) then
+        if Trim(NewName) <> '' then
+        begin
+          CurrentICParam.Name := Trim(NewName);
+          LabelChipName.Caption := CurrentICParam.Name;
+          SaveCurrentChipToUserList(CurrentICParam.Name);
+        end;
+    end;
 
 finally
+  LogPrint(STR_OP_RESULT + OpSummary);
   ExitProgMode25;
   AsProgrammer.Programmer.DevClose;
   UnlockControl();
@@ -6421,6 +7047,10 @@ begin
     TDOMElement(ParentNode).SetAttribute('sn_logfile', ProdSettings.SNLogFile);
     TDOMElement(ParentNode).SetAttribute('batch_enabled', BoolToStr(ProdSettings.BatchEnabled, '1', '0'));
     TDOMElement(ParentNode).SetAttribute('batch_target', IntToStr(ProdSettings.BatchTarget));
+    TDOMElement(ParentNode).SetAttribute('prod_logfile', ProdSettings.ProdLogFile);
+    TDOMElement(ParentNode).SetAttribute('prod_operator', ProdSettings.Operator_);
+    TDOMElement(ParentNode).SetAttribute('prod_jobfile', ProdSettings.JobFile);
+    TDOMElement(ParentNode).SetAttribute('prod_checkuid', BoolToStr(ProdSettings.CheckUID, '1', '0'));
 
     //ขนาดและตำแหน่งหน้าต่าง เก็บเฉพาะตอนไม่ได้ขยายเต็มจอ
     if MainForm.WindowState = wsNormal then
@@ -6554,6 +7184,18 @@ begin
         OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('batch_target').NodeValue);
         if IsNumber(OptVal) then ProdSettings.BatchTarget := StrToInt(OptVal);
       end;
+
+      if Node.Attributes.GetNamedItem('prod_logfile') <> nil then
+        ProdSettings.ProdLogFile := UTF16ToUTF8(Node.Attributes.GetNamedItem('prod_logfile').NodeValue);
+
+      if Node.Attributes.GetNamedItem('prod_operator') <> nil then
+        ProdSettings.Operator_ := UTF16ToUTF8(Node.Attributes.GetNamedItem('prod_operator').NodeValue);
+
+      if Node.Attributes.GetNamedItem('prod_jobfile') <> nil then
+        ProdSettings.JobFile := UTF16ToUTF8(Node.Attributes.GetNamedItem('prod_jobfile').NodeValue);
+
+      if Node.Attributes.GetNamedItem('prod_checkuid') <> nil then
+        ProdSettings.CheckUID := Node.Attributes.GetNamedItem('prod_checkuid').NodeValue = '1';
 
       if  Node.Attributes.GetNamedItem('spi_speed') <> nil then
       begin

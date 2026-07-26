@@ -34,6 +34,10 @@ type
     EdLog: TEdit;
     ChkBatch: TCheckBox;
     EdTarget: TEdit;
+    EdProdLog: TEdit;
+    EdOperator: TEdit;
+    EdJob: TEdit;
+    ChkCheckUID: TCheckBox;
     procedure OkClick(Sender: TObject);
   public
     constructor CreateDialog(AOwner: TComponent);
@@ -70,7 +74,7 @@ begin
   BorderStyle := bsDialog;
   Position := poScreenCenter;
   ClientWidth := 380;
-  ClientHeight := 330;
+  ClientHeight := 470;
 
   ChkSN := TCheckBox.Create(Self);
   ChkSN.Parent := Self;
@@ -131,10 +135,35 @@ begin
   MakeLabel(Self, 210, 256, 'chips');
   EdTarget := MakeEdit(Self, 250, 252, 110);
 
+  //--- การตามรอย ทุกช่องเว้นว่างได้ ถ้าเว้นก็ไม่มีอะไรเปลี่ยน ---
+  Bevel := TBevel.Create(Self);
+  Bevel.Parent := Self;
+  Bevel.Left := 16;
+  Bevel.Top := 286;
+  Bevel.Width := 344;
+  Bevel.Height := 2;
+  Bevel.Shape := bsTopLine;
+
+  MakeLabel(Self, 16, 296, 'Production log (CSV)');
+  EdProdLog := MakeEdit(Self, 210, 292, 150);
+
+  MakeLabel(Self, 16, 326, 'Operator');
+  EdOperator := MakeEdit(Self, 210, 322, 150);
+
+  MakeLabel(Self, 16, 356, 'Job file');
+  EdJob := MakeEdit(Self, 210, 352, 150);
+
+  ChkCheckUID := TCheckBox.Create(Self);
+  ChkCheckUID.Parent := Self;
+  ChkCheckUID.Left := 16;
+  ChkCheckUID.Top := 384;
+  ChkCheckUID.Width := 344;
+  ChkCheckUID.Caption := 'Refuse a chip whose unique ID already passed in the log';
+
   BtnOk := TButton.Create(Self);
   BtnOk.Parent := Self;
   BtnOk.Left := 196;
-  BtnOk.Top := 292;
+  BtnOk.Top := 424;
   BtnOk.Width := 80;
   BtnOk.Caption := 'OK';
   BtnOk.OnClick := @OkClick;
@@ -143,7 +172,7 @@ begin
   BtnCancel := TButton.Create(Self);
   BtnCancel.Parent := Self;
   BtnCancel.Left := 282;
-  BtnCancel.Top := 292;
+  BtnCancel.Top := 424;
   BtnCancel.Width := 80;
   BtnCancel.Caption := 'Cancel';
   BtnCancel.ModalResult := mrCancel;
@@ -182,6 +211,11 @@ begin
   EdLog.Text := S.SNLogFile;
   ChkBatch.Checked := S.BatchEnabled;
   EdTarget.Text := IntToStr(S.BatchTarget);
+
+  EdProdLog.Text := S.ProdLogFile;
+  EdOperator.Text := S.Operator_;
+  EdJob.Text := S.JobFile;
+  ChkCheckUID.Checked := S.CheckUID;
 end;
 
 procedure TProdForm.Store(var S: TProdSettings);
@@ -204,6 +238,11 @@ begin
 
   S.BatchEnabled := ChkBatch.Checked;
   if TryStrToInt(Trim(EdTarget.Text), V) and (V > 0) then S.BatchTarget := V;
+
+  S.ProdLogFile := Trim(EdProdLog.Text);
+  S.Operator_ := Trim(EdOperator.Text);
+  S.JobFile := Trim(EdJob.Text);
+  S.CheckUID := ChkCheckUID.Checked;
 end;
 
 function EditProdSettings(var S: TProdSettings): boolean;

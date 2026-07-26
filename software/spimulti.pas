@@ -21,7 +21,7 @@ function UsbAspMulti_Busy(): boolean;
 
 implementation
 
-uses Main;
+uses Main, basehw;
 
 //คำสั่งแรกหลังรีเซ็ต ต้องใช้ความถี่ไม่เกิน 8MHz
 

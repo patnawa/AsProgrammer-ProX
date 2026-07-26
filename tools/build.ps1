@@ -50,23 +50,58 @@ $lpk = (Get-ChildItem -Recurse -Filter "mphexeditorlaz.lpk" $root | Select-Objec
 Step "registering $((Split-Path -Leaf $lpk))"
 & $lazbuild --add-package-link $lpk | Out-Null
 
-# --- tests first, they need no hardware ---
-Step "running tests"
-$testDir = Join-Path $env:TEMP "aspx-tests"
-Remove-Item -Recurse -Force $testDir -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force $testDir | Out-Null
-Copy-Item "$root\tests\*.lpr","$root\tests\spi25.pas" $testDir
-Copy-Item "$root\software\fileformats.pas","$root\software\sfdp.pas",
-          "$root\software\jedec.pas","$root\software\serialnum.pas" $testDir
-
-Push-Location $testDir
-foreach ($t in @("fftest", "unittests")) {
-  & "$fpcBin\fpc.exe" -Twin32 -Pi386 -Mobjfpc -Sh "$t.lpr" | Out-Null
-  if (-not (Test-Path "$testDir\$t.exe")) { Pop-Location; Die "$t did not compile" }
-  & "$testDir\$t.exe"
-  if ($LASTEXITCODE -ne 0) { Pop-Location; Die "$t reported failures" }
+# --- the chip tables, before anything is compiled ---
+# A typo here breaks one chip and nothing else, which means it is only found
+# when somebody puts that exact part in the socket. Catch it now instead.
+Step "checking the chip tables"
+$python = (Get-Command python -ErrorAction SilentlyContinue)
+if ($python) {
+  & $python.Source "$root\tools\validate_chiplist.py" "$root\chiplist.xml" `
+    $(if (Test-Path "$root\chiplist-flashrom.xml") { "$root\chiplist-flashrom.xml" })
+  if ($LASTEXITCODE -ne 0) { Die "the chip tables have errors" }
+} else {
+  Write-Host "    python not found, skipped" -ForegroundColor Yellow
 }
-Pop-Location
+
+# --- tests, they need no hardware ---
+#
+# Two directories, because the two suites need different versions of spi25:
+# the logic tests link a stub that serves a synthetic SFDP image, while the
+# protocol tests link the real unit and drive it through a mock programmer.
+# Put both in one directory and whichever spi25.pas landed last would win.
+Step "running tests"
+
+function Run-Suite($name, $dir, $files) {
+  Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force $dir | Out-Null
+  Copy-Item $files $dir
+  Push-Location $dir
+  & "$fpcBin\fpc.exe" -Twin32 -Pi386 -Mobjfpc -Sh "$name.lpr" | Out-Null
+  if (-not (Test-Path "$dir\$name.exe")) { Pop-Location; Die "$name did not compile" }
+  & "$dir\$name.exe"
+  $code = $LASTEXITCODE
+  Pop-Location
+  if ($code -ne 0) { Die "$name reported failures" }
+}
+
+# pure logic: SFDP parsing, protection bits, results, production log, formats
+$logicDir = Join-Path $env:TEMP "aspx-tests-logic"
+Run-Suite "fftest" $logicDir @(
+  "$root\tests\fftest.lpr", "$root\tests\spi25.pas",
+  "$root\software\fileformats.pas")
+Run-Suite "unittests" $logicDir @(
+  "$root\tests\unittests.lpr", "$root\tests\spi25.pas",
+  "$root\software\sfdp.pas", "$root\software\jedec.pas",
+  "$root\software\serialnum.pas", "$root\software\protbits.pas",
+  "$root\software\opresult.pas", "$root\software\prodlog.pas",
+  "$root\software\fileformats.pas")
+
+# the real SPI 25 protocol layer, driven through a programmer that is all in memory
+$hwDir = Join-Path $env:TEMP "aspx-tests-hw"
+Run-Suite "hwtests" $hwDir @(
+  "$root\tests\hwtests.lpr", "$root\tests\mockhw.pas",
+  "$root\software\spi25.pas", "$root\software\basehw.pas",
+  "$root\software\utilfunc.pas")
 
 # --- the program ---
 Step "building AsProgrammer.exe"

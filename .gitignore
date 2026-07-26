@@ -14,5 +14,16 @@ mphexeditor/
 # Runtime copy of the chip list (source of truth is chiplist.xml in the repo root)
 software/chiplist.xml
 
+# Runtime state, written by the program next to the exe
+software/settings.xml
+chiplist-user.xml
+software/chiplist-user.xml
+backup/
+software/backup/
+
+# Production output: serial and traceability logs belong to the operator
+*.csv
+serials.log
+
 # Release output
 release/

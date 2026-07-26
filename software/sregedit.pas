@@ -59,7 +59,7 @@ var
 
 implementation
 
-uses main, spi25, msgstr, utilfunc;
+uses main, spi25, msgstr, utilfunc, basehw;
 
 {$R *.lfm}
 

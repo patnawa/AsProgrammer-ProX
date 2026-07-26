@@ -26,7 +26,7 @@ function UsbAspI2C_Write(DevAddr, AddrType: byte; Address: longword; buffer: arr
 
 implementation
 
-uses main;
+uses basehw;
 
 procedure EnterProgModeI2C();
 begin
