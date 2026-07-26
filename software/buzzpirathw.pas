@@ -1,6 +1,6 @@
 unit buzzpirathw;
 
-// By Dreg, Based from arduinohw
+// โดย Dreg พัฒนาต่อจาก arduinohw
 
 {$mode objfpc}{$H+}
 
@@ -78,7 +78,7 @@ public
   procedure I2CStart; override;
   procedure I2CStop; override;
   function I2CReadByte(ack: boolean): byte; override;
-  function I2CWriteByte(data: byte): boolean; override; //return ack
+  function I2CWriteByte(data: byte): boolean; override; //คืนค่า ack
 
   //MICROWIRE
   function MWInit(speed: integer): boolean; override;

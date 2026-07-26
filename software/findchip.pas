@@ -22,9 +22,9 @@ type
     procedure EditSearchChange(Sender: TObject);
     procedure ListBoxChipsDblClick(Sender: TObject);
   private
-    { private declarations }
+    { ส่วนประกาศแบบ private }
   public
-    { public declarations }
+    { ส่วนประกาศแบบ public }
   end;
 
   procedure FindChip(XMLfile: TXMLDocument; chipname: string; chipid: string = '');
@@ -39,7 +39,7 @@ uses main, scriptsfunc;
 
 {$R *.lfm}
 
-//Ищет чип по имени. Если id не пустое то только по id.
+//ค้นหาชิปจากชื่อ ถ้า id ไม่ว่างจะค้นจาก id อย่างเดียว
 procedure FindChip(XMLfile: TXMLDocument; chipname: string; chipid: string = '');
 var
   Node, ChipNode: TDOMNode;
@@ -52,14 +52,14 @@ begin
 
     while Assigned(Node) do
     begin
-     //Node.NodeName; //Раздел(SPI, I2C...)
+     //Node.NodeName; //หมวด (SPI, I2C...)
 
-     // Используем свойство ChildNodes
+     // ใช้พรอเพอร์ตี ChildNodes
      with Node.ChildNodes do
      try
        for j := 0 to (Count - 1) do
        begin
-         //Item[j].NodeName; //Раздел Фирма
+         //Item[j].NodeName; //หมวดผู้ผลิต
 
          for i := 0 to (Item[j].ChildNodes.Count - 1) do
          begin
@@ -80,7 +80,7 @@ begin
            end
            else
            begin
-             cs := UTF16ToUTF8(ChipNode.NodeName); //Чип
+             cs := UTF16ToUTF8(ChipNode.NodeName); //ชิป
              if pos(Upcase(chipname), Upcase(cs)) > 0 then
              begin
                ChipSearchForm.ListBoxChips.Items.Append(cs+' ('+ UTF16ToUTF8(Item[j].NodeName) +')');
@@ -110,18 +110,18 @@ begin
 
     while Assigned(Node) do
     begin
-     //Node.NodeName; //Раздел(SPI, I2C...)
+     //Node.NodeName; //หมวด (SPI, I2C...)
 
-     // Используем свойство ChildNodes
+     // ใช้พรอเพอร์ตี ChildNodes
      with Node.ChildNodes do
      try
        for j := 0 to (Count - 1) do
        begin
-         //Item[j].NodeName; //Раздел Фирма
+         //Item[j].NodeName; //หมวดผู้ผลิต
 
          for i := 0 to (Item[j].ChildNodes.Count - 1) do
          begin
-           cs := UTF16ToUTF8(Item[j].ChildNodes.Item[i].NodeName); //Чип
+           cs := UTF16ToUTF8(Item[j].ChildNodes.Item[i].NodeName); //ชิป
            if Upcase(chipname) = Upcase(cs) then
            begin
              ChipNode := Item[j].ChildNodes.Item[i];
@@ -129,7 +129,7 @@ begin
              if (ChipNode.HasAttributes) then
              begin
 
-               //Идентификатор нужен для проверки перед записью и стиранием
+               //ต้องมี id ไว้ตรวจก่อนเขียนและก่อนลบ
                if ChipNode.Attributes.GetNamedItem('id') <> nil then
                  Main.CurrentICParam.ID := UpperCase(UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('id').NodeValue))
                else
@@ -150,7 +150,7 @@ begin
                  MainForm.RadioSPI.Checked:= true;
                  MainForm.RadioSPIChange(MainForm);
                end
-               else //По дефолту spicmd25
+               else //ค่าเริ่มต้นคือชุดคำสั่ง spicmd 25
                if (ChipNode.Attributes.GetNamedItem('addrtype') = nil) and
                      (ChipNode.Attributes.GetNamedItem('addrbitlen') = nil) then
                      begin
@@ -192,7 +192,7 @@ begin
                else
                  Main.CurrentICParam.Size := 0;
 
-               //Размер сектора стирания. Если не задан - берется 4096
+               //ขนาดเซกเตอร์สำหรับลบ ถ้าไม่ระบุจะใช้ 4096
                if ChipNode.Attributes.GetNamedItem('sector') <> nil then
                begin
                  if IsNumber(UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('sector').NodeValue)) then
@@ -203,7 +203,7 @@ begin
                else
                  Main.CurrentICParam.Sector := 0;
 
-               //Опкод стирания сектора(HEX). Если не задан - подбирается по размеру
+               //opcode สำหรับลบเซกเตอร์ (HEX) ถ้าไม่ระบุจะเลือกให้ตามขนาด
                Main.CurrentICParam.SectorOpcode := 0;
                if ChipNode.Attributes.GetNamedItem('sectorcmd') <> nil then
                  if IsNumber('$'+UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('sectorcmd').NodeValue)) then
@@ -279,7 +279,7 @@ begin
   if ListBoxChips.ItemIndex >= 0 then
   begin
     chipname := ListBoxChips.Items[ListBoxChips.ItemIndex];
-    chipname := copy(chipname, 1, pos(' (', chipname)-1); //отрезаем фирму
+    chipname := copy(chipname, 1, pos(' (', chipname)-1); //ตัดชื่อผู้ผลิตออก
     SelectChip(chiplistfile, chipname);
   end;
 end;

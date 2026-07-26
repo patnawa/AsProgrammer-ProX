@@ -40,7 +40,7 @@ public
   procedure I2CStart; override;
   procedure I2CStop; override;
   function I2CReadByte(ack: boolean): byte; override;
-  function I2CWriteByte(data: byte): boolean; override; //return ack
+  function I2CWriteByte(data: byte): boolean; override; //คืนค่า ack
 
   //MICROWIRE
   function MWInit(speed: integer): boolean; override;
@@ -140,7 +140,7 @@ begin
   if (CS = 1) then if not CH341StreamSPI4(FDevHandle, $80, BufferLen, @buffer) then result :=-1 else result := BufferLen
   else
   begin
-    CH341Set_D5_D0(FDevHandle, $29, 0); //Вручную дергаем cs
+    CH341Set_D5_D0(FDevHandle, $29, 0); //ชัก cs เอง
     if not CH341StreamSPI4(FDevHandle, 0, BufferLen, @buffer) then result :=-1 else result := BufferLen;
   end;
 end;
@@ -152,7 +152,7 @@ begin
   if (CS = 1) then if not CH341StreamSPI4(FDevHandle, $80, BufferLen, @buffer) then result :=-1 else result := BufferLen
   else
   begin
-    CH341Set_D5_D0(FDevHandle, $29, 0); //Вручную дергаем cs
+    CH341Set_D5_D0(FDevHandle, $29, 0); //ชัก cs เอง
     if not CH341StreamSPI4(FDevHandle, 0, BufferLen, @buffer) then result :=-1 else result := BufferLen;
   end
 end;
@@ -195,12 +195,12 @@ var
 begin
   if not FDevOpened then Exit;
 
-  mBuffer[0] := mCH341A_CMD_I2C_STREAM;   // код команды
-  mBuffer[1] := mCH341A_CMD_I2C_STM_STA;  // код старт-бита
-  mBuffer[2] := mCH341A_CMD_I2C_STM_END;  // окончание пакета
-  mLength := 3;                           // длина пакета
+  mBuffer[0] := mCH341A_CMD_I2C_STREAM;   // รหัสคำสั่ง
+  mBuffer[1] := mCH341A_CMD_I2C_STM_STA;  // รหัสบิตเริ่ม
+  mBuffer[2] := mCH341A_CMD_I2C_STM_END;  // ปิดท้ายแพ็กเก็ต
+  mLength := 3;                           // ความยาวแพ็กเก็ต
 
-  CH341WriteData(FDevHandle, @mBuffer, @mLength); // запись блока данных
+  CH341WriteData(FDevHandle, @mBuffer, @mLength); // เขียนบล็อกข้อมูล
 end;
 
 procedure TCH341Hardware.I2CStop;
@@ -210,11 +210,11 @@ var
 begin
   if not FDevOpened then Exit;
 
-  mBuffer[0] := mCH341A_CMD_I2C_STREAM;   // код команды
-  mBuffer[1] := mCH341A_CMD_I2C_STM_STO;  // код стоп-бита
-  mBuffer[2] := mCH341A_CMD_I2C_STM_END;  // окончание пакета
-  mLength := 3;                           // длина пакета
-  CH341WriteData(FDevHandle, @mBuffer, @mLength); // запись блока данных
+  mBuffer[0] := mCH341A_CMD_I2C_STREAM;   // รหัสคำสั่ง
+  mBuffer[1] := mCH341A_CMD_I2C_STM_STO;  // รหัสบิตหยุด
+  mBuffer[2] := mCH341A_CMD_I2C_STM_END;  // ปิดท้ายแพ็กเก็ต
+  mLength := 3;                           // ความยาวแพ็กเก็ต
+  CH341WriteData(FDevHandle, @mBuffer, @mLength); // เขียนบล็อกข้อมูล
 end;
 
 function TCH341Hardware.I2CReadByte(ack: boolean): byte;
@@ -222,8 +222,8 @@ function ReadBit(): byte;
 var
   pins: cardinal;
 begin
-  SetI2CPins(0,1); //scl low
-  SetI2CPins(1,1); //scl/sda hi
+  SetI2CPins(0,1); //scl ลง
+  SetI2CPins(1,1); //scl กับ sda ขึ้น
   CH341GetStatus(FDevHandle, @pins);
   if IsBitSet(pins, 23) then Result := 1
     else
@@ -241,16 +241,16 @@ begin
     if (ReadBit = 1) then data := SetBit(data, i);
   end;
 
-  //generate pulse for ack
+  //สร้างพัลส์สำหรับ ack
   if not ack then
   begin
-    SetI2CPins(0,1); //scl low
+    SetI2CPins(0,1); //scl ลง
     SetI2CPins(0,1); //1
-    SetI2CPins(1,1); //scl hi
+    SetI2CPins(1,1); //scl ขึ้น
   end
   else
   begin
-    SetI2CPins(0,1); //scl low
+    SetI2CPins(0,1); //scl ลง
     SetI2CPins(0,0); //0
     SetI2CPins(1,0);
   end;
@@ -263,7 +263,7 @@ procedure SendBit(bit: byte);
 begin
   if boolean(bit) then
   begin
-    SetI2CPins(0,0); //scl low
+    SetI2CPins(0,0); //scl ลง
     SetI2CPins(0,1);
     SetI2CPins(1,1);
   end
@@ -284,12 +284,12 @@ begin
     if IsBitSet(data, i) then SendBit(1) else SendBit(0);
   end;
 
-  //generate pulse for ack
-  SetI2CPins(0,0); //scl low
+  //สร้างพัลส์สำหรับ ack
+  SetI2CPins(0,0); //scl ลง
   SetI2CPins(0,1);
-  SetI2CPins(1,1); //scl hi
+  SetI2CPins(1,1); //scl ขึ้น
 
-  //read ack
+  //อ่าน ack
   CH341GetStatus(FDevHandle, @pins);
   SetI2CPins(0,0);
 
@@ -317,19 +317,19 @@ var
   i,j: integer;
 begin
   if not FDevOpened then Exit(-1);
-  CH341Set_D5_D0(FDevHandle, %00101001, 1); //cs hi
+  CH341Set_D5_D0(FDevHandle, %00101001, 1); //cs ขึ้น
 
   SetLength(bit_buffer, BufferLen*8);
-  FillByte(bit_buffer[0], BufferLen*8, 1); //cs hi
+  FillByte(bit_buffer[0], BufferLen*8, 1); //cs ขึ้น
 
-  if CH341BitStreamSPI(FDevHandle, BufferLen*8, @bit_buffer[0]) then result := BufferLen else result := -1; //читаем биты
+  if CH341BitStreamSPI(FDevHandle, BufferLen*8, @bit_buffer[0]) then result := BufferLen else result := -1; //อ่านทีละบิต
 
   for i:=0 to BufferLen-1 do
   begin
     for j:=0 to 7 do
     begin
-      if IsBitSet(bit_buffer[(i*8)+j], 7) then //читаем DIN
-        BitSet(1, buffer[i], 7-j) //устанавливаем биты от старшего к младшему
+      if IsBitSet(bit_buffer[(i*8)+j], 7) then //อ่าน DIN
+        BitSet(1, buffer[i], 7-j) //ใส่บิตจากสูงไปต่ำ
       else
         BitSet(0, buffer[i], 7-j);
     end;
@@ -347,23 +347,23 @@ begin
 
   if BitsWrite > 0 then
   begin
-    CH341Set_D5_D0(FDevHandle, %00101001, 1); //cs hi
+    CH341Set_D5_D0(FDevHandle, %00101001, 1); //cs ขึ้น
 
     SetLength(bit_buffer, ByteNum(BitsWrite)*8);
-    FillByte(bit_buffer[0], Length(bit_buffer), 1); //cs hi
+    FillByte(bit_buffer[0], Length(bit_buffer), 1); //cs ขึ้น
 
     for i:=0 to ByteNum(BitsWrite)-1 do
     begin
       for j:=0 to 7 do
       begin
-        if IsBitSet(buffer[i], 7-j) then //читаем буфер
-          BitSet(1, bit_buffer[(i*8)+j], 5) //устанавливаем биты от старшего к младшему
+        if IsBitSet(buffer[i], 7-j) then //อ่านบัฟเฟอร์
+          BitSet(1, bit_buffer[(i*8)+j], 5) //ใส่บิตจากสูงไปต่ำ
         else
           BitSet(0, bit_buffer[(i*8)+j], 5);
       end;
     end;
 
-    //Отсылаем биты
+    //ส่งบิตออกไป
     if CH341BitStreamSPI(FDevHandle, BitsWrite, @bit_buffer[0]) then result := BitsWrite else result := -1;
 
     if Boolean(CS) then CH341Set_D5_D0(FDevHandle, %00101001, 0);
@@ -376,7 +376,7 @@ var
   port: byte;
 begin
   CH341Set_D5_D0(FDevHandle, %00101001, 0);
-  CH341Set_D5_D0(FDevHandle, %00101001, 1); //cs hi
+  CH341Set_D5_D0(FDevHandle, %00101001, 1); //cs ขึ้น
 
   CH341GetStatus(FDevHandle, @port);
   result := not IsBitSet(port, 7);

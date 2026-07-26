@@ -1,10 +1,10 @@
 unit fileformats;
 
-//Загрузка и сохранение прошивок в текстовых форматах:
-//Intel HEX (.hex) и Motorola S-record (.s19/.srec/.mot)
+//อ่านและเขียนไฟล์เฟิร์มแวร์รูปแบบข้อความ:
+//Intel HEX (.hex) และ Motorola S-record (.s19/.srec/.mot)
 //
-//Загрузка всегда возвращает непрерывный образ: пропуски в файле заполняются
-//FillValue, поэтому незаписанные области остаются стертыми
+//การโหลดจะคืนภาพข้อมูลต่อเนื่องเสมอ ช่องว่างในไฟล์จะถูกเติมด้วย FillValue
+//พื้นที่ที่ไฟล์ไม่ได้ระบุจึงยังคงสถานะถูกลบไว้
 
 {$mode objfpc}{$H+}
 
@@ -16,11 +16,11 @@ uses
 type
   TFwFormat = (ffBinary, ffIntelHex, ffSRecord);
 
-//Определяет формат по расширению имени файла
+//เดารูปแบบไฟล์จากนามสกุล
 function DetectFormat(const FileName: string): TFwFormat;
 
-//Загружает файл в Stream. MaxSize ограничивает образ размером микросхемы.
-//ErrMsg заполняется при ошибке разбора
+//โหลดไฟล์ลง Stream โดย MaxSize จำกัดภาพข้อมูลไว้ที่ขนาดชิป
+//ถ้าแยกไฟล์ไม่ผ่านจะใส่ข้อความไว้ใน ErrMsg
 function LoadFirmware(const FileName: string; Stream: TMemoryStream;
   MaxSize: cardinal; FillValue: byte; out ErrMsg: string): boolean;
 
@@ -78,7 +78,7 @@ begin
   begin
     S := Trim(Lines[i]);
     if S = '' then Continue;
-    if S[1] <> ':' then Continue;   //мусор между записями игнорируем
+    if S[1] <> ':' then Continue;   //ข้อความขยะระหว่างเรคอร์ดข้ามไปเฉย ๆ
 
     if Length(S) < 11 then
     begin
@@ -98,7 +98,7 @@ begin
       Exit;
     end;
 
-    //Контрольная сумма записи
+    //checksum ของเรคอร์ด
     Sum := 0;
     p := 2;
     for j := 0 to Len + 4 do
@@ -123,7 +123,7 @@ begin
     HexByte(S, 8, RecType);
 
     case RecType of
-      $00:  //данные
+      $00:  //ข้อมูล
         begin
           for j := 0 to Len - 1 do
           begin
@@ -141,7 +141,7 @@ begin
           end;
         end;
 
-      $01: Break;   //конец файла
+      $01: Break;   //จบไฟล์
 
       $02:  //extended segment address
         begin
@@ -155,7 +155,7 @@ begin
           HexByte(S, 12, B);  Base := (Base or B) shl 16;
         end;
 
-      //03 и 05 задают точку старта, для памяти смысла не имеют
+      //03 กับ 05 บอกจุดเริ่มโปรแกรม ไม่มีความหมายกับหน่วยความจำ
       $03, $05: ;
     end;
   end;
@@ -193,7 +193,7 @@ begin
       '1': AddrLen := 2;
       '2': AddrLen := 3;
       '3': AddrLen := 4;
-      '0', '5', '6', '7', '8', '9': Continue;   //заголовок, счетчик, конец
+      '0', '5', '6', '7', '8', '9': Continue;   //ส่วนหัว ตัวนับ และเรคอร์ดปิดท้าย
     else
       Continue;
     end;
@@ -210,7 +210,7 @@ begin
       Exit;
     end;
 
-    //Контрольная сумма: дополнение до единицы суммы count, адреса и данных
+    //checksum คือส่วนเติมเต็มหนึ่งของผลบวก count แอดเดรส และข้อมูล
     Sum := 0;
     p := 3;
     for j := 0 to Count do
@@ -237,7 +237,7 @@ begin
       Addr := (Addr shl 8) or B;
     end;
 
-    //count = адрес + данные + контрольная сумма
+    //count = แอดเดรส + ข้อมูล + checksum
     DataLen := Count - AddrLen - 1;
 
     for j := 0 to DataLen - 1 do
@@ -346,7 +346,7 @@ begin
     begin
       Base := Addr shr 16;
 
-      //Смена старших 16 бит адреса - запись типа 04
+      //แอดเดรส 16 บิตบนเปลี่ยน ต้องออกเรคอร์ดชนิด 04
       if Base <> LastBase then
       begin
         Sum := byte(2 + 0 + 0 + 4 + byte(Base shr 8) + byte(Base));
@@ -356,7 +356,7 @@ begin
 
       Len := BytesPerLine;
       if cardinal(Len) > Size - Addr then Len := Size - Addr;
-      //Не переходим границу 64K внутри одной записи
+      //ห้ามข้ามขอบ 64K ภายในเรคอร์ดเดียว
       if ((Addr and $FFFF) + cardinal(Len)) > $10000 then
         Len := $10000 - (Addr and $FFFF);
 
@@ -400,7 +400,7 @@ begin
   Stream.Position := 0;
   Stream.ReadBuffer(Data[0], Size);
 
-  //Ширина адреса по размеру образа: S1 до 64K, S2 до 16M, иначе S3
+  //เลือกความกว้างแอดเดรสตามขนาดภาพ: S1 ถึง 64K, S2 ถึง 16M, เกินนั้น S3
   if Size <= $10000 then AddrLen := 2
   else if Size <= $1000000 then AddrLen := 3
   else AddrLen := 4;
@@ -408,7 +408,7 @@ begin
   AssignFile(F, FileName);
   Rewrite(F);
   try
-    WriteLn(F, 'S0030000FC');   //пустой заголовок
+    WriteLn(F, 'S0030000FC');   //ส่วนหัวเปล่า
 
     Addr := 0;
     RecCount := 0;
@@ -440,7 +440,7 @@ begin
       Inc(RecCount);
     end;
 
-    //Завершающая запись, парная типу данных
+    //เรคอร์ดปิดท้าย ต้องเข้าคู่กับชนิดของเรคอร์ดข้อมูล
     case AddrLen of
       2: WriteLn(F, 'S9030000FC');
       3: WriteLn(F, 'S804000000FB');

@@ -29,7 +29,7 @@ implementation
 
 uses Main;
 
-//Пока отлипнет ромка
+//รอจนกว่าชิปจะพร้อม
 function UsbAsp45_Busy(): boolean;
 var
   sreg: byte;
@@ -90,20 +90,20 @@ begin
   result := SPIReadWrite(1, 0, 1, sreg, 1, sreg);
 end;
 
-//Возвращает сколько байт записали
+//คืนจำนวนไบต์ที่เขียนได้
 function UsbAsp45_Write(PageAddr: word; buffer: array of byte; bufflen: integer): integer;
 var
   buff: array[0..3] of byte;
 begin
  // rrrraaaa aaaaaaap pppppppp
  //r - reserved
- //a - page address
- //p - buffer address
+ //a - แอดเดรสของเพจ
+ //p - แอดเดรสในบัฟเฟอร์
 
-  //Опкод
+  //opcode
   buff[0] := $82;
-  //В зависимости от размера страницы(не меньше 8 бит), адрес страницы будет занимать
-  //столько-то старших бит
+  //แอดเดรสของเพจจะกินบิตสูงกี่บิต ขึ้นกับขนาดเพจ
+  //ซึ่งอย่างน้อยคือ 8 บิต
   PageAddr := ( PageAddr shl (BitNum(bufflen)-8) );
 
   buff[1] := hi(PageAddr);
@@ -117,10 +117,10 @@ end;
 
 function UsbAsp45_Read(PageAddr: word; var buffer: array of byte; bufflen: integer): integer;
 begin
-  //Опкод
+  //opcode
   buffer[0] := $E8;
-  //В зависимости от размера страницы(не меньше 8 бит), адрес страницы будет занимать
-  //столько-то старших бит
+  //แอดเดรสของเพจจะกินบิตสูงกี่บิต ขึ้นกับขนาดเพจ
+  //ซึ่งอย่างน้อยคือ 8 บิต
   PageAddr := ( PageAddr shl (BitNum(bufflen)-8) );
 
   buffer[1] := hi(PageAddr);

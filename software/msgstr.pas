@@ -48,7 +48,7 @@ resourcestring
   STR_SCRIPT_RUN_SECTION = 'Выполняется секция: ';
   STR_ERASE_NOTICE       = 'Процесс может длиться больше минуты на больших флешках!';
 
-  //dregmod additions
+  //ข้อความที่เพิ่มเข้ามาใน ProX
   STR_SECTOR_SPI25_ONLY  = 'Sector erase is available only for SPI 25 series chips';
   STR_ERASE_RANGE_Q      = 'Erase the selected address range?';
   STR_ERASING_RANGE      = 'Erasing range: ';

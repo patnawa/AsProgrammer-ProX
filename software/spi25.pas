@@ -63,7 +63,7 @@ implementation
 
 uses Main;
 
-//Пока отлипнет ромка
+//รอจนกว่าชิปจะพร้อม
 function UsbAsp25_Busy: boolean;
 var
   sreg: byte;
@@ -75,24 +75,24 @@ begin
   if not IsBitSet(sreg, 0) then Result := False;
 end;
 
-//Вход в режим программирования
+//เข้าสู่โหมดโปรแกรม
 function EnterProgMode25(spiSpeed: integer; SendAB: boolean = false): boolean;
 begin
   result := AsProgrammer.Programmer.SPIInit(spiSpeed);
   sleep(50);
 
-  //release power-down
+  //ปลุกชิปจาก power-down
   if SendAB then SPIWrite(1, 1, $AB);
   sleep(2);
 end;
 
-//Выход из режима программирования
+//ออกจากโหมดโปรแกรม
 procedure ExitProgMode25;
 begin
   AsProgrammer.Programmer.SPIDeinit;
 end;
 
-//Читает id и заполняет структуру
+//อ่าน id แล้วเติมลงโครงสร้าง
 function UsbAsp25_ReadID(var ID: MEMORY_ID): integer;
 var
   buffer: array[0..3] of byte;
@@ -123,7 +123,7 @@ begin
   move(buffer, ID.ID15H, 2);
 end;
 
-//Читает таблицу SFDP (JESD216). Опкод 5Ah: 3 байта адреса + 1 холостой байт
+//อ่านตาราง SFDP (JESD216) opcode 5Ah: แอดเดรส 3 ไบต์ + ไบต์หลอก 1 ไบต์
 function UsbAsp25_ReadSFDP(Addr: longword; var buffer: array of byte; bufflen: integer): integer;
 var
   buff: array[0..4] of byte;
@@ -145,7 +145,7 @@ begin
   end;
 end;
 
-//Уникальный заводской номер микросхемы, опкод 4Bh: 4 холостых байта, затем 8 байт
+//เลขประจำตัวจากโรงงาน opcode 4Bh: ไบต์หลอก 4 ไบต์ แล้วตามด้วยข้อมูล 8 ไบต์
 function UsbAsp25_ReadUniqueID(var buffer: array of byte): integer;
 var
   buff: array[0..4] of byte;
@@ -167,9 +167,9 @@ begin
   end;
 end;
 
-//Winbond W74M Authentication Flash, опкод 96h: холостой байт, затем
-//Status[7:0] Tag[95:0] CounterData[31:0] Signature[255:0], всего 49 байт.
-//Единственная команда этого семейства, которой не нужна подпись HMAC
+//Winbond W74M Authentication Flash opcode 96h: ไบต์หลอก แล้วตามด้วย
+//Status[7:0] Tag[95:0] CounterData[31:0] Signature[255:0] รวม 49 ไบต์
+//เป็นคำสั่งเดียวในตระกูลนี้ที่ไม่ต้องมีลายเซ็น HMAC
 function UsbAsp25_ReadAuthStatus(var buffer: array of byte; bufflen: integer): integer;
 var
   buff: array[0..1] of byte;
@@ -188,8 +188,8 @@ begin
   end;
 end;
 
-//Регистры безопасности(OTP). Опкод 48h: 3 байта адреса + 1 холостой байт.
-//Обычно три страницы по 256 байт по адресам 001000h, 002000h, 003000h
+//Security register (OTP) opcode 48h: แอดเดรส 3 ไบต์ + ไบต์หลอก 1 ไบต์
+//ปกติมี 3 หน้า หน้าละ 256 ไบต์ ที่แอดเดรส 001000h, 002000h, 003000h
 function UsbAsp25_ReadSecReg(Addr: longword; var buffer: array of byte; bufflen: integer): integer;
 var
   buff: array[0..4] of byte;
@@ -211,7 +211,7 @@ begin
   end;
 end;
 
-//Запись регистра безопасности, опкод 42h. WREN выдает вызывающая сторона
+//เขียน security register opcode 42h โดยผู้เรียกต้องสั่ง WREN มาก่อน
 function UsbAsp25_WriteSecReg(Addr: longword; buffer: array of byte; bufflen: integer): integer;
 var
   buff: array[0..3] of byte;
@@ -225,7 +225,7 @@ begin
   result := SPIWrite(1, bufflen, buffer);
 end;
 
-//Стирание регистра безопасности, опкод 44h. WREN выдает вызывающая сторона
+//ลบ security register opcode 44h โดยผู้เรียกต้องสั่ง WREN มาก่อน
 function UsbAsp25_EraseSecReg(Addr: longword): integer;
 var
   buff: array[0..3] of byte;
@@ -238,8 +238,8 @@ begin
   result := SPIWrite(1, 4, buff);
 end;
 
-//Стирание одного сектора/блока. Опкод: 20h(4K), 52h(32K), D8h(64K)
-//WREN должен быть выдан вызывающей стороной
+//ลบหนึ่งเซกเตอร์หรือหนึ่งบล็อก opcode: 20h(4K), 52h(32K), D8h(64K)
+//ผู้เรียกต้องสั่ง WREN มาก่อน
 function UsbAsp25_EraseSector(Opcode: byte; Addr: longword; FourByteAddr: boolean): integer;
 var
   buff: array[0..4] of byte;
@@ -263,7 +263,7 @@ begin
   end;
 end;
 
-//Возвращает сколько байт прочитали
+//คืนจำนวนไบต์ที่อ่านได้
 function UsbAsp25_Read(Opcode: byte; Addr: longword; var buffer: array of byte; bufflen: integer): integer;
 var
   buff: array[0..3] of byte;
@@ -327,10 +327,10 @@ function UsbAsp25_ChipErase(): integer;
 var
   buff: byte;
 begin
-  //Некоторые atmel'ы требуют 62H
+  //Atmel บางรุ่นต้องใช้ 62H
   buff:= $62;
   SPIWrite(1, 1, buff);
-  //Старые SST требуют 60H
+  //SST รุ่นเก่าต้องใช้ 60H
   buff:= $60;
   SPIWrite(1, 1, buff);
   buff:= $C7;
@@ -341,7 +341,7 @@ function UsbAsp25_WriteSR(sreg: byte; opcode: byte = $01): integer;
 var
   buff: array[0..1] of byte;
 begin
-  //Старые SST требуют Enable-Write-Status-Register (50H)
+  //SST รุ่นเก่าต้องสั่ง Enable-Write-Status-Register (50H) ก่อน
   Buff[0] := $50;
   SPIWrite(1, 1, buff);
   //
@@ -354,11 +354,11 @@ function UsbAsp25_WriteSR_2byte(sreg1, sreg2: byte): integer;
 var
   buff: array[0..2] of byte;
 begin
-  //Старые SST требуют Enable-Write-Status-Register (50H)
+  //SST รุ่นเก่าต้องสั่ง Enable-Write-Status-Register (50H) ก่อน
   Buff[0] := $50;
   SPIWrite(1, 1, buff);
 
-  //Если регистр из 2х байт
+  //กรณีที่ status register ยาว 2 ไบต์
   Buff[0] := $01;
   Buff[1] := sreg1;
   Buff[2] := sreg2;
@@ -378,7 +378,7 @@ begin
     end;
 end;
 
-//Возвращает сколько байт записали
+//คืนจำนวนไบต์ที่เขียนได้
 function UsbAsp25_Write(Opcode: byte; Addr: longword; buffer: array of byte; bufflen: integer): integer;
 var
   buff: array[0..3] of byte;
@@ -429,7 +429,7 @@ begin
   result := SPIWrite(1, 3, buff)-1;
 end;
 
-//Enter 4-byte mode
+//เข้าโหมดแอดเดรส 4 ไบต์
 function UsbAsp25_EN4B(): integer;
 var
   buff: byte;
@@ -444,7 +444,7 @@ begin
   result := SPIWrite(1, 1, buff);
 end;
 
-//Exit 4-byte mode
+//ออกจากโหมดแอดเดรส 4 ไบต์
 function UsbAsp25_EX4B(): integer;
 var
   buff: byte;

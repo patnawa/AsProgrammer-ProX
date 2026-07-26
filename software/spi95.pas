@@ -23,23 +23,23 @@ var
   buff: array[0..3] of byte;
 begin
 
-  if ChipSize < 512 then //1 байт
+  if ChipSize < 512 then //1 ไบต์
   begin
     buff[0] := $03;
     buff[1] := Addr;
     len := 2;
   end;
 
-  if ChipSize = 512 then  //1 байт с разными запросами
+  if ChipSize = 512 then  //1 ไบต์ แต่คำสั่งต่างกัน
   begin
-    //Нижняя часть памяти
+    //หน่วยความจำครึ่งล่าง
     if Addr < 256 then
     begin
       buff[0] := $03;
       buff[1] := Addr;
     end;
 
-    //Верхняя часть памяти
+    //หน่วยความจำครึ่งบน
     if Addr > 255 then
     begin
       buff[0] := $0b;
@@ -49,7 +49,7 @@ begin
     len := 2;
   end;
 
-  if (ChipSize > 512) and (ChipSize <= 65536) then  // 2 байта
+  if (ChipSize > 512) and (ChipSize <= 65536) then  // 2 ไบต์
   begin
     buff[0] := $03;
     buff[1] := hi(lo(addr));
@@ -57,7 +57,7 @@ begin
     len := 3;
   end;
 
-  if (ChipSize > 65536)  then  // 3 байта
+  if (ChipSize > 65536)  then  // 3 ไบต์
     begin
     buff[0] := $03;
     buff[1] := hi(addr);
@@ -75,23 +75,23 @@ var
   buff: array[0..3] of byte;
 begin
 
-  if ChipSize < 512 then //1 байт
+  if ChipSize < 512 then //1 ไบต์
   begin
     buff[0] := $02;
     buff[1] := Addr;
     len := 2;
   end;
 
-  if ChipSize = 512 then  //1 байт с разными запросами
+  if ChipSize = 512 then  //1 ไบต์ แต่คำสั่งต่างกัน
   begin
-    //Нижняя часть памяти
+    //หน่วยความจำครึ่งล่าง
     if Addr < 256 then
     begin
       buff[0] := $02;
       buff[1] := Addr;
     end;
 
-    //Верхняя часть памяти
+    //หน่วยความจำครึ่งบน
     if Addr > 255 then
     begin
       buff[0] := $0a;
@@ -101,7 +101,7 @@ begin
     len := 2;
   end;
 
-  if (ChipSize > 512) and (ChipSize <= 65536) then  // 2 байта
+  if (ChipSize > 512) and (ChipSize <= 65536) then  // 2 ไบต์
   begin
     buff[0] := $02;
     buff[1] := hi(lo(addr));
@@ -109,7 +109,7 @@ begin
     len := 3;
   end;
 
-  if (ChipSize > 65536)  then  // 3 байта
+  if (ChipSize > 65536)  then  // 3 ไบต์
     begin
     buff[0] := $02;
     buff[1] := hi(addr);

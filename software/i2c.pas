@@ -9,7 +9,7 @@ uses
 
 const
 
-  //Как посылать адрес ячейки в чип
+  //วิธีส่งแอดเดรสของเซลล์ไปยังชิป
   I2C_ADDR_TYPE_7BIT             = 0;
   I2C_ADDR_TYPE_1BYTE            = 1;
   I2C_ADDR_TYPE_1BYTE_1BIT       = 2;
@@ -41,7 +41,7 @@ begin
   AsProgrammer.Programmer.I2CStop;
 end;
 
-//Возвращает сколько байт прочитали
+//คืนจำนวนไบต์ที่อ่านได้
 function UsbAspI2C_Read(DevAddr, AddrType: byte; Address: longword; var buffer: array of byte; bufflen: integer): integer;
 var
   value, index: Integer;
@@ -144,27 +144,27 @@ begin
     wBuffer[1] := lo(word(index));
   end;
 
-  //value адрес устройства
-  //index адреса памяти
+  //value คือแอดเดรสของอุปกรณ์
+  //index คือแอดเดรสในหน่วยความจำ
   result := AsProgrammer.Programmer.I2CReadWrite(value, Length(wBuffer), wBuffer, bufflen, buffer)-Length(wBuffer);
 end;
 
-//Возвращает сколько байт записали
+//คืนจำนวนไบต์ที่เขียนได้
 function UsbAspI2C_Write(DevAddr, AddrType: byte; Address: longword; buffer: array of byte; bufflen: integer): integer;
 var
   value, index, address_size: Integer;
   wBuffer: array of byte;
   dummy: byte;
 begin
-  //value Адрес устройства
-  //Lo(index)  = 4; Lo адрес
-  //Hi(index)  = 5; Hi адрес
+  //value คือแอดเดรสของอุปกรณ์
+  //Lo(index)  = 4; แอดเดรสไบต์ต่ำ
+  //Hi(index)  = 5; แอดเดรสไบต์สูง
 
   //TODO: 24LC1025
 
   if AddrType = I2C_ADDR_TYPE_7BIT then
   begin
-    Value := Byte(Address) shl 1; //7 бит
+    Value := Byte(Address) shl 1; //7 บิต
     index := 0;
     SetLength(wBuffer, 0);
   end;

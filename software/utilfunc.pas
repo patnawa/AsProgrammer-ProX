@@ -125,7 +125,7 @@ begin
    val := ClearBit(val, bit_num);
 end;
 
-//сколько бит нужно для хранения данного значения
+//ต้องใช้กี่บิตถึงจะเก็บค่านี้ได้
 function BitNum(value: cardinal): integer;
 var
   i: integer;
@@ -144,7 +144,7 @@ begin
   result := i;
 end;
 
-//Сколько байт нужно для хранение количества бит
+//ต้องใช้กี่ไบต์ถึงจะเก็บบิตจำนวนนี้ได้
 function ByteNum(value: cardinal): integer;
 begin
   result := value div 8;

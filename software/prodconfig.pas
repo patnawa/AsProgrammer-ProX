@@ -1,9 +1,9 @@
 unit prodconfig;
 
-//Автонумерация и серийное производство.
+//เลขรันนิ่งอัตโนมัติและโหมดผลิตเป็นชุด
 //
-//Диалог собирается кодом, а не из .lfm: так он не может сломать запуск
-//программы, если в разметке окажется опечатка.
+//ไดอะล็อกสร้างด้วยโค้ด ไม่ได้มาจาก .lfm เพราะถ้าพิมพ์ผิดในไฟล์ฟอร์ม
+//โปรแกรมจะเปิดไม่ขึ้นทั้งตัว แบบนี้พังได้แค่ไดอะล็อกนี้
 
 {$mode objfpc}{$H+}
 
@@ -15,39 +15,39 @@ uses
 type
 
   TSerialMode = (
-    smIncrement,        //только счетчик
-    smDateIncrement,    //BCD дата ГГ ММ ДД, дальше счетчик
-    smRandom            //случайные байты
+    smIncrement,        //นับอย่างเดียว
+    smDateIncrement,    //วันที่แบบ BCD ปี เดือน วัน แล้วตามด้วยตัวนับ
+    smRandom            //ไบต์สุ่ม
   );
 
   TProdSettings = record
     SNEnabled: boolean;
-    SNAddress: cardinal;    //куда в буфере класть номер
-    SNLength: byte;         //1..8 байт
+    SNAddress: cardinal;    //ตำแหน่งในบัฟเฟอร์ที่จะวางเลข
+    SNLength: byte;         //1..8 ไบต์
     SNMode: TSerialMode;
-    SNValue: QWord;         //текущее значение счетчика
+    SNValue: QWord;         //ค่าตัวนับปัจจุบัน
     SNStep: cardinal;
-    SNBigEndian: boolean;   //старший байт первым
-    SNLogFile: string;      //куда дописывать выданные номера, пусто - не вести
+    SNBigEndian: boolean;   //เรียงไบต์สูงขึ้นก่อน
+    SNLogFile: string;      //ไฟล์บันทึกเลขที่จ่ายไป เว้นว่างคือไม่บันทึก
 
     BatchEnabled: boolean;
-    BatchTarget: integer;   //сколько микросхем прошить за прогон
+    BatchTarget: integer;   //จะเขียนกี่ตัวต่อหนึ่งรอบการผลิต
   end;
 
-//Диалог настроек. True - пользователь нажал OK
+//ไดอะล็อกตั้งค่า คืน True เมื่อผู้ใช้กด OK
 function EditProdSettings(var S: TProdSettings): boolean;
 
-//Значения по умолчанию
+//ค่าเริ่มต้น
 procedure DefaultProdSettings(out S: TProdSettings);
 
-//Готовит байты номера для текущего значения счетчика
+//สร้างไบต์ของเลขรันนิ่งจากค่าตัวนับปัจจุบัน
 procedure BuildSerialBytes(const S: TProdSettings; out Bytes: array of byte);
 
-//Кладет номер в буфер. False - номер не помещается в буфер
+//วางเลขลงบัฟเฟอร์ คืน False ถ้าเลขไม่พอดีกับบัฟเฟอร์
 function ApplySerial(const S: TProdSettings; var Data: array of byte;
   DataSize: cardinal): boolean;
 
-//Читаемое представление номера, для лога
+//รูปแบบที่อ่านออกของเลขรันนิ่ง ใช้ตอนเขียน log
 function SerialToStr(const S: TProdSettings): string;
 
 implementation
@@ -91,7 +91,7 @@ begin
       begin
         DecodeDate(Date, Y, M, D);
 
-        //Дата занимает 3 байта, но только если номер достаточно длинный
+        //วันที่กินไป 3 ไบต์ ใส่ได้ต่อเมื่อเลขยาวพอ
         if S.SNLength >= 4 then
         begin
           Bytes[0] := ToBCD(byte(Y mod 100));
@@ -123,7 +123,7 @@ begin
     end;
   end;
 
-  //Байты собраны старшим вперед, при необходимости разворачиваем
+  //ไบต์ถูกเรียงสูงขึ้นก่อน ถ้าต้องการสลับก็กลับด้านตรงนี้
   if not S.SNBigEndian then
     for i := 0 to (S.SNLength div 2) - 1 do
     begin
@@ -162,7 +162,7 @@ begin
     Result := Result + IntToHex(Bytes[i], 2);
 end;
 
-//--------------------------------------------------------------------- диалог
+//--------------------------------------------------------------------- ไดอะล็อก
 
 type
 

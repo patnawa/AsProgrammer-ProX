@@ -43,7 +43,7 @@ public
   procedure I2CStart; override;
   procedure I2CStop; override;
   function I2CReadByte(ack: boolean): byte; override;
-  function I2CWriteByte(data: byte): boolean; override; //return ack
+  function I2CWriteByte(data: byte): boolean; override; //คืนค่า ack
 
   //MICROWIRE
   function MWInit(speed: integer): boolean; override;
@@ -117,9 +117,9 @@ begin
     Exit(false);
   end;
 
-  //0=не поддерживается
-  //1=урезана
-  //2=полная
+  //0 = ไม่รองรับ
+  //1 = รองรับบางส่วน
+  //2 = รองรับเต็มรูปแบบ
 
   USBSendControlMessage(FDevHandle, USB2PC, USBASP_FUNC_GETCAPABILITIES, 1, 0, 4, buff);
   //if buff[3] = 11 then result := 1;

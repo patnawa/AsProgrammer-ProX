@@ -40,7 +40,7 @@ public
   procedure I2CStart; override;
   procedure I2CStop; override;
   function I2CReadByte(ack: boolean): byte; override;
-  function I2CWriteByte(data: byte): boolean; override; //return ack
+  function I2CWriteByte(data: byte): boolean; override; //คืนค่า ack
 
   //MICROWIRE
   function MWInit(speed: integer): boolean; override;
@@ -144,7 +144,7 @@ begin
   if (CS = 1) then if not CH347SPI_Read(FDevHandle, $80, 0, @BufferLen, @buffer) then result :=-1 else result := BufferLen
   else
   begin
-    CH347SPI_ChangeCS(FDevHandle, 0); //Вручную дергаем cs
+    CH347SPI_ChangeCS(FDevHandle, 0); //ชัก cs เอง
     if not CH347SPI_Read(FDevHandle, 0, 0, @BufferLen, @buffer) then result :=-1 else result := BufferLen;
   end;
 
@@ -157,7 +157,7 @@ begin
   if (CS = 1) then if not CH347SPI_Write(FDevHandle, $80, BufferLen, 500, @buffer) then result :=-1 else result := BufferLen
   else
   begin
-    CH347SPI_ChangeCS(FDevHandle, 0); //Вручную дергаем cs
+    CH347SPI_ChangeCS(FDevHandle, 0); //ชัก cs เอง
     if not CH347SPI_Write(FDevHandle, 0, BufferLen, 500, @buffer) then result :=-1 else result := BufferLen;
   end;
 
@@ -198,12 +198,12 @@ var
 begin
   if not FDevOpened then Exit;
 
-  mBuffer[0] := mCH341A_CMD_I2C_STREAM;   // код команды
-  mBuffer[1] := mCH341A_CMD_I2C_STM_STA;  // код старт-бита
-  mBuffer[2] := mCH341A_CMD_I2C_STM_END;  // окончание пакета
-  mLength := 3;                           // длина пакета
+  mBuffer[0] := mCH341A_CMD_I2C_STREAM;   // รหัสคำสั่ง
+  mBuffer[1] := mCH341A_CMD_I2C_STM_STA;  // รหัสบิตเริ่ม
+  mBuffer[2] := mCH341A_CMD_I2C_STM_END;  // ปิดท้ายแพ็กเก็ต
+  mLength := 3;                           // ความยาวแพ็กเก็ต
 
-  CH347WriteData(FDevHandle, @mBuffer, @mLength); // запись блока данных
+  CH347WriteData(FDevHandle, @mBuffer, @mLength); // เขียนบล็อกข้อมูล
 end;
 
 procedure TCH347Hardware.I2CStop;
@@ -213,12 +213,12 @@ var
 begin
   if not FDevOpened then Exit;
 
-  mBuffer[0] := mCH341A_CMD_I2C_STREAM;   // код команды
-  mBuffer[1] := mCH341A_CMD_I2C_STM_STO;  // код стоп-бита
-  mBuffer[2] := mCH341A_CMD_I2C_STM_END;  // окончание пакета
-  mLength := 3;                           // длина пакета
+  mBuffer[0] := mCH341A_CMD_I2C_STREAM;   // รหัสคำสั่ง
+  mBuffer[1] := mCH341A_CMD_I2C_STM_STO;  // รหัสบิตหยุด
+  mBuffer[2] := mCH341A_CMD_I2C_STM_END;  // ปิดท้ายแพ็กเก็ต
+  mLength := 3;                           // ความยาวแพ็กเก็ต
 
-  CH347WriteData(FDevHandle, @mBuffer, @mLength); // запись блока данных
+  CH347WriteData(FDevHandle, @mBuffer, @mLength); // เขียนบล็อกข้อมูล
 end;
 
 function TCH347Hardware.I2CReadByte(ack: boolean): byte;
@@ -230,7 +230,7 @@ begin
 
   mBuffer[0] := mCH341A_CMD_I2C_STREAM;
   mBuffer[1] := mCH341A_CMD_I2C_STM_IN;
-  if ack then mBuffer[1] := mBuffer[1] or 1; // ack bit
+  if ack then mBuffer[1] := mBuffer[1] or 1; // บิต ack
   mBuffer[2] := mCH341A_CMD_I2C_STM_END;
 
   mLength := 3;

@@ -9,10 +9,10 @@ uses
 
 type
 
-//List of devices
+//รายชื่ออุปกรณ์ที่รองรับ
 THardwareList = (CHW_NONE, CHW_CH341, CHW_CH347, CHW_AVRISP, CHW_USBASP, CHW_ARDUINO, CHW_FT232H, CHW_BUZZPIRAT);
 
-//Base class for hardware
+//คลาสฐานของฮาร์ดแวร์
 TBaseHardware = class
 protected
   FHardwareName: string;
@@ -41,18 +41,18 @@ public
   procedure I2CStart; virtual; abstract;
   procedure I2CStop; virtual; abstract;
   function I2CReadByte(ack: boolean): byte; virtual; abstract;
-  function I2CWriteByte(data: byte): boolean; virtual; abstract; //return ack
+  function I2CWriteByte(data: byte): boolean; virtual; abstract; //คืนค่า ack
 
   //MICROWIRE
   function MWInit(speed: integer): boolean; virtual; abstract;
   procedure MWDeinit; virtual; abstract;
   function MWRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; virtual; abstract;
-  //return number of bits written
+  //คืนจำนวนบิตที่เขียนได้
   function MWWrite(CS: byte; BitsWrite: byte; buffer: array of byte): integer; virtual; abstract;
   function MWIsBusy: boolean; virtual; abstract;
 end;
 
-//Class for manipulating hw
+//คลาสสำหรับจัดการฮาร์ดแวร์
 TAsProgrammer = class
 private
   FCurrent_HW : THardwareList;

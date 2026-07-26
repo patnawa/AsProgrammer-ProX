@@ -49,8 +49,8 @@ begin
 
 end;
 
-{Возвращает текст выбранной секции
- Если секция не найдена возвращает false}
+{คืนข้อความของเซกชันที่เลือก
+ ถ้าไม่พบเซกชันจะคืนค่า false}
 function ParseScriptText(Script: TStrings; SectionName: string; var ScriptText: TStrings ): Boolean;
 var
   st: string;
@@ -83,7 +83,7 @@ begin
   end;
 end;
 
-//Выполняет скрипт
+//รันสคริปต์
 procedure RunScript(ScriptText: TStrings);
 var
   TimeCounter: TDateTime;
@@ -94,7 +94,7 @@ begin
 
   RomF.Clear;
 
-  //Предопределяем переменные
+  //กำหนดตัวแปรตั้งต้นให้สคริปต์
   ScriptEngine.ClearVars;
   SyncUI_ICParam();
   SetScriptVars();
@@ -119,8 +119,8 @@ begin
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 end;
 
-{Выполняет секцию скрипта из файла
- Если файл или секция отсутствует то возвращает false}
+{รันเซกชันของสคริปต์จากไฟล์
+ ถ้าไม่มีไฟล์หรือไม่มีเซกชันจะคืนค่า false}
 function RunScriptFromFile(ScriptFile: string; Section: string): boolean;
 var
   ScriptText, ParsedScriptText: TStrings;
@@ -150,7 +150,7 @@ end;
 //------------------------------------------------------------------------------
 
 {Script Delay(ms: WORD);
- Останавливает выполнение скрипта на ms миллисекунд
+ หยุดการทำงานของสคริปต์เป็นเวลา ms มิลลิวินาที
 }
 function Script_Delay(Sender:TObject; var A:TVarList): boolean;
 begin
@@ -160,7 +160,7 @@ begin
 end;
 
 {Script ShowMessage(text);
- Аналог ShowMessage}
+ ทำงานเหมือน ShowMessage}
 function Script_ShowMessage(Sender:TObject; var A:TVarList) : boolean;
 var s: string;
 begin
@@ -172,7 +172,7 @@ begin
 end;
 
 {Script InputBox(Captiontext, Prompttext, Defaulttext): value;
- Аналог InputBox}
+ ทำงานเหมือน InputBox}
 function Script_InputBox(Sender:TObject; var A:TVarList; var R:TVar) : boolean;
 begin
   if A.Count < 3 then Exit(false);
@@ -183,9 +183,9 @@ begin
 end;
 
 {Script LogPrint(text);
- Выводит сообщение в лог
- Параметры:
-   text текст сообщения}
+ แสดงข้อความลงใน log
+ พารามิเตอร์:
+   text ข้อความที่จะแสดง}
 function Script_LogPrint(Sender:TObject; var A:TVarList) : boolean;
 var
   s: string;
@@ -198,7 +198,7 @@ begin
 end;
 
 {Script CreateByteArray(size): variant;
- Создает массив с типом элементов varbyte}
+ สร้างอาเรย์ที่สมาชิกเป็นชนิด varbyte}
 function Script_CreateByteArray(Sender:TObject; var A:TVarList; var R:TVar) : boolean;
 begin
   if A.Count < 1 then Exit(false);
@@ -207,7 +207,7 @@ begin
 end;
 
 {Script GetArrayItem(array, index): variant;
- Возвращает значение элемента массива}
+ คืนค่าของสมาชิกในอาเรย์}
 function Script_GetArrayItem(Sender:TObject; var A:TVarList; var R:TVar) : boolean;
 begin
   if (A.Count < 2) or (not VarIsArray(TPVar(A.Items[0])^.Value)) then Exit(false);
@@ -216,7 +216,7 @@ begin
 end;
 
 {Script SetArrayItem(array, index, value);
- Устанавливает значение элемента массива}
+ กำหนดค่าให้สมาชิกในอาเรย์}
 function Script_SetArrayItem(Sender:TObject; var A:TVarList) : boolean;
 begin
   if (A.Count < 3) or (not VarIsArray(TPVar(A.Items[0])^.Value)) then Exit(false);
@@ -225,7 +225,7 @@ begin
 end;
 
 {Script IntToHex(value, digits): string;
- Аналог IntToHex}
+ ทำงานเหมือน IntToHex}
 function Script_IntToHex(Sender:TObject; var A:TVarList; var R:TVar) : boolean;
 begin
   if A.Count < 2 then Exit(false);
@@ -235,7 +235,7 @@ begin
 end;
 
 {Script CHR(byte): char;
- Аналог CHR}
+ ทำงานเหมือน CHR}
 function Script_CHR(Sender:TObject; var A:TVarList; var R:TVar) : boolean;
 begin
   if A.Count < 1 then Exit(false);
@@ -245,9 +245,9 @@ begin
 end;
 
 {Script SPIEnterProgMode(speed): boolean;
- Инициализирует состояние пинов для SPI и устанавливает частоту SPI
- Если частота не установлена возвращает false
- Игнорируется для CH341}
+ ตั้งค่าขาสำหรับ SPI และกำหนดความถี่ SPI
+ ถ้าตั้งความถี่ไม่สำเร็จจะคืนค่า false
+ ไม่มีผลกับ CH341}
 function Script_SPIEnterProgMode(Sender:TObject; var A:TVarList; var R:TVar) : boolean;
 var speed: byte;
 begin
@@ -264,7 +264,7 @@ begin
 end;
 
 {Script SPIExitProgMode();
- Отключает пины SPI}
+ ปิดการใช้งานขา SPI}
 function Script_SPIExitProgMode(Sender:TObject; var A:TVarList) : boolean;
 begin
   ExitProgMode25;
@@ -273,12 +273,12 @@ begin
 end;
 
 {Script ProgressBar(inc, max, pos);
- Устанавливает состояние ProgressBar
- Параметры:
-   inc насколько увиличить позицию
- Необязательные параметры:
-   max максимальная позиция ProgressBar
-   pos устанавливает конкретную позицию ProgressBar}
+ กำหนดสถานะของ ProgressBar
+ พารามิเตอร์:
+   inc เพิ่มตำแหน่งขึ้นเท่าไร
+ พารามิเตอร์ที่ไม่บังคับ:
+   max ตำแหน่งสูงสุดของ ProgressBar
+   pos กำหนดตำแหน่งเป็นค่าที่ระบุ}
 function Script_ProgressBar(Sender:TObject; var A:TVarList) : boolean;
 begin
 
@@ -295,12 +295,12 @@ begin
 end;
 
 {Script SPIRead(cs, size, buffer..): integer;
- Читает данные в буфер
- Параметры:
-   cs если cs=1 отпускать Chip Select после чтения данных
-   size размер данных в байтах
-   buffer переменные для хранения данных или массив созданный CreateByteArray
- Возвращает количество прочитанных байт}
+ อ่านข้อมูลลงบัฟเฟอร์
+ พารามิเตอร์:
+   cs ถ้า cs=1 จะปล่อย Chip Select หลังอ่านข้อมูลเสร็จ
+   size ขนาดข้อมูลเป็นไบต์
+   buffer ตัวแปรสำหรับเก็บข้อมูล หรืออาเรย์ที่สร้างด้วย CreateByteArray
+ คืนจำนวนไบต์ที่อ่านได้}
 function Script_SPIRead(Sender:TObject; var A:TVarList; var R: TVar) : boolean;
 var
   i, size, cs: integer;
@@ -316,7 +316,7 @@ begin
 
   R.Value := SPIRead(cs, size, DataArr[0]);
 
-  //Если buffer массив
+  //กรณีที่ buffer เป็นอาเรย์
   if (VarIsArray(TPVar(A.Items[2])^.Value)) then
   for i := 0 to size-1 do
   begin
@@ -332,12 +332,12 @@ begin
 end;
 
 {Script SPIWrite(cs, size, buffer..): integer;
- Записывает данные из буфера
- Параметры:
-   cs если cs=1 отпускать Chip Select после записи данных
-   size размер данных в байтах
-   buffer переменные для хранения данных или массив созданный CreateByteArray
- Возвращает количество записанных байт}
+ เขียนข้อมูลจากบัฟเฟอร์
+ พารามิเตอร์:
+   cs ถ้า cs=1 จะปล่อย Chip Select หลังเขียนข้อมูลเสร็จ
+   size ขนาดข้อมูลเป็นไบต์
+   buffer ตัวแปรสำหรับเก็บข้อมูล หรืออาเรย์ที่สร้างด้วย CreateByteArray
+ คืนจำนวนไบต์ที่เขียนได้}
 function Script_SPIWrite(Sender:TObject; var A:TVarList; var R: TVar) : boolean;
 var
   i, size, cs: integer;
@@ -350,7 +350,7 @@ begin
   cs := TPVar(A.Items[0])^.Value;
   SetLength(DataArr, size);
 
-  //Если buffer массив
+  //กรณีที่ buffer เป็นอาเรย์
   if (VarIsArray(TPVar(A.Items[2])^.Value)) then
   for i := 0 to size-1 do
   begin
@@ -367,11 +367,11 @@ begin
 end;
 
 {Script SPIReadToEditor(cs, size): integer;
- Читает данные в редактор
- Параметры:
-   cs если cs=1 отпускать Chip Select после чтения данных
-   size размер данных в байтах
- Возвращает количество прочитанных байт}
+ อ่านข้อมูลเข้าไปใน hex editor
+ พารามิเตอร์:
+   cs ถ้า cs=1 จะปล่อย Chip Select หลังอ่านข้อมูลเสร็จ
+   size ขนาดข้อมูลเป็นไบต์
+ คืนจำนวนไบต์ที่อ่านได้}
 function Script_SPIReadToEditor(Sender:TObject; var A:TVarList; var R: TVar) : boolean;
 var
   DataArr: array of byte;
@@ -405,12 +405,12 @@ begin
 end;
 
 {Script SPIWriteFromEditor(cs, size, position): integer;
- Записывает данные из редактора размером size с позиции position
- Параметры:
-   cs если cs=1 отпускать Chip Select после записи данных
-   size размер данных в байтах
-   position позиция в редакторе
- Возвращает количество записанных байт}
+ เขียนข้อมูลจาก hex editor ขนาด size เริ่มจากตำแหน่ง position
+ พารามิเตอร์:
+   cs ถ้า cs=1 จะปล่อย Chip Select หลังเขียนข้อมูลเสร็จ
+   size ขนาดข้อมูลเป็นไบต์
+   position ตำแหน่งใน hex editor
+ คืนจำนวนไบต์ที่เขียนได้}
 function Script_SPIWriteFromEditor(Sender:TObject; var A:TVarList; var R: TVar) : boolean;
 var
   DataArr: array of byte;
@@ -435,7 +435,7 @@ end;
 //I2C---------------------------------------------------------------------------
 
 {Script I2CEnterProgMode;
- Инициализирует состояние пинов}
+ ตั้งค่าสถานะของขา}
 function Script_I2CEnterProgMode(Sender:TObject; var A:TVarList) : boolean;
 begin
   if not OpenDevice() then Exit(false);
@@ -444,7 +444,7 @@ begin
 end;
 
 {Script I2cExitProgMode();
- Отключает пины}
+ ปิดการใช้งานขา}
 function Script_I2CExitProgMode(Sender:TObject; var A:TVarList) : boolean;
 begin
   Asprogrammer.Programmer.I2CDeinit;
@@ -453,12 +453,12 @@ begin
 end;
 
 {Script I2CReadWrite(DevAddr, wsize, rsize, wbuffer.., rbuffer...): integer;
- Записывает данные из буфера
- Параметры:
-   DevAddr адрес устройства
-   size размер данных в байтах
-   buffer переменные для хранения данных или массив созданный CreateByteArray
- Возвращает количество записанных + прочитанных байт}
+ เขียนข้อมูลจากบัฟเฟอร์
+ พารามิเตอร์:
+   DevAddr แอดเดรสของอุปกรณ์
+   size ขนาดข้อมูลเป็นไบต์
+   buffer ตัวแปรสำหรับเก็บข้อมูล หรืออาเรย์ที่สร้างด้วย CreateByteArray
+ คืนผลรวมจำนวนไบต์ที่เขียนและที่อ่านได้}
 function Script_I2CReadWrite(Sender:TObject; var A:TVarList; var R: TVar) : boolean;
 var
   i, rsize, wsize: integer;
@@ -475,7 +475,7 @@ begin
   SetLength(WDataArr, wsize);
   SetLength(RDataArr, rsize);
 
-  //Если wbuffer массив
+  //กรณีที่ wbuffer เป็นอาเรย์
   if (VarIsArray(TPVar(A.Items[3])^.Value)) then
   for i := 0 to wsize-1 do
   begin
@@ -492,7 +492,7 @@ begin
   if rsize < 1 then Exit(true);
 
   if (VarIsArray(TPVar(A.Items[3])^.Value)) then wsize := 1;
-  //Если rbuffer массив
+  //กรณีที่ rbuffer เป็นอาเรย์
   if (VarIsArray(TPVar(A.Items[wsize+3])^.Value)) then
   for i := 0 to rsize-1 do
   begin
@@ -508,7 +508,7 @@ begin
 end;
 
 {Script I2CStart;
-  Используется вместе с I2CWriteByte, I2CReadByte
+  ใช้คู่กับ I2CWriteByte และ I2CReadByte
  }
 function Script_I2CStart(Sender:TObject) : boolean;
 begin
@@ -517,7 +517,7 @@ begin
 end;
 
 {Script I2CStop;
-  Используется вместе с I2CWriteByte, I2CReadByte
+  ใช้คู่กับ I2CWriteByte และ I2CReadByte
  }
 function Script_I2CStop(Sender:TObject) : boolean;
 begin
@@ -526,10 +526,10 @@ begin
 end;
 
 {Script I2CWriteByte(data): boolean;
- Возвращает ack/nack
- Параметры:
-   data байт данных для записи
-   Возвращает ack/nack}
+ คืนค่า ack/nack
+ พารามิเตอร์:
+   data ไบต์ข้อมูลที่จะเขียน
+   คืนค่า ack/nack}
 function Script_I2CWriteByte(Sender:TObject; var A:TVarList; var R: TVar) : boolean;
 begin
   if A.Count < 1 then Exit(false);
@@ -539,10 +539,10 @@ begin
 end;
 
 {Script I2CReadByte(ack: boolean): data;
- Возвращает байт данных
- Параметры:
+ คืนไบต์ข้อมูล
+ พารามิเตอร์:
    ack ack/nack
-   Возвращает байт прочитаных данных}
+   คืนไบต์ข้อมูลที่อ่านได้}
 function Script_I2CReadByte(Sender:TObject; var A:TVarList; var R: TVar) : boolean;
 begin
   if A.Count < 1 then Exit(false);
@@ -552,11 +552,11 @@ begin
 end;
 
 {Script ReadToEditor(size, position, buffer...);
- Записывает данные из буфера в редактор
- Параметры:
-   size размер данных в байтах
-   position позиция в редакторе
-   buffer переменные для хранения данных или массив созданный CreateByteArray}
+ เขียนข้อมูลจากบัฟเฟอร์ลงใน hex editor
+ พารามิเตอร์:
+   size ขนาดข้อมูลเป็นไบต์
+   position ตำแหน่งใน hex editor
+   buffer ตัวแปรสำหรับเก็บข้อมูล หรืออาเรย์ที่สร้างด้วย CreateByteArray}
 function Script_ReadToEditor(Sender:TObject; var A:TVarList) : boolean;
 var
   DataArr: array of byte;
@@ -570,7 +570,7 @@ begin
   if TPVar(A.Items[1])^.Value < 0 then Exit(false);
   SetLength(DataArr, size);
 
-  //Если buffer массив
+  //กรณีที่ buffer เป็นอาเรย์
   if (VarIsArray(TPVar(A.Items[2])^.Value)) then
   for i := 0 to size-1 do
   begin
@@ -595,11 +595,11 @@ begin
 end;
 
 {Script WriteFromEditor(size, position, buffer...);
- Записывает данные из редактора размером size с позиции position
- Параметры:
-   size размер данных в байтах
-   position позиция в редакторе
-   buffer переменные для хранения данных или массив созданный CreateByteArray}
+ เขียนข้อมูลจาก hex editor ขนาด size เริ่มจากตำแหน่ง position
+ พารามิเตอร์:
+   size ขนาดข้อมูลเป็นไบต์
+   position ตำแหน่งใน hex editor
+   buffer ตัวแปรสำหรับเก็บข้อมูล หรืออาเรย์ที่สร้างด้วย CreateByteArray}
 function Script_WriteFromEditor(Sender:TObject; var A:TVarList) : boolean;
 var
   DataArr: array of byte;
@@ -617,7 +617,7 @@ begin
   RomF.Position := TPVar(A.Items[1])^.Value;
   RomF.ReadBuffer(DataArr[0], size);
 
-  //Если buffer массив
+  //กรณีที่ buffer เป็นอาเรย์
   if (VarIsArray(TPVar(A.Items[2])^.Value)) then
   for i := 0 to size-1 do
   begin
@@ -633,7 +633,7 @@ begin
 end;
 
 {Script GetEditorDataSize: Longword;
- Возвращает размер данных в редакторе
+ คืนขนาดข้อมูลใน hex editor
  }
 function Script_GetEditorDataSize(Sender:TObject; var A:TVarList; var R: TVar) : boolean;
 begin

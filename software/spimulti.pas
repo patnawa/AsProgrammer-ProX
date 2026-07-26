@@ -23,9 +23,9 @@ implementation
 
 uses Main;
 
-//Первая команда, после ресета, должна быть на частоте не более 8MHz
+//คำสั่งแรกหลังรีเซ็ต ต้องใช้ความถี่ไม่เกิน 8MHz
 
-//Write enable of EFCMD register,0xFEAC.
+//เปิดสิทธิ์เขียนรีจิสเตอร์ EFCMD ที่ 0xFEAC
 function UsbAspMulti_EnableEDI(): integer;
 var
   Buff: array[0..4] of byte;
@@ -69,7 +69,7 @@ begin
 
   AsProgrammer.Programmer.SPIWrite(0, 4, Buff);
 
-  //Ready
+  //รอสถานะพร้อม
   repeat
     Application.ProcessMessages;
     if UserCancel then Exit;
@@ -93,7 +93,7 @@ begin
 
 end;
 
-//Page128
+//เพจละ 128 ไบต์
 function UsbAspMulti_WritePage(Addr: longword; var Data: array of byte): integer;
 var
   i: integer;
@@ -103,16 +103,16 @@ begin
    UsbAspMulti_WriteReg($FEA9, hi(lo(Addr)) );
    //UsbAspMulti_WriteReg($FEA8, lo(lo(page)) );
 
-   UsbAspMulti_WriteReg($FEAC, $80); //clr buff
+   UsbAspMulti_WriteReg($FEAC, $80); //ล้างบัฟเฟอร์
 
    for i:=0 to 127 do
    begin
      UsbAspMulti_WriteReg($FEA8, lo(lo(Addr)) + i );
      UsbAspMulti_WriteReg($FEAB, Data[i]);
-     UsbAspMulti_WriteReg($FEAC, $02); //latch page
+     UsbAspMulti_WriteReg($FEAC, $02); //แลตช์เพจ
    end;
 
-   UsbAspMulti_WriteReg($FEAC, $70); //prog page
+   UsbAspMulti_WriteReg($FEAC, $70); //สั่งเขียนเพจ
 end;
 
 function UsbAspMulti_ErasePage(Addr: longword): integer;

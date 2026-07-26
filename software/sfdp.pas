@@ -1,7 +1,7 @@
 unit sfdp;
 
 //Serial Flash Discoverable Parameters (JEDEC JESD216)
-//Позволяет определить параметры микросхемы, которой нет в chiplist.xml
+//ใช้อ่านสเปกของชิปที่ไม่มีอยู่ใน chiplist.xml
 
 {$mode objfpc}
 
@@ -13,24 +13,24 @@ uses
 type
 
   TSFDPEraseType = record
-    Size: cardinal;    //Размер сектора в байтах. 0 - тип не поддерживается
-    Opcode: byte;      //Опкод стирания для этого размера
+    Size: cardinal;    //ขนาดเซกเตอร์เป็นไบต์ ถ้าเป็น 0 คือชิปไม่รองรับขนาดนี้
+    Opcode: byte;      //opcode สำหรับลบขนาดนี้
   end;
 
   TSFDPInfo = record
     Valid: boolean;
     MajorRev: byte;
     MinorRev: byte;
-    Density: cardinal;              //Размер микросхемы в байтах
-    PageSize: cardinal;             //Размер страницы записи в байтах
-    AddrBytes: byte;                //3 - только 3 байта, 4 - только 4, 34 - оба
+    Density: cardinal;              //ขนาดชิปเป็นไบต์
+    PageSize: cardinal;             //ขนาดเพจสำหรับเขียนเป็นไบต์
+    AddrBytes: byte;                //3 = 3 ไบต์เท่านั้น, 4 = 4 ไบต์เท่านั้น, 34 = ได้ทั้งสองแบบ
     Supports4KErase: boolean;
     Erase4KOpcode: byte;
     EraseTypes: array[1..4] of TSFDPEraseType;
   end;
 
 function SFDPDetect(out Info: TSFDPInfo): boolean;
-//Наименьший поддерживаемый размер стирания (обычно 4K)
+//ขนาดลบที่เล็กที่สุดที่ชิปรองรับ ปกติคือ 4K
 function SFDPSmallestErase(const Info: TSFDPInfo; out Size: cardinal; out Opcode: byte): boolean;
 function SFDPAddrBytesStr(const Info: TSFDPInfo): string;
 
@@ -39,10 +39,10 @@ implementation
 uses spi25;
 
 const
-  SFDP_SIGNATURE = $50444653;  //'SFDP' little endian
+  SFDP_SIGNATURE = $50444653;  //'SFDP' แบบ little endian
   JEDEC_BASIC_TABLE_ID = $00;
 
-//2^N с защитой от переполнения сдвига
+//2^N พร้อมกันการเลื่อนบิตเกินขอบ
 function Pow2(N: cardinal): cardinal;
 begin
   if N > 31 then
@@ -63,7 +63,7 @@ function SFDPDetect(out Info: TSFDPInfo): boolean;
 var
   Header: array[0..7] of byte;
   ParamHeader: array[0..7] of byte;
-  Table: array[0..79] of byte;    //20 DWORD - с запасом для JESD216B
+  Table: array[0..79] of byte;    //20 DWORD เผื่อไว้ให้พอสำหรับ JESD216B
   NumHeaders, i, TableLen, DwordCount: integer;
   TablePtr: cardinal;
   Dw: cardinal;
@@ -81,10 +81,10 @@ begin
 
   Info.MinorRev := Header[4];
   Info.MajorRev := Header[5];
-  NumHeaders := Header[6] + 1;     //NPH хранится как количество-1
+  NumHeaders := Header[6] + 1;     //NPH เก็บค่าเป็นจำนวนลบหนึ่ง
   if NumHeaders > 16 then NumHeaders := 16;
 
-  //Ищем JEDEC Basic Flash Parameter Table
+  //หา JEDEC Basic Flash Parameter Table
   Found := False;
   TablePtr := 0;
   DwordCount := 0;
@@ -94,7 +94,7 @@ begin
     FillByte(ParamHeader, SizeOf(ParamHeader), 0);
     UsbAsp25_ReadSFDP(8 + cardinal(i) * 8, ParamHeader, SizeOf(ParamHeader));
 
-    //ParamHeader: [0]=ID LSB [1]=minor [2]=major [3]=length in dwords [4..6]=ptr [7]=ID MSB
+    //ParamHeader: [0]=ID LSB [1]=minor [2]=major [3]=ความยาวเป็น dword [4..6]=ptr [7]=ID MSB
     if ParamHeader[0] = JEDEC_BASIC_TABLE_ID then
     begin
       DwordCount := ParamHeader[3];
@@ -114,7 +114,7 @@ begin
   FillByte(Table, SizeOf(Table), 0);
   UsbAsp25_ReadSFDP(TablePtr, Table, TableLen);
 
-  //DWORD-1: флаги стирания и адресация
+  //DWORD-1: แฟล็กการลบและรูปแบบแอดเดรส
   Dw := GetDword(Table, 0);
   Info.Supports4KErase := (Dw and $03) = $01;
   Info.Erase4KOpcode := (Dw shr 8) and $FF;
@@ -127,21 +127,21 @@ begin
     Info.AddrBytes := 3;
   end;
 
-  //DWORD-2: плотность
+  //DWORD-2: ความจุ
   Dw := GetDword(Table, 4);
   if (Dw and $80000000) = 0 then
-    Info.Density := (Dw + 1) div 8            //значение = количество бит - 1
+    Info.Density := (Dw + 1) div 8            //ค่าที่อ่านได้คือจำนวนบิตลบหนึ่ง
   else
   begin
     ShiftVal := Dw and $7FFFFFFF;
-    //2^N бит. Больше 2^34 бит (2 ГБайт) в cardinal не помещается
+    //2^N บิต เกิน 2^34 บิต (2 GB) ใส่ใน cardinal ไม่พอ
     if (ShiftVal < 3) or (ShiftVal > 34) then
       Info.Density := 0
     else
       Info.Density := Pow2(ShiftVal - 3);
   end;
 
-  //DWORD-8 и DWORD-9: типы стирания (размер = 2^N байт)
+  //DWORD-8 และ DWORD-9: ชนิดการลบ ขนาดคือ 2^N ไบต์
   if DwordCount >= 8 then
   begin
     Dw := GetDword(Table, 28);
@@ -172,14 +172,14 @@ begin
     end;
   end;
 
-  //DWORD-11: размер страницы (только JESD216 rev A и новее)
+  //DWORD-11: ขนาดเพจ มีเฉพาะ JESD216 rev A ขึ้นไป
   if DwordCount >= 11 then
   begin
     Dw := GetDword(Table, 40);
     Info.PageSize := Pow2((Dw shr 4) and $0F);
   end;
 
-  //Страница по умолчанию, если таблица короткая или значение бессмысленное
+  //ถ้าตารางสั้นไปหรือค่าที่อ่านได้ไม่สมเหตุสมผล ใช้ขนาดเพจมาตรฐาน
   if (Info.PageSize < 1) or (Info.PageSize > 2048) then Info.PageSize := 256;
 
   Info.Valid := Info.Density > 0;
@@ -203,7 +203,7 @@ begin
         Result := True;
       end;
 
-  //Если таблица типов стирания недоступна, но чип заявил поддержку 4K
+  //ถ้าไม่มีตารางชนิดการลบ แต่ชิปแจ้งว่ารองรับ 4K
   if (not Result) and Info.Supports4KErase and (Info.Erase4KOpcode <> 0) and
      (Info.Erase4KOpcode <> $FF) then
   begin

@@ -40,7 +40,7 @@ public
   procedure I2CStart; override;
   procedure I2CStop; override;
   function I2CReadByte(ack: boolean): byte; override;
-  function I2CWriteByte(data: byte): boolean; override; //return ack
+  function I2CWriteByte(data: byte): boolean; override; //คืนค่า ack
 
   //MICROWIRE
   function MWInit(speed: integer): boolean; override;
@@ -141,7 +141,7 @@ begin
 
   FSerial.Config(speed, 8, 'N', SB1, false, false);
   FSerial.Purge;
-  sleep(2000); //Задержка пока отработает загрузчик ардуины
+  sleep(2000); //หน่วงรอให้ bootloader ของ Arduino ทำงานจบก่อน
 
   //FSerial.RaiseExcept:= true;
   FDevOpened := true;
@@ -266,7 +266,7 @@ begin
     Exit(-1);
   end;
 
-  //Нужна запись пачками чтобы не переполнять буфер ардуинки
+  //ต้องเขียนเป็นชุด ไม่งั้นบัฟเฟอร์ของ Arduino ล้น
   bytes := 0;
   while bytes < BufferLen do
   begin
@@ -591,7 +591,7 @@ begin
     Exit(-1);
   end;
 
-  //Максимум 32 байта
+  //สูงสุด 32 ไบต์
   result := FSerial.SendBuffer(@buffer[0], bytes);
 
   buff := FSerial.RecvByte(TIMEOUT);

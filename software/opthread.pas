@@ -1,12 +1,12 @@
 unit opthread;
 
-//Выполнение длительных операций в фоновом потоке.
-//Главный поток при этом продолжает качать сообщения, поэтому GUI не зависает
-//и кнопка "Отмена" остается живой даже на блокирующих вызовах(Buzzpirat, CH341).
+//รันงานที่ใช้เวลานานบน thread เบื้องหลัง
+//ระหว่างนั้น thread หลักยังปั๊ม message ต่อ หน้าต่างจึงไม่ค้าง
+//และปุ่ม Cancel ยังกดได้แม้ตอนที่ไดรเวอร์บล็อกอยู่ (Buzzpirat, CH341)
 //
-//ВАЖНО: код, выполняемый в фоновом потоке, не должен обращаться к элементам
-//управления напрямую. Для лога и прогресса используйте LogPrint/SetProgress*
-//из main, они сами переключаются на главный поток.
+//สำคัญ: โค้ดที่รันบน thread เบื้องหลังห้ามแตะ control โดยตรง
+//ถ้าจะเขียน log หรืออัปเดต progress ให้เรียก LogPrint/SetProgress* จาก main
+//ซึ่งจะสลับไป thread หลักให้เอง
 
 {$mode objfpc}{$H+}
 {$modeswitch nestedprocvars}
@@ -32,23 +32,23 @@ type
   end;
 
 var
-  //Выключено по умолчанию: старое поведение остается поведением по умолчанию
+  //ปิดไว้เป็นค่าเริ่มต้น พฤติกรรมเดิมจึงยังเป็นค่าเริ่มต้น
   UseWorkerThread: boolean = False;
 
-//Выполняет AProc. В фоновом режиме - в отдельном потоке, иначе просто вызывает.
-//Возвращает текст исключения из потока или пустую строку
+//เรียก AProc ถ้าเปิดโหมดเบื้องหลังจะรันบน thread แยก ถ้าไม่เปิดก็เรียกตรง ๆ
+//คืนข้อความ exception จาก thread หรือสตริงว่างถ้าไม่มีข้อผิดพลาด
 function RunOperation(AProc: TNestedOp): string;
 
 function InWorkerThread: boolean;
 
-//Application.ProcessMessages, безопасный для вызова из рабочего потока
+//Application.ProcessMessages เวอร์ชันที่เรียกจาก thread เบื้องหลังได้อย่างปลอดภัย
 procedure OpProcessMessages;
 
 implementation
 
 constructor TOpThread.CreateOp(AProc: TNestedOp);
 begin
-  inherited Create(True);   //создаем приостановленным, чтобы успеть заполнить поля
+  inherited Create(True);   //สร้างแบบหยุดไว้ก่อน จะได้ใส่ค่าลงฟิลด์ให้ครบก่อนเริ่มรัน
   FProc := AProc;
   FErrorMsg := '';
   FreeOnTerminate := False;
@@ -72,7 +72,7 @@ end;
 
 procedure OpProcessMessages;
 begin
-  //В рабочем потоке качать очередь сообщений нельзя - это делает главный поток
+  //ห้ามปั๊มคิว message จาก thread เบื้องหลัง งานนี้เป็นของ thread หลัก
   if not InWorkerThread then Application.ProcessMessages;
 end;
 
@@ -82,7 +82,7 @@ var
 begin
   Result := '';
 
-  //Вложенный запуск недопустим: уже находимся в рабочем потоке
+  //ห้ามเรียกซ้อน เพราะตอนนี้อยู่บน thread เบื้องหลังอยู่แล้ว
   if (not UseWorkerThread) or InWorkerThread then
   begin
     AProc();
@@ -97,7 +97,7 @@ begin
       CheckSynchronize(10);
     end;
 
-    //Добираем то, что осталось в очереди синхронизации
+    //เก็บกวาดสิ่งที่ยังค้างอยู่ในคิว synchronize
     CheckSynchronize(0);
     Result := T.ErrorMsg;
   finally

@@ -6,7 +6,7 @@ uses
   {$IFDEF UNIX}{$IFDEF UseCThreads}
   cthreads,
   {$ENDIF}{$ENDIF}
-  Interfaces, // this includes the LCL widgetset
+  Interfaces, // บรรทัดนี้ดึง widgetset ของ LCL เข้ามา
   Forms, main, i2c, microwire,
   spi95, search, sregedit, findchip, ScriptEdit, spi25;
 

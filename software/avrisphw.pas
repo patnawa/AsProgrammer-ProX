@@ -40,7 +40,7 @@ public
   procedure I2CStart; override;
   procedure I2CStop; override;
   function I2CReadByte(ack: boolean): byte; override;
-  function I2CWriteByte(data: byte): boolean; override; //return ack
+  function I2CWriteByte(data: byte): boolean; override; //คืนค่า ack
 
   //MICROWIRE
   function MWInit(speed: integer): boolean; override;
@@ -55,13 +55,13 @@ uses main;
 
 const
 
-   SPI_SPEED_8                 = 0;   // clock 16MHz = 8MHz SPI, clock 8MHz = 4MHz SPI
-   SPI_SPEED_4                 = 1;   // 4MHz SPI
-   SPI_SPEED_2                 = 2;   // 2MHz SPI
-   SPI_SPEED_1                 = 3;   // 1MHz SPI
-   SPI_SPEED_500               = 4;   // 500KHz SPI
-   SPI_SPEED_250               = 5;   // 250KHz SPI
-   SPI_SPEED_125               = 6;   // 125KHz SPI
+   SPI_SPEED_8                 = 0;   // สัญญาณนาฬิกา 16MHz ได้ SPI 8MHz, 8MHz ได้ SPI 4MHz
+   SPI_SPEED_4                 = 1;   // SPI 4MHz
+   SPI_SPEED_2                 = 2;   // SPI 2MHz
+   SPI_SPEED_1                 = 3;   // SPI 1MHz
+   SPI_SPEED_500               = 4;   // SPI 500KHz
+   SPI_SPEED_250               = 5;   // SPI 250KHz
+   SPI_SPEED_125               = 6;   // SPI 125KHz
 
    STATUS_CMD_UNKNOWN            = $C9;
 
@@ -140,7 +140,7 @@ begin
   usb_claim_interface(FDevHandle, 0);
 
 
-  //Есть ли в прошивке наши команды
+  //เฟิร์มแวร์ตัวนี้มีคำสั่งของเราหรือไม่
 
   buff[0]:= CMD_FIRMWARE_VER;
   usb_bulk_write(FDevHandle, OUT_EP, buff, 1, STREAM_TIMEOUT_MS);
@@ -177,7 +177,7 @@ begin
  if not FDevOpened then Exit(false);
  result := true;
 
- //spi speed
+ //ความเร็ว spi
  buffer[0]:= CMD_SET_PARAMETER;
  buffer[1]:= PARAM_SCK_DURATION;
  buffer[2]:= speed;
@@ -190,7 +190,7 @@ begin
    Exit(false);
  end;
 
- //spi init
+ //เริ่มต้น spi
  buffer[0]:= CMD_ENTER_PROGMODE_SPI25;
  if usb_bulk_write(FDevHandle, OUT_EP, buffer, 1, STREAM_TIMEOUT_MS) <> 1 then result := false;
  if usb_bulk_read(FDevHandle, IN_EP, buffer, 2, STREAM_TIMEOUT_MS) <> 2 then result := false;
@@ -368,7 +368,7 @@ begin
   if not FDevOpened then Exit(false);
   result := true;
 
-  //spi speed
+  //ความเร็ว spi
   buffer[0]:= CMD_SET_PARAMETER;
   buffer[1]:= PARAM_SCK_DURATION;
   buffer[2]:= speed;
@@ -381,7 +381,7 @@ begin
     Exit(false);
   end;
 
-  //spi init
+  //เริ่มต้น spi
   buffer[0]:= CMD_MW_INIT;
   if usb_bulk_write(FDevHandle, OUT_EP, buffer, 1, STREAM_TIMEOUT_MS) <> 1 then result := false;
 end;
@@ -409,7 +409,7 @@ begin
 
   result := 0;
   usb_bulk_write(FDevHandle, OUT_EP, buff, Length(buff), STREAM_TIMEOUT_MS);
-  if BufferLen = 0 then BufferLen := 1; //костыль
+  if BufferLen = 0 then BufferLen := 1; //ทางเลี่ยงชั่วคราว
     result := usb_bulk_read(FDevHandle, IN_EP, buffer, BufferLen, STREAM_TIMEOUT_MS);
 end;
 

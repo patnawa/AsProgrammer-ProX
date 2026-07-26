@@ -1,7 +1,7 @@
 unit main;
 
-//TODO: at45 установка размера странцы
-//TODO: at45 Проверка размера страницы перед операциями
+//TODO: at45 กำหนดขนาดเพจ
+//TODO: at45 ตรวจขนาดเพจก่อนเริ่มทำงาน
 
 
 {$mode objfpc}{$H+}
@@ -273,9 +273,9 @@ type
     procedure StartAddressEditKeyPress(Sender: TObject; var Key: char);
     procedure VerifyFlash(BlankCheck: boolean = false);
   private
-    { private declarations }
+    { ส่วนประกาศแบบ private }
   public
-    { public declarations }
+    { ส่วนประกาศแบบ public }
 
   end;
 
@@ -308,9 +308,9 @@ type
     SpiCmd: byte;
     I2CAddrType: byte;
     MWAddLen: byte;
-    Sector: Longword;    //Размер сектора стирания. 0 - не задан, берем 4096
-    SectorOpcode: byte;  //Опкод стирания сектора. 0 - подобрать по размеру
-    ID: string;          //Идентификатор из chiplist.xml, для проверки перед работой
+    Sector: Longword;    //ขนาดเซกเตอร์สำหรับลบ ถ้าเป็น 0 คือไม่ระบุ จะใช้ 4096
+    SectorOpcode: byte;  //opcode สำหรับลบเซกเตอร์ ถ้าเป็น 0 จะเลือกให้ตามขนาด
+    ID: string;          //id จาก chiplist.xml ใช้ตรวจก่อนเริ่มทำงานกับชิป
 
     Script: string;
   end;
@@ -342,7 +342,7 @@ var
 {$R *.lfm}
 
 type
-  //Прокидывает обновления интерфейса из рабочего потока в главный
+  //ส่งการอัปเดตหน้าจอจาก thread เบื้องหลังไปให้ thread หลัก
   TUIProxy = class
   private
     FMsg: string;
@@ -361,15 +361,15 @@ type
 var
   UIProxy: TUIProxy;
 
-  //Защита от повторного входа: пункты меню, в отличие от кнопок панели,
-  //остаются доступны, пока главный поток качает сообщения
+  //กันการเรียกซ้อน เพราะเมนูไม่เหมือนปุ่มบนแถบเครื่องมือ
+  //มันยังคลิกได้อยู่ตอนที่ thread หลักกำลังปั๊ม message
   OperationRunning: boolean = False;
 
-  //Автонумерация и серийное производство
+  //เลขรันนิ่งอัตโนมัติและการผลิตเป็นชุด
   ProdSettings: TProdSettings;
 
-  //Состояние интерфейса, снятое в главном потоке перед стартом операции.
-  //Рабочий поток обязан читать его отсюда, а не из элементов управления
+  //สถานะหน้าจอที่อ่านเก็บไว้บน thread หลักก่อนเริ่มงาน
+  //thread เบื้องหลังต้องอ่านจากตรงนี้ ห้ามอ่านจาก control โดยตรง
   OpUI: record
     ChipSize: cardinal;
     SkipFF: boolean;
@@ -421,7 +421,7 @@ begin
   TThread.Synchronize(nil, @SyncProgressReset);
 end;
 
-//Потокобезопасная установка прогресса
+//ตั้งค่า progress แบบปลอดภัยต่อ thread
 procedure SetProgressMax(V: integer);
 begin
   if InWorkerThread then
@@ -438,8 +438,8 @@ begin
     MainForm.ProgressBar.Position := V;
 end;
 
-//Снимает состояние интерфейса. Вызывать только из главного потока,
-//до запуска операции
+//อ่านสถานะหน้าจอเก็บไว้ ต้องเรียกจาก thread หลักเท่านั้น
+//และต้องเรียกก่อนเริ่มงาน
 procedure CaptureUIState;
 begin
   OpUI.ChipSize := 0;
@@ -526,7 +526,7 @@ begin
   end else
   begin
     SettingsFile := TXMLDocument.Create;
-    // Create a root node
+    // สร้าง root node
     RootNode := SettingsFile.CreateElement('settings');
     SettingsFile.Appendchild(RootNode);
   end;
@@ -677,28 +677,28 @@ begin
 end;
 
 //------------------------------------------------------------------------
-// Внешний вид: набор иконок и промышленная темная тема
+// หน้าตาโปรแกรม: ชุดไอคอนและธีมสไตล์เครื่องมือช่าง
 //------------------------------------------------------------------------
 
 const
   IconDirName = 'icons' + DirectorySeparator + 'modern' + DirectorySeparator;
 
-  //TColor хранится как $00BBGGRR, поэтому байты идут в обратном порядке
+  //TColor เก็บเป็น $00BBGGRR ลำดับไบต์จึงกลับด้านกับโค้ดสี HTML
 
-  //Светлая тема(по умолчанию)
-  LIGHT_CHROME  = $F7F4F2;  //#F2F4F7 панели и фон окна
-  LIGHT_SURFACE = $FFFFFF;  //#FFFFFF лог и редактор
-  LIGHT_TEXT    = $33291F;  //#1F2933 текст
-  LIGHT_ACCENT  = $D16E0A;  //#0A6ED1 акцент
+  //ธีมสว่าง เป็นค่าเริ่มต้น
+  LIGHT_CHROME  = $F7F4F2;  //#F2F4F7 พื้นหลังหน้าต่างและแผงต่าง ๆ
+  LIGHT_SURFACE = $FFFFFF;  //#FFFFFF ช่อง log และ hex editor
+  LIGHT_TEXT    = $33291F;  //#1F2933 ตัวอักษร
+  LIGHT_ACCENT  = $D16E0A;  //#0A6ED1 สีเน้น
 
-  //Темная тема
+  //ธีมมืด
   DARK_CHROME   = $241F1B;  //#1B1F24
   DARK_SURFACE  = $1C1814;  //#14181C
   DARK_TEXT     = $D9D1C9;  //#C9D1D9
   DARK_ACCENT   = $F3B32B;  //#2BB3F3
 
-//Подменяет встроенные иконки на файлы из icons\modern.
-//Если папки нет или набор неполный - остаются встроенные
+//เปลี่ยนไอคอนที่ฝังมาในโปรแกรมเป็นไฟล์จาก icons\modern
+//ถ้าไม่มีโฟลเดอร์หรือไฟล์ไม่ครบ จะใช้ไอคอนเดิมที่ฝังไว้
 procedure LoadModernIcons;
 var
   Files: TStringList;
@@ -718,7 +718,7 @@ begin
       FindClose(sr);
     end;
 
-    //Порядок задается именем файла: 00_ ... 08_
+    //ลำดับกำหนดด้วยชื่อไฟล์ 00_ ถึง 08_
     if Files.Count < MainForm.ImageList.Count then Exit;
     Files.Sort;
 
@@ -766,7 +766,7 @@ begin
   MainForm.Panel_I2C_DevAddr.Color := ChromeColor;
   MainForm.GroupChipSettings.Color := ChromeColor;
 
-  //Лог моноширинным: адреса и hex в нем читаются заметно лучше
+  //ให้ log ใช้ฟอนต์ความกว้างคงที่ อ่านแอดเดรสกับ hex ได้ง่ายกว่ามาก
   MainForm.Log.Color := SurfaceColor;
   MainForm.Log.Font.Color := TextColor;
   MainForm.Log.Font.Name := 'Consolas';
@@ -774,7 +774,7 @@ begin
   MainForm.MPHexEditorEx.Color := SurfaceColor;
   MainForm.MPHexEditorEx.Font.Color := TextColor;
 
-  //У части подписей в main.lfm снят ParentFont, поэтому цвет ставим каждой
+  //ป้ายบางตัวใน main.lfm ปิด ParentFont ไว้ จึงต้องตั้งสีให้ทีละตัว
   for i := 0 to MainForm.ComponentCount - 1 do
   begin
     C := MainForm.Components[i];
@@ -795,10 +795,10 @@ begin
 end;
 
 //------------------------------------------------------------------------
-// Файл проекта: микросхема, настройки и содержимое буфера в одном файле
+// ไฟล์โปรเจกต์: เก็บชิป การตั้งค่า และเนื้อหาบัฟเฟอร์ไว้ในไฟล์เดียว
 //
-// Формат: 'APXPROJ1' | длина заголовка(4 байта LE) | XML заголовок | данные
-// Заголовок текстовый, данные сырые - без base64 файл не раздувается втрое
+// รูปแบบ: 'APXPROJ1' | ความยาวส่วนหัว 4 ไบต์ LE | ส่วนหัว XML | ข้อมูลดิบ
+// ส่วนหัวเป็นข้อความ ข้อมูลเป็นไบต์ดิบ ไม่ใช้ base64 ไฟล์จึงไม่บวมสามเท่า
 //------------------------------------------------------------------------
 
 const
@@ -858,8 +858,8 @@ begin
   end;
 end;
 
-//Достает значение атрибута из заголовка проекта простым разбором строки:
-//полноценный XML тут избыточен, а зависимость от DOM лишняя
+//ดึงค่า attribute จากส่วนหัวโปรเจกต์ด้วยการค้นสตริงตรง ๆ
+//ใช้ XML parser เต็มรูปแบบตรงนี้เกินความจำเป็น และเพิ่มการพึ่งพา DOM โดยไม่ต้อง
 function ProjectAttr(const Header, Name: string): string;
 var
   p, q: integer;
@@ -919,7 +919,7 @@ begin
     try
       if F.Size > F.Position then Buf.CopyFrom(F, F.Size - F.Position);
 
-      //Протокол выставляем первым: смена радиокнопки чистит поля
+      //ต้องตั้งโปรโตคอลก่อนเป็นอันดับแรก เพราะการสลับ radio จะล้างค่าในช่องต่าง ๆ
       s := ProjectAttr(Header, 'protocol');
       if s = 'i2c' then MainForm.RadioI2C.Checked := True
       else if s = 'mw' then MainForm.RadioMw.Checked := True
@@ -967,7 +967,7 @@ begin
   end;
 end;
 
-//Опкод стирания по размеру сектора: 20h(4K), 52h(32K), D8h(64K)
+//opcode สำหรับลบตามขนาดเซกเตอร์: 20h(4K), 52h(32K), D8h(64K)
 function SectorEraseOpcode(SectorSize: cardinal): byte;
 begin
   case SectorSize of
@@ -979,8 +979,8 @@ begin
   end;
 end;
 
-//Размер сектора текущей микросхемы. Берется из chiplist.xml(sector=) или SFDP,
-//иначе 4096 - подходит практически для всей современной SPI NOR
+//ขนาดเซกเตอร์ของชิปปัจจุบัน มาจาก chiplist.xml (sector=) หรือ SFDP
+//ถ้าไม่มีจะใช้ 4096 ซึ่งใช้ได้กับ SPI NOR สมัยใหม่แทบทุกตัว
 function CurrentSectorSize: cardinal;
 begin
   if CurrentICParam.Sector > 0 then
@@ -989,7 +989,7 @@ begin
     Result := 4096;
 end;
 
-//Опкод стирания текущей микросхемы
+//opcode สำหรับลบเซกเตอร์ของชิปปัจจุบัน
 function CurrentSectorOpcode: byte;
 begin
   if (CurrentICParam.Sector > 0) and (CurrentICParam.SectorOpcode <> 0) then
@@ -998,7 +998,7 @@ begin
     Result := SectorEraseOpcode(CurrentSectorSize);
 end;
 
-//Ждет снятия флага Busy. Возвращает false если прервано пользователем
+//รอจนแฟล็ก Busy ดับ คืน false ถ้าผู้ใช้สั่งยกเลิก
 function WaitNotBusy25: boolean;
 begin
   Result := True;
@@ -1009,8 +1009,8 @@ begin
   end;
 end;
 
-//Стирает только сектора, попадающие в диапазон StartAddress..StartAddress+RangeLen-1.
-//Границы выравниваются на размер сектора - стирать половину сектора нельзя.
+//ลบเฉพาะเซกเตอร์ที่อยู่ในช่วง StartAddress ถึง StartAddress+RangeLen-1
+//ขอบถูกปัดให้ตรงเซกเตอร์ เพราะลบครึ่งเซกเตอร์ไม่ได้
 function EraseRange25(StartAddress, RangeLen, SectorSize: cardinal; Opcode: byte): boolean;
 const
   FLASH_SIZE_128MBIT = 16777216;
@@ -1019,7 +1019,7 @@ var
   Use4B: boolean;
   OK: boolean;
 
-  //Тело операции. Выполняется в рабочем потоке, если фоновый режим включен
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
   procedure DoWork;
   begin
   OK := False;
@@ -1038,7 +1038,7 @@ var
     Exit;
   end;
 
-  //Выравниваем начало вниз, конец - вверх, по границе сектора
+  //ปัดจุดเริ่มลง ปัดจุดจบขึ้น ให้ตรงขอบเซกเตอร์
   Addr := (StartAddress div SectorSize) * SectorSize;
   EndAddr := StartAddress + RangeLen;
   if EndAddr > ChipSize then EndAddr := ChipSize;
@@ -1093,10 +1093,10 @@ begin
   Result := OK;
 end;
 
-//Полное стирание микросхемы 25 серии с ожиданием готовности
+//ลบทั้งชิปตระกูล 25 พร้อมรอจนพร้อมใช้งาน
 procedure ChipErase25;
 
-  //Тело операции. Выполняется в рабочем потоке, если фоновый режим включен
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
   procedure DoWork;
   var
     Started: TDateTime;
@@ -1113,8 +1113,8 @@ procedure ChipErase25;
       if UserCancel then Exit;
     end;
 
-    //Полное стирание физически не может занять доли секунды: почти всегда
-    //это значит, что микросхема отказала в команде из-за защиты
+    //การลบทั้งชิปเป็นไปไม่ได้ที่จะเสร็จในเสี้ยววินาที เกือบทุกครั้ง
+    //แปลว่าชิปปฏิเสธคำสั่งเพราะยังถูกป้องกันการเขียนอยู่
     if MilliSecondsBetween(Now, Started) < 1000 then
       LogPrint(STR_ERASE_TOO_FAST);
   end;
@@ -1123,11 +1123,11 @@ begin
   RunOperation(@DoWork);
 end;
 
-//Реализация ниже по файлу, нужна для авторезервирования
+//ตัวจริงอยู่ถัดลงไปในไฟล์ ประกาศไว้ก่อนเพราะการสำรองข้อมูลอัตโนมัติต้องใช้
 procedure ReadFlash25(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal); forward;
 
-//Проверяет, что в панели действительно та микросхема, которая выбрана.
-//Вызывать в режиме программирования. False - пользователь отказался продолжать
+//ตรวจว่าชิปที่เสียบอยู่ตรงกับที่เลือกไว้จริงหรือไม่
+//ต้องเรียกตอนอยู่ในโหมดโปรแกรม คืน False เมื่อผู้ใช้เลือกไม่ทำต่อ
 function VerifyChipID: boolean;
 var
   ID: MEMORY_ID;
@@ -1140,7 +1140,7 @@ begin
   if MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25 then Exit;
 
   Expected := UpperCase(Trim(CurrentICParam.ID));
-  //У части микросхем идентификатора нет, проверять нечего
+  //ชิปบางตัวไม่มี id จึงไม่มีอะไรให้ตรวจ
   if (Expected = '') or (Expected = '0') then Exit;
 
   FillByte(ID.ID9FH, 3, $FF);
@@ -1167,8 +1167,8 @@ begin
   Result := MessageDlg('AsProgrammer', STR_ID_MISMATCH_Q, mtWarning, [mbYes, mbNo], 0) = mrYes;
 end;
 
-//Снимок содержимого микросхемы перед записью или стиранием.
-//False - снять не удалось, продолжать нельзя
+//สำรองเนื้อหาชิปก่อนเขียนหรือลบ
+//คืน False เมื่อสำรองไม่สำเร็จ ซึ่งแปลว่าห้ามทำต่อ
 function AutoBackupChip: boolean;
 var
   Backup: TMemoryStream;
@@ -1190,7 +1190,7 @@ begin
       Exit(False);
     end;
 
-  //Имя микросхемы попадает в имя файла, чистим недопустимые символы
+  //ชื่อชิปจะไปอยู่ในชื่อไฟล์ ต้องล้างอักขระที่ใช้ไม่ได้ออกก่อน
   ChipName := CurrentICParam.Name;
   if ChipName = '' then ChipName := 'chip';
   for i := 1 to Length(ChipName) do
@@ -1218,8 +1218,8 @@ begin
   end;
 end;
 
-//Вставляет очередной серийный номер в поток перед записью и, если задан
-//файл журнала, дописывает выданный номер туда
+//ใส่เลขรันนิ่งตัวถัดไปลงในสตรีมก่อนเขียน และถ้ากำหนดไฟล์บันทึกไว้
+//ก็เขียนเลขที่จ่ายไปต่อท้ายไฟล์นั้นด้วย
 procedure ApplySerialToStream(Stream: TMemoryStream);
 var
   Data: array of byte;
@@ -1264,7 +1264,7 @@ begin
   Stream.Position := 0;
 end;
 
-//Установка скорости spi и Microwire
+//ตั้งความเร็วของ spi และ Microwire
 function SetSPISpeed(OverrideSpeed: byte): integer;
 var
   Speed: byte;
@@ -1460,9 +1460,9 @@ var
   ProgressPos: integer;
   SkipPage: boolean;
 
-  //Тело операции. Выполняется в рабочем потоке, если фоновый режим включен
-  //Счетчик цикла обязан быть локальным: FPC не разрешает использовать
-  //переменную внешней процедуры как счетчик for
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  //ตัวนับลูปต้องเป็นตัวแปรในตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
+  //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
   procedure DoWork;
   var
     i: integer;
@@ -1488,16 +1488,16 @@ var
 
   while (Address-StartAddress) < WriteSize do
   begin
-    //Сбрасываем на каждой странице: инициализированная переменная в FPC
-    //статическая и сохраняла бы значение от предыдущей операции записи
+    //ต้องรีเซ็ตทุกเพจ เพราะตัวแปร local ที่มีค่าเริ่มต้นใน FPC เป็นแบบ static
+    //ค่าจึงค้างข้ามมาจากการเขียนรอบก่อน
     SkipPage := False;
 
-    //Только вначале aai
+    //เฉพาะตอนเริ่มของ aai
     if (((WriteType = WT_SSTB) or (WriteType = WT_SSTW)) and (Address = StartAddress)) or
-    //Вначале страницы
+    //ตอนเริ่มเพจ
     (WriteType = WT_PAGE) then UsbAsp25_WREN();
 
-    //Determines first page buffer size to prevent buffer "rolls over" on address boundary
+    //คำนวณขนาดบัฟเฟอร์เพจแรก กันไม่ให้บัฟเฟอร์วนกลับเมื่อชนขอบแอดเดรส
         if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 2) then
            PageSize := (OpUI.ChipSize - StartAddress) mod PageSize else
               PageSize := PageSizeTemp;
@@ -1506,22 +1506,22 @@ var
     RomStream.ReadBuffer(DataChunk, PageSize);
 
     if (WriteType = WT_SSTB) then
-      if (Address = StartAddress) then //Пишем первый байт с адресом
+      if (Address = StartAddress) then //เขียนไบต์แรกพร้อมแอดเดรส
         BytesWrite := BytesWrite + UsbAsp25_Write($AF, Address, datachunk, PageSize)
         else
-        //Пишем остальные(без адреса)
+        //ไบต์ที่เหลือเขียนโดยไม่ต้องส่งแอดเดรส
         BytesWrite := BytesWrite + UsbAsp25_WriteSSTB($AF, datachunk[0]);
 
     if (WriteType = WT_SSTW) then
-      if (Address = StartAddress) then //Пишем первые два байта с адресом
+      if (Address = StartAddress) then //เขียนสองไบต์แรกพร้อมแอดเดรส
         BytesWrite := BytesWrite + UsbAsp25_Write($AD, Address, datachunk, PageSize)
         else
-        //Пишем остальные(без адреса)
+        //ไบต์ที่เหลือเขียนโดยไม่ต้องส่งแอดเดรส
         BytesWrite := BytesWrite + UsbAsp25_WriteSSTW($AD, datachunk[0], datachunk[1]);
 
     if WriteType = WT_PAGE then
     begin
-      //Если страница вся FF то не пишем ее
+      //ถ้าทั้งเพจเป็น FF ก็ไม่ต้องเขียน
       if OpUI.SkipFF then
       begin
         SkipPage := True;
@@ -1535,17 +1535,17 @@ var
 
       if not SkipPage then
       begin
-        if WriteSize > FLASH_SIZE_128MBIT then //Память больше 128Мбит
+        if WriteSize > FLASH_SIZE_128MBIT then //หน่วยความจำใหญ่กว่า 128Mbit
         begin
-          //4 байтная адресация
+          //ใช้แอดเดรส 4 ไบต์
           BytesWrite := BytesWrite + UsbAsp25_Write32bitAddr($02, Address, datachunk, PageSize)
         end
-        else //Память в пределах 128Мбит
+        else //หน่วยความจำไม่เกิน 128Mbit
           BytesWrite := BytesWrite + UsbAsp25_Write($02, Address, datachunk, PageSize);
       end else BytesWrite := BytesWrite + PageSize;
     end;
 
-    if (not OpUI.IgnoreBusy) and (not SkipPage) then  //Игнорировать проверку
+    if (not OpUI.IgnoreBusy) and (not SkipPage) then  //ข้ามการตรวจสถานะ
       while UsbAsp25_Busy() do
       begin
         OpProcessMessages;
@@ -1578,7 +1578,7 @@ var
   end;
 
   if WriteSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
-  UsbAsp25_Wrdi(); //Для sst
+  UsbAsp25_Wrdi(); //สำหรับ sst
 
   if BytesWrite <> WriteSize then
     LogPrint(STR_WRONG_BYTES_WRITE)
@@ -1619,7 +1619,7 @@ begin
   begin
     UsbAsp95_WREN();
 
-    //Determines first page buffer size to prevent buffer "rolls over" on address boundary
+    //คำนวณขนาดบัฟเฟอร์เพจแรก กันไม่ให้บัฟเฟอร์วนกลับเมื่อชนขอบแอดเดรส
         if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 1) then
            PageSize := (ChipSize - StartAddress) mod PageSize else
               PageSize := PageSizeTemp;
@@ -1629,7 +1629,7 @@ begin
 
     BytesWrite := BytesWrite + UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
 
-    if not MainForm.MenuIgnoreBusyBit.Checked then  //Игнорировать проверку
+    if not MainForm.MenuIgnoreBusyBit.Checked then  //ข้ามการตรวจสถานะ
       while UsbAsp25_Busy() do
       begin
         Application.ProcessMessages;
@@ -1689,7 +1689,7 @@ begin
 
     BytesWrite := BytesWrite + UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
 
-    if not MainForm.MenuIgnoreBusyBit.Checked then  //Игнорировать проверку
+    if not MainForm.MenuIgnoreBusyBit.Checked then  //ข้ามการตรวจสถานะ
       while UsbAsp25_Busy() do
       begin
         Application.ProcessMessages;
@@ -1731,7 +1731,7 @@ begin
   MainForm.ProgressBar.Max := chipsize div pagesize;
 
   UsbAspMulti_EnableEDI();
-  UsbAspMulti_WriteReg($FEA7, $A4); //en write
+  UsbAspMulti_WriteReg($FEA7, $A4); //เปิดสิทธิ์เขียน
 
   for i:= 0 to (chipsize div pagesize)-1 do
   begin
@@ -1772,7 +1772,7 @@ begin
   MainForm.ProgressBar.Max := WriteSize div PageSize;
 
   UsbAspMulti_EnableEDI();
-  UsbAspMulti_WriteReg($FEA7, $A4); //en write
+  UsbAspMulti_WriteReg($FEA7, $A4); //เปิดสิทธิ์เขียน
 
   while Address < WriteSize do
   begin
@@ -1781,7 +1781,7 @@ begin
     RomStream.ReadBuffer(DataChunk, PageSize);
 
 
-    //Если страница вся 00 то не пишем ее
+    //ถ้าทั้งเพจเป็น 00 ก็ไม่ต้องเขียน
     if MainForm.MenuSkipFF.Checked then
     begin
       SkipPage := True;
@@ -1902,7 +1902,7 @@ var
   Address: cardinal;
   ProgressPos: integer;
 
-  //Тело операции. Выполняется в рабочем потоке, если фоновый режим включен
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
   procedure DoWork;
   begin
   if (StartAddress >= ChipSize) or (ChipSize = 0) then
@@ -2115,9 +2115,9 @@ var
   Address: cardinal;
   ProgressPos: integer;
 
-  //Тело операции. Выполняется в рабочем потоке, если фоновый режим включен
-  //Счетчик цикла обязан быть локальным: FPC не разрешает использовать
-  //переменную внешней процедуры как счетчик for
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  //ตัวนับลูปต้องเป็นตัวแปรในตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
+  //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
   procedure DoWork;
   var
     i: integer;
@@ -2365,7 +2365,7 @@ begin
   MainForm.ProgressBar.Max := ChipSize div ChunkSize;
 
   UsbAspMulti_EnableEDI();
-  UsbAspMulti_WriteReg($FEAD, $08); //en flash
+  UsbAspMulti_WriteReg($FEAD, $08); //เปิดใช้งานแฟลช
 
   //RomStream.Clear;
 
@@ -2463,7 +2463,7 @@ begin
 
   while (Address-StartAddress) < WriteSize do
   begin
-    //Determines first page buffer size to prevent buffer "rolls over" on address boundary
+    //คำนวณขนาดบัฟเฟอร์เพจแรก กันไม่ให้บัฟเฟอร์วนกลับเมื่อชนขอบแอดเดรส
     if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 1) then
        PageSize := (StrToInt(MainForm.ComboChipSize.Text) - StartAddress) mod PageSize else
            PageSize := PageSizeTemp;
@@ -2669,8 +2669,8 @@ end;
 
 procedure LockControl;
 begin
-  //Снимаем состояние интерфейса до старта операции: рабочий поток читает
-  //настройки из OpUI, а не из элементов управления
+  //อ่านสถานะหน้าจอเก็บไว้ก่อนเริ่มงาน thread เบื้องหลังจะอ่านค่า
+  //จาก OpUI ไม่ใช่จาก control โดยตรง
   CaptureUIState;
   OperationRunning := True;
 
@@ -2735,7 +2735,7 @@ begin
   if ButtonBlock.Enabled then
     ButtonBlockClick(Sender);
   if ButtonErase.Enabled then
-    if ComboSPICMD.ItemIndex <> SPI_CMD_45 then  //Сами стирают страницу
+    if ComboSPICMD.ItemIndex <> SPI_CMD_45 then  //ชิปพวกนี้ลบเพจให้เองอยู่แล้ว
       ButtonEraseClick(Sender);
 
   CheckTemp := MenuAutoCheck.Checked;
@@ -2911,14 +2911,14 @@ begin
 
   if ComboSPICMD.ItemIndex = SPI_CMD_25 then
   begin
-    UsbAsp25_ReadSR(sreg); //Читаем регистр
+    UsbAsp25_ReadSR(sreg); //อ่าน register
     LogPrint(STR_OLD_SREG+IntToBin(sreg, 8));
 
     sreg := %10011100; //
-    UsbAsp25_WREN(); //Включаем разрешение записи
-    UsbAsp25_WriteSR(sreg); //Устанавливаем регистр
+    UsbAsp25_WREN(); //เปิดสิทธิ์เขียน
+    UsbAsp25_WriteSR(sreg); //ตั้งค่า register
 
-    //Пока отлипнет ромка
+    //รอจนกว่าชิปจะพร้อม
     while UsbAsp25_Busy() do
     begin
       Application.ProcessMessages;
@@ -2930,14 +2930,14 @@ begin
 
   if ComboSPICMD.ItemIndex = SPI_CMD_95 then
   begin
-    UsbAsp95_ReadSR(sreg); //Читаем регистр
+    UsbAsp95_ReadSR(sreg); //อ่าน register
     LogPrint(STR_OLD_SREG+IntToBin(sreg, 8));
 
     sreg := %10011100; //
-    UsbAsp95_WREN(); //Включаем разрешение записи
-    UsbAsp95_WriteSR(sreg); //Устанавливаем регистр
+    UsbAsp95_WREN(); //เปิดสิทธิ์เขียน
+    UsbAsp95_WriteSR(sreg); //ตั้งค่า register
 
-    //Пока отлипнет ромка
+    //รอจนกว่าชิปจะพร้อม
     while UsbAsp25_Busy() do
     begin
       Application.ProcessMessages;
@@ -2969,9 +2969,9 @@ begin
 
   if ComboSPICMD.ItemIndex = SPI_CMD_25 then
   begin
-    UsbAsp25_ReadSR(sreg); //Читаем регистр
-    UsbAsp25_ReadSR(sreg2, $35); //Второй байт
-    UsbAsp25_ReadSR(sreg3, $15); //Третий байт
+    UsbAsp25_ReadSR(sreg); //อ่าน register
+    UsbAsp25_ReadSR(sreg2, $35); //ไบต์ที่สอง
+    UsbAsp25_ReadSR(sreg3, $15); //ไบต์ที่สาม
     LogPrint('Sreg: '+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+'), ')
                                          +IntToBin(sreg2, 8)+'(0x'+(IntToHex(sreg2, 2)+'), ')
                                          +IntToBin(sreg3, 8)+'(0x'+(IntToHex(sreg3, 2)+')'));
@@ -2979,13 +2979,13 @@ begin
 
   if ComboSPICMD.ItemIndex = SPI_CMD_95 then
   begin
-    UsbAsp95_ReadSR(sreg); //Читаем регистр
+    UsbAsp95_ReadSR(sreg); //อ่าน register
     LogPrint('Sreg: '+IntToBin(sreg, 8));
   end;
 
   if ComboSPICMD.ItemIndex = SPI_CMD_45 then
   begin
-    UsbAsp45_ReadSR(sreg); //Читаем регистр
+    UsbAsp45_ReadSR(sreg); //อ่าน register
     LogPrint('Sreg: '+IntToBin(sreg, 8));
   end;
 
@@ -3193,7 +3193,7 @@ try
 
     EnterProgModeI2C();
 
-    //Адрес микросхемы по чекбоксам
+    //แอดเดรสของชิปตามช่องติ๊ก
     I2C_DevAddr := SetI2CDevAddr();
 
     if CheckBox_I2C_ByteRead.Checked then I2C_ChunkSize := 1;
@@ -3260,7 +3260,7 @@ try
 
   end;
 
-  //Счетчик двигаем только если запись дошла до конца
+  //เลื่อนตัวนับต่อเมื่อการเขียนทำจนจบจริง
   if ProdSettings.SNEnabled and (ButtonCancel.Tag = 0) then
     ProdSettings.SNValue := ProdSettings.SNValue + ProdSettings.SNStep;
 
@@ -3359,7 +3359,7 @@ try
 
     EnterProgModeI2C();
 
-    //Адрес микросхемы по чекбоксам
+    //แอดเดรสของชิปตามช่องติ๊ก
     I2C_DevAddr := SetI2CDevAddr();
 
     if CheckBox_I2C_ByteRead.Checked then I2C_ChunkSize := 1;
@@ -3437,59 +3437,59 @@ try
 
   if ComboSPICMD.ItemIndex = SPI_CMD_25 then
   begin
-    UsbAsp25_ReadSR(sreg); //Читаем регистр
+    UsbAsp25_ReadSR(sreg); //อ่าน register
     LogPrint(STR_OLD_SREG+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+')'));
 
     sreg := 0;
 
-    UsbAsp25_WREN(); //Включаем разрешение записи
-    UsbAsp25_WriteSR(sreg); //Сбрасываем регистр
+    UsbAsp25_WREN(); //เปิดสิทธิ์เขียน
+    UsbAsp25_WriteSR(sreg); //ล้างค่า register
 
-    //Пока отлипнет ромка
+    //รอจนกว่าชิปจะพร้อม
     while UsbAsp25_Busy() do
     begin
       Application.ProcessMessages;
       if UserCancel then Exit;
     end;
 
-    UsbAsp25_ReadSR(sreg); //Читаем регистр
+    UsbAsp25_ReadSR(sreg); //อ่าน register
     LogPrint(STR_NEW_SREG+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+')'));
   end;
 
   if ComboSPICMD.ItemIndex = SPI_CMD_95 then
   begin
-    UsbAsp95_ReadSR(sreg); //Читаем регистр
+    UsbAsp95_ReadSR(sreg); //อ่าน register
     LogPrint(STR_OLD_SREG+IntToBin(sreg, 8));
 
     sreg := 0; //
-    UsbAsp95_WREN(); //Включаем разрешение записи
-    UsbAsp95_WriteSR(sreg); //Сбрасываем регистр
+    UsbAsp95_WREN(); //เปิดสิทธิ์เขียน
+    UsbAsp95_WriteSR(sreg); //ล้างค่า register
 
-    //Пока отлипнет ромка
+    //รอจนกว่าชิปจะพร้อม
     while UsbAsp25_Busy() do
     begin
       Application.ProcessMessages;
       if UserCancel then Exit;
     end;
 
-    UsbAsp95_ReadSR(sreg); //Читаем регистр
+    UsbAsp95_ReadSR(sreg); //อ่าน register
     LogPrint(STR_NEW_SREG+IntToBin(sreg, 8));
   end;
 
   if ComboSPICMD.ItemIndex = SPI_CMD_45 then
   begin
     UsbAsp45_DisableSP();
-    UsbAsp45_ReadSR(sreg); //Читаем регистр
+    UsbAsp45_ReadSR(sreg); //อ่าน register
     LogPrint('Sreg: '+IntToBin(sreg, 8));
 
-    UsbAsp45_ReadSectorLockdown(SLreg); //Читаем Lockdown регистр
+    UsbAsp45_ReadSectorLockdown(SLreg); //อ่าน Lockdown register
 
     s := '';
     for i:=0 to 31 do
     begin
       s := s + IntToHex(SLreg[i], 2);
     end;
-    LogPrint('Secktor Lockdown регистр: 0x'+s);
+    LogPrint('Sector Lockdown register: 0x'+s);
     if UsbAsp45_isPagePowerOfTwo() then LogPrint(STR_45PAGE_POWEROF2)
       else LogPrint(STR_45PAGE_STD);
 
@@ -3528,9 +3528,9 @@ begin
     begin
       UsbAspMulti_EnableEDI();
       UsbAspMulti_EnableEDI();
-      UsbAspMulti_ReadReg($FF00, ID.IDABH); //read EC hardware version
+      UsbAspMulti_ReadReg($FF00, ID.IDABH); //อ่านเวอร์ชันฮาร์ดแวร์ของ EC
       LogPrint('KB9012 EC Hardware version: '+IntToHex(ID.IDABH, 2));
-      UsbAspMulti_ReadReg($FF24, ID.IDABH); //read EDI version
+      UsbAspMulti_ReadReg($FF24, ID.IDABH); //อ่านเวอร์ชัน EDI
       LogPrint('KB9012 EDI version: '+IntToHex(ID.IDABH, 2));
       ExitProgMode25;
       Exit;
@@ -3600,7 +3600,7 @@ var
 begin
   if not OpenDialog.Execute then Exit;
 
-  //Двоичный файл грузим как раньше, без промежуточного буфера
+  //ไฟล์ไบนารีโหลดแบบเดิม ไม่ต้องผ่านบัฟเฟอร์กลาง
   if DetectFormat(OpenDialog.FileName) = ffBinary then
   begin
     MPHexEditorEx.LoadFromFile(OpenDialog.FileName);
@@ -3608,8 +3608,8 @@ begin
     Exit;
   end;
 
-  //Текстовые форматы разворачиваются в образ на весь размер микросхемы,
-  //пропуски остаются стертыми
+  //ไฟล์รูปแบบข้อความจะกางออกเป็นภาพเต็มขนาดชิป
+  //ช่องว่างยังคงสถานะถูกลบไว้
   ChipSize := 0;
   if IsNumber(ComboChipSize.Text) then ChipSize := StrToInt(ComboChipSize.Text);
 
@@ -3626,7 +3626,7 @@ begin
       Exit;
     end;
 
-    if ErrMsg <> '' then LogPrint(ErrMsg);   //предупреждение, но данные загружены
+    if ErrMsg <> '' then LogPrint(ErrMsg);   //เป็นแค่คำเตือน ข้อมูลโหลดสำเร็จแล้ว
 
     Stream.Position := 0;
     MPHexEditorEx.LoadFromStream(Stream);
@@ -3648,7 +3648,7 @@ begin
   FileName := SaveDialog.FileName;
   Fmt := DetectFormat(FileName);
 
-  //Формат берем из фильтра, если пользователь не дописал расширение
+  //ถ้าผู้ใช้ไม่พิมพ์นามสกุลมา ให้ดูรูปแบบจากตัวกรองที่เลือก
   if (Fmt = ffBinary) and (ExtractFileExt(FileName) = '') then
     case SaveDialog.FilterIndex of
       2: begin Fmt := ffIntelHex; FileName := FileName + '.hex'; end;
@@ -3681,7 +3681,7 @@ begin
   end;
 end;
 
-//Сохранение лога в файл
+//บันทึก log ลงไฟล์
 procedure TMainForm.SaveLogMenuItemClick(Sender: TObject);
 var
   Dlg: TSaveDialog;
@@ -3697,7 +3697,7 @@ begin
   end;
 end;
 
-//Заполнение всего буфера одним значением
+//เติมค่าเดียวกันลงทั้งบัฟเฟอร์
 procedure TMainForm.MenuFillBufferClick(Sender: TObject);
 var
   s: string;
@@ -3805,8 +3805,8 @@ begin
     LogPrint(STR_PROD_SAVED);
 end;
 
-//Серийное производство: прошиваем микросхемы одну за другой, считая
-//результат. Каждая итерация это снятие защиты, стирание, запись с проверкой
+//การผลิตเป็นชุด: เขียนชิปทีละตัวแล้วนับผลลัพธ์
+//แต่ละรอบคือ ปลดล็อก ลบ แล้วเขียนพร้อมตรวจสอบ
 procedure TMainForm.MenuRunBatchClick(Sender: TObject);
 var
   Done, Passed, Failed: integer;
@@ -3848,7 +3848,7 @@ begin
 
     Inc(Done);
 
-    //Прерывание или ошибка выставляют Tag, отдельного кода возврата нет
+    //การยกเลิกหรือข้อผิดพลาดจะตั้งค่า Tag ไว้ ไม่มีรหัสผลลัพธ์แยกต่างหาก
     if ButtonCancel.Tag <> 0 then
     begin
       Inc(Failed);
@@ -3864,9 +3864,9 @@ begin
   LogPrint(Format(STR_BATCH_SUMMARY, [Done, Passed, Failed]));
 end;
 
-//Уникальный номер микросхемы и регистры безопасности(OTP).
-//Регистры OTP можно залочить навсегда, поэтому запись сюда закрыта
-//подтверждением, а бит блокировки не трогается вообще
+//เลขประจำตัวชิปและ security register (OTP)
+//security register ล็อกถาวรได้ การเขียนจึงต้องผ่านการยืนยัน
+//และโค้ดนี้ไม่แตะบิตล็อกเลย
 procedure TMainForm.MenuSecRegClick(Sender: TObject);
 const
   SecRegAddr: array[0..2] of longword = ($001000, $002000, $003000);
@@ -3893,7 +3893,7 @@ try
 
   EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
 
-  //Уникальный номер, опкод 4Bh
+  //เลขประจำตัว opcode 4Bh
   FillByte(UID, SizeOf(UID), $FF);
   UsbAsp25_ReadUniqueID(UID);
 
@@ -3901,12 +3901,12 @@ try
   for i := 0 to 7 do s := s + IntToHex(UID[i], 2);
   LogPrint(STR_UNIQUE_ID + s);
 
-  //W74M Authentication Flash: единственная команда семейства, не требующая
-  //подписи HMAC. Все остальные(9Bh) без корневого ключа выполнить нельзя
+  //W74M Authentication Flash: คำสั่งเดียวของตระกูลนี้ที่ไม่ต้องมีลายเซ็น HMAC
+  //คำสั่งอื่น (9Bh) ทั้งหมดใช้ไม่ได้ถ้าไม่มี root key
   FillByte(Auth, SizeOf(Auth), $FF);
   UsbAsp25_ReadAuthStatus(Auth, SizeOf(Auth));
 
-  //FF во всех байтах означает, что микросхема команду не поняла
+  //ถ้าได้ FF ทุกไบต์ แปลว่าชิปไม่เข้าใจคำสั่งนี้
   Blank := True;
   for i := 0 to High(Auth) do
     if Auth[i] <> $FF then
@@ -3928,7 +3928,7 @@ try
     LogPrint(STR_AUTH_NEEDS_KEY);
   end;
 
-  //Три страницы регистров безопасности по 256 байт
+  //security register สามหน้า หน้าละ 256 ไบต์
   for i := 0 to 2 do
   begin
     FillByte(Reg, SizeOf(Reg), $FF);
@@ -3948,7 +3948,7 @@ try
     begin
       LogPrint(Format(STR_SECREG_HEADER, [i + 1, SecRegAddr[i]]));
 
-      //Печатаем по 16 байт в строке, как в редакторе
+      //พิมพ์บรรทัดละ 16 ไบต์ ให้เหมือนใน hex editor
       for j := 0 to 15 do
       begin
         s := '  ' + IntToHex(j * 16, 4) + ': ';
@@ -3966,8 +3966,8 @@ finally
 end;
 end;
 
-//Перестановка байт в 16-битных словах. Нужно для образов, снятых с шины,
-//у которой порядок байт обратный
+//สลับไบต์ในคำขนาด 16 บิต ใช้กับภาพข้อมูลที่ดึงมาจากบัสที่
+//เรียงไบต์กลับด้าน
 procedure TMainForm.MenuSwapBytesClick(Sender: TObject);
 var
   Stream: TMemoryStream;
@@ -4011,8 +4011,8 @@ begin
   LogPrint(STR_SWAP_DONE + IntToStr(Size div 2));
 end;
 
-//Сравнение буфера с содержимым микросхемы с отчетом по диапазонам,
-//в отличие от проверки, которая останавливается на первом расхождении
+//เทียบบัฟเฟอร์กับเนื้อหาในชิปแล้วรายงานเป็นช่วง ๆ
+//ต่างจาก verify ตรงที่ verify จะหยุดที่จุดแรกที่ไม่ตรง
 procedure TMainForm.MenuCompareChipClick(Sender: TObject);
 var
   ChipData, BufStream: TMemoryStream;
@@ -4199,19 +4199,19 @@ begin
        continue;
      end;
 
-     MainForm.MenuChip.Add(NewItem(UTF16ToUTF8(Node.NodeName), 0, False, True, nil, 0, '')); //Раздел(SPI, I2C...)
+     MainForm.MenuChip.Add(NewItem(UTF16ToUTF8(Node.NodeName), 0, False, True, nil, 0, '')); //หมวด (SPI, I2C...)
 
-     // Используем свойство ChildNodes
+     // ใช้พรอเพอร์ตี ChildNodes
      with Node.ChildNodes do
      try
        for j := 0 to (Count - 1) do
        begin
-         MainForm.MenuChip.Find(UTF16ToUTF8(Node.NodeName)).Add(NewItem(UTF16ToUTF8(Item[j].NodeName) ,0, False, True, nil, 0, '')); //Раздел Фирма
+         MainForm.MenuChip.Find(UTF16ToUTF8(Node.NodeName)).Add(NewItem(UTF16ToUTF8(Item[j].NodeName) ,0, False, True, nil, 0, '')); //หมวดผู้ผลิต
 
          for i := 0 to (Item[j].ChildNodes.Count - 1) do
            MainForm.MenuChip.Find(UTF16ToUTF8(Node.NodeName)).
              Find(UTF16ToUTF8(Item[j].NodeName)).
-               Add(NewItem(UTF16ToUTF8(Item[j].ChildNodes.Item[i].NodeName), 0, False, True, @MainForm.ChipClick, 0, '' )); //Чип
+               Add(NewItem(UTF16ToUTF8(Item[j].ChildNodes.Item[i].NodeName), 0, False, True, @MainForm.ChipClick, 0, '' )); //ชิป
        end;
      finally
        Free;
@@ -4235,7 +4235,7 @@ begin
   AsProgrammer.AddHW(TFT232HHardware.Create);
   AsProgrammer.AddHW(TCH347Hardware.Create);
 
-  SelectHW(CHW_BUZZPIRAT); // dreg's dirty hack
+  SelectHW(CHW_BUZZPIRAT); // ทางลัดแบบหยาบ ๆ ของ dreg
 
   LoadChipList(ChipListFile);
   RomF := TMemoryStream.Create;
@@ -4325,7 +4325,7 @@ try
 
     EnterProgModeI2c();
 
-    //Адрес микросхемы по чекбоксам
+    //แอดเดรสของชิปตามช่องติ๊ก
     I2C_DevAddr := SetI2CDevAddr();
 
     if CheckBox_I2C_ByteRead.Checked then I2C_ChunkSize := 1;
@@ -4397,8 +4397,8 @@ procedure TMainForm.FormCloseQuery(Sender: TObject; var CanClose: boolean);
 begin
   ButtonCancel.Tag := 1;
 
-  //В фоновом режиме окно остается живым, поэтому его можно закрыть прямо
-  //посреди работы с микросхемой. Сначала операция должна завершиться
+  //ในโหมดเบื้องหลังหน้าต่างยังใช้งานได้ จึงปิดได้ทั้งที่ยังคุยกับชิปอยู่
+  //ต้องรอให้งานที่ทำอยู่จบก่อน
   if OperationRunning then
   begin
     CanClose := False;
@@ -4503,7 +4503,7 @@ try
 
     EnterProgModeI2C();
 
-    //Адрес микросхемы по чекбоксам
+    //แอดเดรสของชิปตามช่องติ๊ก
     I2C_DevAddr := SetI2CDevAddr();
 
     if UsbAspI2C_BUSY(I2C_DevAddr) then
@@ -4558,9 +4558,9 @@ begin
   VerifyFlash(true);
 end;
 
-//Стирание только тех секторов, которые попадают в диапазон
-//Начало - "Начальный адрес", длина - размер данных в редакторе
-//Tag пункта меню задает размер сектора, 0 - взять из chiplist.xml/SFDP
+//ลบเฉพาะเซกเตอร์ที่อยู่ในช่วงที่กำหนด
+//จุดเริ่มมาจากช่อง Start address ความยาวมาจากขนาดข้อมูลใน hex editor
+//ค่า Tag ของเมนูกำหนดขนาดเซกเตอร์ ถ้าเป็น 0 จะเอาจาก chiplist.xml หรือ SFDP
 procedure TMainForm.MenuEraseRangeClick(Sender: TObject);
 var
   SectorSize, RangeLen, StartAddr: cardinal;
@@ -4590,7 +4590,7 @@ try
   RangeLen := MPHexEditorEx.DataSize;
   if RangeLen = 0 then RangeLen := SectorSize;
 
-  //Вызов из "умной записи" уже подтвержден пользователем
+  //ถ้าเรียกมาจาก smart write ผู้ใช้ยืนยันไปแล้ว ไม่ต้องถามซ้ำ
   if Sender <> MenuSmartWrite then
     if MessageDlg('AsProgrammer', STR_ERASE_RANGE_Q + LineEnding +
        '0x' + IntToHex(StartAddr, 8) + ' + ' + IntToStr(RangeLen) + ' bytes',
@@ -4620,7 +4620,7 @@ finally
 end;
 end;
 
-//Снять защиту -> стереть только нужные сектора -> записать -> проверить
+//ปลดล็อก -> ลบเฉพาะเซกเตอร์ที่ต้องใช้ -> เขียน -> ตรวจสอบ
 procedure TMainForm.MenuSmartWriteClick(Sender: TObject);
 var
   CheckTemp: boolean;
@@ -4657,7 +4657,7 @@ begin
   MenuAutoCheck.Checked := CheckTemp;
 end;
 
-//Переключение фонового режима выполнения операций
+//สลับโหมดรันงานบน thread เบื้องหลัง
 procedure TMainForm.MenuBackgroundOpsClick(Sender: TObject);
 begin
   UseWorkerThread := MenuBackgroundOps.Checked;
@@ -4668,7 +4668,7 @@ begin
   ApplyTheme(MenuDarkTheme.Checked);
 end;
 
-//Контрольные суммы содержимого редактора
+//ค่า checksum ของข้อมูลใน hex editor
 procedure TMainForm.MenuChecksumClick(Sender: TObject);
 var
   Stream: TMemoryStream;
@@ -4708,7 +4708,7 @@ begin
            '  SUM16=' + IntToHex(sum32 and $FFFF, 4));
 end;
 
-//Определение параметров микросхемы через SFDP (JESD216)
+//อ่านสเปกของชิปผ่าน SFDP (JESD216)
 procedure TMainForm.MenuSFDPDetectClick(Sender: TObject);
 var
   Info: TSFDPInfo;
@@ -4749,7 +4749,7 @@ try
       LogPrint('  Erase type ' + IntToStr(i) + ': ' + IntToStr(Info.EraseTypes[i].Size) +
                ' bytes, opcode 0x' + IntToHex(Info.EraseTypes[i].Opcode, 2));
 
-  //Заполняем настройки. Порядок важен: RadioSPIChange очищает поля
+  //เติมค่าลงช่องต่าง ๆ ลำดับสำคัญ เพราะ RadioSPIChange จะล้างค่าทิ้ง
   ComboSPICMD.ItemIndex := SPI_CMD_25;
   RadioSPI.Checked := True;
   RadioSPIChange(MainForm);
@@ -4791,16 +4791,16 @@ var
 begin
   if XMLfile <> nil then
   begin
-    //Удаляем старую запись
+    //ลบรายการเดิมทิ้ง
     Node := XMLfile.DocumentElement.FindNode('locale');
     if (Node <> nil) then XMLfile.DocumentElement.RemoveChild(Node);
-    //Создаем новую
+    //แล้วสร้างใหม่
     Node:= XMLfile.DocumentElement;
     ParentNode := XMLfile.CreateElement('locale');
     TDOMElement(ParentNode).SetAttribute('lang', CurrentLang);
     Node.Appendchild(parentNode);
 
-    //Удаляем старую запись
+    //ลบรายการเดิมทิ้ง
     Node := XMLfile.DocumentElement.FindNode('options');
     if (Node <> nil) then XMLfile.DocumentElement.RemoveChild(Node);
 
@@ -4889,7 +4889,7 @@ begin
     if MainForm.MenuHWFT232H.Checked then
       TDOMElement(ParentNode).SetAttribute('hw', 'ft232h');
 
-    //Автонумерация и партия
+    //เลขรันนิ่งและการผลิตเป็นชุด
     TDOMElement(ParentNode).SetAttribute('sn_enabled', BoolToStr(ProdSettings.SNEnabled, '1', '0'));
     TDOMElement(ParentNode).SetAttribute('sn_address', IntToHex(ProdSettings.SNAddress, 6));
     TDOMElement(ParentNode).SetAttribute('sn_length', IntToStr(ProdSettings.SNLength));
@@ -4961,7 +4961,7 @@ begin
         MainForm.MenuAutoBackup.Checked :=
           Node.Attributes.GetNamedItem('auto_backup').NodeValue = '1';
 
-      //Автонумерация и партия
+      //เลขรันนิ่งและการผลิตเป็นชุด
       if Node.Attributes.GetNamedItem('sn_enabled') <> nil then
         ProdSettings.SNEnabled := Node.Attributes.GetNamedItem('sn_enabled').NodeValue = '1';
 
