@@ -73,6 +73,27 @@ Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-
 
 ---
 
+## Command line
+
+Any `--switch` puts the program into command line mode: the window is never
+shown, output goes to the calling console, and the exit code is 0 on success.
+The work runs through the same code as the buttons, so there is no second
+implementation to keep in step.
+
+```
+AsProgrammer.exe --detect
+AsProgrammer.exe --read dump.bin  --chip W25Q64BV
+AsProgrammer.exe --write fw.hex   --chip W25Q64BV --erase --verify
+AsProgrammer.exe --verify fw.bin  --chip W25Q64BV
+AsProgrammer.exe --read dump.bin  --sfdp
+AsProgrammer.exe --help
+```
+
+`--hw` forces a programmer (`ch341`, `ch347`, `ft232h`, `usbasp`, `avrisp`);
+without it the one that is plugged in is used. `--sfdp` takes the chip
+parameters from the chip itself instead of the database. File format follows
+the extension, so `.bin`, `.hex` and S-record all work.
+
 ## Runtime files
 
 The `.exe` alone will not start. These must sit next to it — the DLL imports are static, so Windows

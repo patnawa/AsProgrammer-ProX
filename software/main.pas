@@ -312,6 +312,12 @@ type
   procedure SyncUI_ICParam();
   function UserCancel(): boolean;
 
+  //ใช้จากโหมดบรรทัดคำสั่ง
+  procedure SelectHW(programmer: THardwareList);
+  procedure SetHardwareMenuCheck(HW: THardwareList);
+  procedure PollProgrammer(Announce: boolean);
+  function SelectChipAny(const AName: string): boolean;
+
 const
   SPI_CMD_25             = 0;
   SPI_CMD_45             = 1;
@@ -360,6 +366,10 @@ var
   Arduino_COMPort: string;
   Arduino_BaudRate: integer = 1000000;
   Buzzpirat_COMPort: string;
+
+  //สถานะที่วาดเป็นไฟบอกสถานะในแผงด้านซ้าย
+  ProgrammerPresent: boolean = False;
+  ChipDetected: boolean = False;
 implementation
 
 
@@ -398,9 +408,6 @@ var
   //เลขรันนิ่งอัตโนมัติและการผลิตเป็นชุด
   ProdSettings: TProdSettings;
 
-  //สถานะที่วาดเป็นไฟบอกสถานะในแผงด้านซ้าย
-  ProgrammerPresent: boolean = False;
-  ChipDetected: boolean = False;
 
   //สถานะหน้าจอที่อ่านเก็บไว้บน thread หลักก่อนเริ่มงาน
   //thread เบื้องหลังต้องอ่านจากตรงนี้ ห้ามอ่านจาก control โดยตรง
@@ -4479,6 +4486,37 @@ begin
     LogPrint(STR_PROD_SAVED);
 end;
 
+//บันทึกผลการผลิตทีละชิ้นลงไฟล์ CSV เปิดด้วย Excel ได้เลย
+//งานผลิตจริงต้องตามรอยได้ว่าชิ้นไหนผ่านหรือไม่ผ่าน และได้เลขอะไรไป
+procedure LogProduction(UnitNo: integer; Passed: boolean);
+const
+  FileName = 'production.csv';
+var
+  F: TextFile;
+  IsNew: boolean;
+begin
+  try
+    IsNew := not FileExists(FileName);
+    AssignFile(F, FileName);
+    if IsNew then Rewrite(F) else Append(F);
+    try
+      if IsNew then
+        WriteLn(F, 'timestamp,unit,chip,id,serial,result');
+
+      WriteLn(F, Format('%s,%d,%s,%s,%s,%s', [
+        FormatDateTime('yyyy-mm-dd hh:nn:ss', Now),
+        UnitNo,
+        CurrentICParam.Name,
+        CurrentICParam.ID,
+        BoolToStr(ProdSettings.SNEnabled, SerialToStr(ProdSettings), ''),
+        BoolToStr(Passed, 'PASS', 'FAIL')]));
+    finally
+      CloseFile(F);
+    end;
+  except
+    LogPrint('Cannot write production.csv');
+  end;
+end;
 //การผลิตเป็นชุด: เขียนชิปทีละตัวแล้วนับผลลัพธ์
 //แต่ละรอบคือ ปลดล็อก ลบ แล้วเขียนพร้อมตรวจสอบ
 procedure TMainForm.MenuRunBatchClick(Sender: TObject);
@@ -4527,11 +4565,13 @@ begin
     begin
       Inc(Failed);
       LogPrint(Format(STR_BATCH_UNIT_FAIL, [Done]));
+      LogProduction(Done, False);
     end
     else
     begin
       Inc(Passed);
       LogPrint(Format(STR_BATCH_UNIT_OK, [Done]));
+      LogProduction(Done, True);
     end;
   end;
 
