@@ -27,3 +27,10 @@ serials.log
 
 # Release output
 release/
+
+# Third party binary kept locally for reference, deliberately not distributed.
+# A Linux ELF with no source and no clear licence has no place in an MIT repo,
+# and nothing here needs it: tools/import_ezp.py reads the same .Dat format and
+# fixes the three bugs this has (ids printed with %hhx lose their leading zeros,
+# GBK part names are not decoded, and it reads past the end of the file).
+ezp_parser
