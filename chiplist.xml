@@ -1030,6 +1030,9 @@
       <_24C256 page="64" size="32768" addrtype="5"/>
       <_24C512 page="128" size="65536" addrtype="5"/>
       <_24C1024 page="128" size="131072" addrtype="6"/>
+      <_24LC1025 page="128" size="131072" addrtype="7"/>
+      <_24AA1025 page="128" size="131072" addrtype="7"/>
+      <_24FC1025 page="128" size="131072" addrtype="7"/>
     </_24Cxxx>
   </I2C>
   <Microwire>

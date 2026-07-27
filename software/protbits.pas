@@ -41,6 +41,24 @@ function ProtectedRange(const P: TProtInfo; ChipSize: cardinal;
 //ประกอบ SR1 กลับจากค่าที่แก้แล้ว
 function EncodeProtSR1(const P: TProtInfo): byte;
 
+type
+  //ตัวอ่านบิตล็อกของบล็อกหนึ่งบล็อก แยกออกจากฮาร์ดแวร์เพื่อให้ทดสอบได้
+  //คืน False เมื่ออ่านไม่สำเร็จ ซึ่งไม่เหมือนกับอ่านได้ว่าไม่ล็อก
+  TBlockLockProc = function(Addr: cardinal; out Locked: boolean): boolean;
+
+//หาว่าช่วงที่จะแตะทับกับบล็อกที่ถูกล็อกไว้หรือไม่ เมื่อชิปตั้ง WPS = 1
+//
+//WPS = 1 แปลว่าบิต BP ใน status register ไม่มีความหมายแล้ว พื้นที่ที่ถูก
+//ล็อกมาจากบิตรายบล็อกซึ่งต้องอ่านทีละบล็อกด้วย 3Dh เดิมโปรแกรมได้แค่บอกว่า
+//ตีความไม่ได้แล้วปล่อยผ่าน ซึ่งแปลว่าชิปกลุ่มนี้ไม่มีการ์ดกันเขียนเลย
+//
+//สแกนเฉพาะบล็อกที่ทับกับช่วงที่ขอ ไม่ต้องไล่ทั้งชิป
+//Readable บอกว่าอ่านบิตล็อกได้อย่างน้อยหนึ่งบล็อกหรือไม่ ถ้าอ่านไม่ได้เลย
+//แปลว่าไม่รู้ ผู้เรียกต้องบอกผู้ใช้แบบนั้น ห้ามสรุปว่าปลอดภัย
+function BlockLockConflict(Reader: TBlockLockProc;
+  ChipSize, BlockSize, StartAddr, Len: cardinal;
+  out LockedAt: cardinal; out Readable: boolean): boolean;
+
 implementation
 
 function DecodeProt(SR1, SR2: byte): TProtInfo;
@@ -132,6 +150,42 @@ begin
   end;
 
   Result := ToAddr >= FromAddr;
+end;
+
+function BlockLockConflict(Reader: TBlockLockProc;
+  ChipSize, BlockSize, StartAddr, Len: cardinal;
+  out LockedAt: cardinal; out Readable: boolean): boolean;
+var
+  Addr, EndAddr: int64;
+  Locked: boolean;
+begin
+  Result := False;
+  Readable := False;
+  LockedAt := 0;
+
+  if (Reader = nil) or (ChipSize = 0) or (BlockSize = 0) or (Len = 0) then Exit;
+  if StartAddr >= ChipSize then Exit;
+
+  //บวกด้วย int64 เพราะ StartAddr + Len ล้น cardinal ได้
+  EndAddr := int64(StartAddr) + int64(Len);
+  if EndAddr > ChipSize then EndAddr := ChipSize;
+
+  //เริ่มที่ต้นบล็อกที่แอดเดรสเริ่มตกอยู่ เพราะบิตล็อกคุมทั้งบล็อก
+  Addr := (int64(StartAddr) div BlockSize) * BlockSize;
+
+  while Addr < EndAddr do
+  begin
+    if Reader(cardinal(Addr), Locked) then
+    begin
+      Readable := True;
+      if Locked then
+      begin
+        LockedAt := cardinal(Addr);
+        Exit(True);
+      end;
+    end;
+    Inc(Addr, BlockSize);
+  end;
 end;
 
 function ProtToText(const P: TProtInfo): string;

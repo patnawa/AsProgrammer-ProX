@@ -57,7 +57,8 @@ Step "checking the chip tables"
 $python = (Get-Command python -ErrorAction SilentlyContinue)
 if ($python) {
   & $python.Source "$root\tools\validate_chiplist.py" "$root\chiplist.xml" `
-    $(if (Test-Path "$root\chiplist-flashrom.xml") { "$root\chiplist-flashrom.xml" })
+    $(if (Test-Path "$root\chiplist-flashrom.xml") { "$root\chiplist-flashrom.xml" }) `
+    $(if (Test-Path "$root\chiplist-ezp.xml") { "$root\chiplist-ezp.xml" })
   if ($LASTEXITCODE -ne 0) { Die "the chip tables have errors" }
 } else {
   Write-Host "    python not found, skipped" -ForegroundColor Yellow
@@ -94,14 +95,15 @@ Run-Suite "unittests" $logicDir @(
   "$root\software\sfdp.pas", "$root\software\jedec.pas",
   "$root\software\serialnum.pas", "$root\software\protbits.pas",
   "$root\software\opresult.pas", "$root\software\prodlog.pas",
-  "$root\software\fileformats.pas")
+  "$root\software\fileformats.pas", "$root\software\flashops.pas")
 
-# the real SPI 25 protocol layer, driven through a programmer that is all in memory
+# the real SPI 25 and I2C protocol layers, driven through a programmer that is
+# all in memory
 $hwDir = Join-Path $env:TEMP "aspx-tests-hw"
 Run-Suite "hwtests" $hwDir @(
   "$root\tests\hwtests.lpr", "$root\tests\mockhw.pas",
   "$root\software\spi25.pas", "$root\software\basehw.pas",
-  "$root\software\utilfunc.pas")
+  "$root\software\utilfunc.pas", "$root\software\i2c.pas")
 
 # --- the program ---
 Step "building AsProgrammer.exe"
@@ -122,6 +124,7 @@ New-Item -ItemType Directory -Force $out | Out-Null
 Copy-Item $exe $out
 Copy-Item "$root\chiplist.xml","$root\settings.xml" $out
 if (Test-Path "$root\chiplist-flashrom.xml") { Copy-Item "$root\chiplist-flashrom.xml" $out }
+if (Test-Path "$root\chiplist-ezp.xml") { Copy-Item "$root\chiplist-ezp.xml" $out }
 Copy-Item "$root\LICENSE","$root\README.md" $out
 Copy-Item "$root\scripts" $out -Recurse
 Copy-Item "$root\software\lang" $out -Recurse

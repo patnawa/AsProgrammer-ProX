@@ -16,7 +16,7 @@ program unittests;
 {$mode objfpc}{$H+}
 
 uses
-  SysUtils, sfdp, jedec, serialnum, spi25, protbits, opresult, prodlog;
+  SysUtils, sfdp, jedec, serialnum, spi25, protbits, opresult, prodlog, flashops;
 
 var
   Failures: integer = 0;
@@ -446,6 +446,193 @@ begin
   Check('random mode varies between calls', SerialToStr(S) <> SerialToStr(S));
 end;
 
+// ------------------------------------------------- individual block locks
+
+var
+  FakeLockMap: array[0..511] of boolean;
+  FakeLockReadable: boolean = True;
+
+//ตัวอ่านปลอม บล็อกละ 64K เพื่อทดสอบการสแกนโดยไม่ต้องมีชิป
+function FakeLockReader(Addr: cardinal; out Locked: boolean): boolean;
+begin
+  Locked := False;
+  if not FakeLockReadable then Exit(False);
+  Locked := FakeLockMap[(Addr div 65536) and 511];
+  Result := True;
+end;
+
+procedure TestBlockLocks;
+const
+  CHIP = 8 * 1024 * 1024;
+  BLK  = 64 * 1024;
+var
+  LockedAt: cardinal;
+  Readable, Hit: boolean;
+  i: integer;
+begin
+  WriteLn('Block locks: a WPS part is checked block by block');
+
+  for i := 0 to High(FakeLockMap) do FakeLockMap[i] := False;
+  FakeLockReadable := True;
+
+  Hit := BlockLockConflict(@FakeLockReader, CHIP, BLK, 0, CHIP, LockedAt, Readable);
+  Check('nothing locked means no conflict', not Hit);
+  Check('and the bits were readable', Readable);
+
+  //ล็อกบล็อกที่ 2 แล้วขอเขียนทับพอดี
+  FakeLockMap[2] := True;
+  Hit := BlockLockConflict(@FakeLockReader, CHIP, BLK, $20000, 100, LockedAt, Readable);
+  Check('a locked block is found', Hit);
+  Check('and it is named', LockedAt = $20000);
+
+  //ขอเขียนที่อื่นซึ่งไม่ทับบล็อกที่ล็อก ต้องผ่าน
+  Hit := BlockLockConflict(@FakeLockReader, CHIP, BLK, $50000, 100, LockedAt, Readable);
+  Check('an untouched block is not a conflict', not Hit);
+
+  //แอดเดรสกลางบล็อกต้องนับทั้งบล็อก เพราะบิตล็อกคุมทั้งบล็อก
+  Hit := BlockLockConflict(@FakeLockReader, CHIP, BLK, $2F000, 16, LockedAt, Readable);
+  Check('an address inside a locked block still conflicts', Hit);
+
+  //ช่วงที่คร่อมหลายบล็อกต้องเจอตัวที่ล็อกด้วย
+  Hit := BlockLockConflict(@FakeLockReader, CHIP, BLK, 0, $30000, LockedAt, Readable);
+  Check('a range spanning into a locked block conflicts', Hit);
+  Check('the first locked block is reported', LockedAt = $20000);
+
+  //ความยาวที่ล้น cardinal ต้องถูกตัด ไม่ใช่วนกลับ
+  Hit := BlockLockConflict(@FakeLockReader, CHIP, BLK, $7F0000, $FFFFFFFF,
+                           LockedAt, Readable);
+  Check('an overflowing length does not wrap', not Hit);
+
+  //อ่านบิตไม่ได้เลยแปลว่าไม่รู้ ห้ามสรุปว่าปลอดภัย
+  FakeLockReadable := False;
+  Hit := BlockLockConflict(@FakeLockReader, CHIP, BLK, 0, CHIP, LockedAt, Readable);
+  Check('an unreadable chip reports no conflict', not Hit);
+  Check('but says so instead of claiming it is safe', not Readable);
+end;
+
+// ------------------------------------------------------------ flashops
+
+procedure TestFirstChunk;
+begin
+  WriteLn('Write planning: the first chunk stops at the page boundary');
+
+  //นี่คือบั๊กตัวจริงที่เคยทำให้โปรแกรมค้าง สูตรเดิมคืน 0 ตรงนี้
+  //แล้ว Address ไม่ขยับ ลูปเขียนจึงวนไม่รู้จบ
+  Check('an aligned start gets a whole page', FirstChunkSize($1000, 256) = 256);
+  Check('address zero gets a whole page', FirstChunkSize(0, 256) = 256);
+  Check('64 KiB boundary gets a whole page', FirstChunkSize($10000, 256) = 256);
+  Check('1 MiB boundary gets a whole page', FirstChunkSize($100000, 256) = 256);
+
+  //ครึ่งเพจต้องเขียนแค่ส่วนที่เหลือจนถึงขอบ
+  Check('an unaligned start stops at the boundary',
+        FirstChunkSize($1234, 256) = 204);
+  Check('one byte before the boundary writes one byte',
+        FirstChunkSize($10FF, 256) = 1);
+  Check('a big page works the same', FirstChunkSize($800, 512) = 512);
+
+  //ห้ามคืนศูนย์เด็ดขาด ไม่ว่าจะป้อนอะไรเข้ามา
+  Check('never zero for a real page size',
+        (FirstChunkSize($1000, 256) > 0) and (FirstChunkSize($1001, 256) > 0) and
+        (FirstChunkSize($FFFFFF, 256) > 0));
+end;
+
+procedure TestAlignErase;
+var
+  F, T: cardinal;
+begin
+  WriteLn('Erase planning: the range is rounded out to whole sectors');
+
+  Check('a range inside one sector covers that sector',
+        AlignEraseRange($1800, $100, 4096, 8 * 1024 * 1024, F, T) and
+        (F = $1000) and (T = $2000));
+
+  Check('a range crossing a boundary covers both sectors',
+        AlignEraseRange($1FFF, 2, 4096, 8 * 1024 * 1024, F, T) and
+        (F = $1000) and (T = $3000));
+
+  Check('the end is clamped to the chip',
+        AlignEraseRange($7FF000, $8000, 4096, 8 * 1024 * 1024, F, T) and
+        (T = 8 * 1024 * 1024));
+
+  //ความยาวที่บวกแล้วล้น cardinal ต้องไม่กลายเป็นช่วงสั้น ๆ ที่ดูปกติ
+  Check('a length that would overflow is clamped, not wrapped',
+        AlignEraseRange($7FF000, $FFFFFFFF, 4096, 8 * 1024 * 1024, F, T) and
+        (F = $7FF000) and (T = 8 * 1024 * 1024));
+
+  Check('a start past the end is refused',
+        not AlignEraseRange(8 * 1024 * 1024, 4096, 4096, 8 * 1024 * 1024, F, T));
+  Check('a zero length is refused',
+        not AlignEraseRange(0, 0, 4096, 8 * 1024 * 1024, F, T));
+  Check('a zero sector size is refused',
+        not AlignEraseRange(0, 4096, 0, 8 * 1024 * 1024, F, T));
+end;
+
+procedure TestPlanUniform;
+var
+  Plan: TErasePlan;
+begin
+  WriteLn('Erase planning: one sector size for the whole chip');
+
+  Check('four sectors are planned',
+        PlanEraseUniform($1000, 4096 * 4, 4096, 8 * 1024 * 1024, $20, Plan) and
+        (Length(Plan) = 4));
+  Check('they start where they should', Plan[0].Addr = $1000);
+  Check('they run on from each other', Plan[3].Addr = $1000 + 3 * 4096);
+  Check('they all use the given opcode',
+        (Plan[0].Opcode = $20) and (Plan[3].Opcode = $20));
+  Check('the total is the range', PlanTotalBytes(Plan) = 4096 * 4);
+end;
+
+procedure TestPlanSectorMap;
+var
+  Info: TSFDPInfo;
+  Plan: TErasePlan;
+  F, T: cardinal;
+  i, Small, Big: integer;
+begin
+  WriteLn('Erase planning: a boot block part is erased by its own map');
+  SetFakeChip(fcBootBlock);
+  Check('detected', SFDPDetect(Info));
+
+  //ลบทั้งชิป ช่วงหัวและท้ายเป็นบล็อกเล็กที่ลบได้แค่ 4K
+  //ส่วนตรงกลางลบได้ทีละ 64K ซึ่งใช้คำสั่งน้อยกว่ากันสิบหกเท่า
+  Check('a whole chip erase is planned',
+        PlanEraseSFDP(Info, 0, 8 * 1024 * 1024, 8 * 1024 * 1024, Plan));
+  Check('it covers the whole chip', PlanTotalBytes(Plan) = 8 * 1024 * 1024);
+  Check('it starts at zero and ends at the top',
+        PlanBounds(Plan, F, T) and (F = 0) and (T = 8 * 1024 * 1024));
+
+  Small := 0;
+  Big := 0;
+  for i := 0 to High(Plan) do
+  begin
+    if Plan[i].Size = 4096 then Inc(Small);
+    if Plan[i].Size = 65536 then Inc(Big);
+  end;
+
+  //หัว 64K และท้าย 64K อย่างละ 16 เซกเตอร์ 4K ที่เหลือ 126 บล็อก 64K
+  Check('the boot regions use 4K sectors', Small = 32);
+  Check('the middle uses 64K blocks', Big = 126);
+  Check('158 commands instead of 2048', Length(Plan) = 158);
+
+  Check('the small sectors carry 20h', Plan[0].Opcode = $20);
+  Check('the big blocks carry D8h', Plan[16].Opcode = $D8);
+  Check('the big blocks start after the boot region', Plan[16].Addr = $10000);
+
+  //ขอลบแค่ไม่กี่ไบต์กลางชิป ต้องไม่ลามไปลบทั้งบล็อก 64K
+  //ถ้าเซกเตอร์ 4K ใช้ได้ตรงนั้น
+  Check('a small request in the middle stays small',
+        PlanEraseSFDP(Info, $100000, 100, 8 * 1024 * 1024, Plan));
+  Check('it is one 4K sector',
+        (Length(Plan) = 1) and (Plan[0].Size = 4096) and (Plan[0].Addr = $100000));
+
+  //ชิปที่ไม่มีแผนผังต้องบอกว่าวางแผนแบบนี้ไม่ได้ ผู้เรียกจะได้ถอยไปใช้แบบเดิม
+  SetFakeChip(fcWinbond64);
+  Check('detected', SFDPDetect(Info));
+  Check('a uniform part has no map to follow',
+        not PlanEraseSFDP(Info, 0, 8 * 1024 * 1024, 8 * 1024 * 1024, Plan));
+end;
+
 begin
   WriteLn('AsProgrammer ProX unit tests');
   WriteLn;
@@ -463,6 +650,11 @@ begin
   TestJobFile;
   TestJedec;
   TestSerial;
+  TestBlockLocks;
+  TestFirstChunk;
+  TestAlignErase;
+  TestPlanUniform;
+  TestPlanSectorMap;
 
   WriteLn;
   if Failures = 0 then

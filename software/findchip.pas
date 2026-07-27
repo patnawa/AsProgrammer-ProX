@@ -207,6 +207,16 @@ begin
                else
                  Main.CurrentICParam.Note := '';
 
+               //แรงดันใช้งานของชิป เช่น 1.8
+               //
+               //เดิมดูจากชื่อรุ่นว่ามี 1.8V อยู่ในนั้นหรือไม่ ซึ่งพลาดชิป 1.8V
+               //ที่ชื่อไม่ได้บอก เช่น W25Q64FW MX25U6435F GD25LQ32
+               //ซึ่งเป็นกลุ่มที่พังเพราะจ่ายไฟเกินบ่อยที่สุด
+               if ChipNode.Attributes.GetNamedItem('vcc') <> nil then
+                 Main.CurrentICParam.Vcc := UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('vcc').NodeValue)
+               else
+                 Main.CurrentICParam.Vcc := '';
+
                //ต้องมี id ไว้ตรวจก่อนเขียนและก่อนลบ
                if ChipNode.Attributes.GetNamedItem('id') <> nil then
                  Main.CurrentICParam.ID := UpperCase(UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('id').NodeValue))

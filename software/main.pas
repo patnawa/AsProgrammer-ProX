@@ -16,7 +16,7 @@ uses
   XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
   utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, serialnum, jedec, protbits,
-  opresult, prodlog, chipsave,
+  opresult, prodlog, chipsave, flashops,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
 
@@ -351,6 +351,10 @@ const
   ChipListFile2Name      = 'chiplist-flashrom.xml';
   //ชิปที่ผู้ใช้เพิ่มเอง อัปเดตโปรแกรมทับแล้วไม่หาย
   ChipListFile3Name      = UserChipListName;
+  //ตารางชิปที่แปลงมาจากฐานข้อมูลของเครื่องโปรแกรม EZP ด้วย tools/import_ezp.py
+  //เป็นข้อมูลของบุคคลที่สาม จึงแยกไฟล์ไว้แบบเดียวกับ chiplist-flashrom.xml
+  //ลบไฟล์นี้ทิ้งแล้วโปรแกรมก็ยังทำงานได้ตามปกติ
+  ChipListFile4Name      = 'chiplist-ezp.xml';
   SettingsFileName       = 'settings.xml';
   ScriptsPath            = 'scripts'+DirectorySeparator;
 
@@ -367,6 +371,7 @@ type
     SectorOpcode: byte;  //opcode สำหรับลบเซกเตอร์ ถ้าเป็น 0 จะเลือกให้ตามขนาด
     ID: string;          //id จาก chiplist.xml ใช้ตรวจก่อนเริ่มทำงานกับชิป
     Note: string;        //หมายเหตุจาก chiplist.xml เช่นข้อควรระวังเรื่องแรงดัน
+    Vcc: string;         //แรงดันใช้งานจาก chiplist.xml เช่น 1.8 ว่างคือไม่ระบุ
 
     Script: string;
   end;
@@ -377,6 +382,7 @@ var
   ChipListFile: TXMLDocument;
   ChipListFile2: TXMLDocument;
   ChipListFile3: TXMLDocument;
+  ChipListFile4: TXMLDocument;
   SettingsFile: TXMLDocument;
   CurrentICParam: TCurrentICParam;
   ScriptEngine: TPasCalc;
@@ -636,6 +642,7 @@ begin
   ChipListFile := nil;
   ChipListFile2 := nil;
   ChipListFile3 := nil;
+  ChipListFile4 := nil;
   SettingsFile := nil;
   if FileExists(ChipListFileName) then
   begin
@@ -674,6 +681,19 @@ begin
       begin
         ShowMessage(E.Message);
         ChipListFile3 := nil;
+      end;
+    end;
+  end;
+
+  if FileExists(ChipListFile4Name) then
+  begin
+    try
+      ReadXMLFile(ChipListFile4, ChipListFile4Name);
+    except
+      on E: EXMLReadError do
+      begin
+        ShowMessage(E.Message);
+        ChipListFile4 := nil;
       end;
     end;
   end;
@@ -1339,16 +1359,36 @@ const
 //คืน false เมื่อผู้ใช้ยกเลิก หรือเมื่อรอเกินเวลาที่กำหนด
 //เดิมไม่มีเวลาหมดอายุเลย ชิปที่ไม่ตอบสนองจะทำให้โปรแกรมวนรอไม่รู้จบ
 function WaitNotBusy25(TimeoutMs: integer): boolean;
+const
+  //ซ็อกเก็ตว่าง สายขาด หรือชิปไม่ได้รับไฟ จะอ่าน status register ได้ FF ล้วน
+  //ซึ่งบิต 0 ติดอยู่ แปลว่ายุ่งตลอดกาล ชิปที่ทำงานอยู่จริงไม่เคยค้างที่ FF
+  //นานขนาดนี้ ระหว่างลบหรือเขียนค่าปกติคือ 03h
+  //
+  //เดิมรอจนหมดเวลาแล้วรายงานว่าชิปยุ่ง ซึ่งบนคำสั่งลบทั้งชิปคือรอสิบนาที
+  //เพื่อจะได้คำตอบที่ชี้ไปผิดเรื่อง
+  NOT_RESPONDING_MS = 500;
 var
   Started: TDateTime;
+  sreg: byte;
+  AllOnes: boolean;
 begin
   Result := True;
   Started := Now;
+  AllOnes := True;
 
-  while UsbAsp25_Busy() do
+  while UsbAsp25_BusyEx(sreg) do
   begin
+    if sreg <> $FF then AllOnes := False;
+
     OpProcessMessages;
     if UserCancel then Exit(False);
+
+    if AllOnes and (MilliSecondsBetween(Now, Started) > NOT_RESPONDING_MS) then
+    begin
+      LogPrint(STR_NOT_RESPONDING);
+      OpFail('no chip is answering: the status register reads back as FF');
+      Exit(False);
+    end;
 
     if MilliSecondsBetween(Now, Started) > TimeoutMs then
     begin
@@ -1360,18 +1400,74 @@ begin
   end;
 end;
 
+//ตาราง SFDP ของชิปตัวที่เสียบอยู่ เก็บไว้ทั้งก้อน เพราะทั้งแผนผังเซกเตอร์
+//และ opcode ชุดแอดเดรส 4 ไบต์ ต้องใช้ตอนวางแผนลบและตอนเขียน
+//ล้างทุกครั้งที่เปลี่ยนชิปหรือเปลี่ยนซ็อกเก็ต พร้อมกับ Reset25ChipHints
+var
+  CurrentSFDP: TSFDPInfo;
+  CurrentSFDPValid: boolean = False;
+
+procedure ForgetSFDP;
+begin
+  FillChar(CurrentSFDP, SizeOf(CurrentSFDP), 0);
+  CurrentSFDPValid := False;
+end;
+
+//--- โหมดแอดเดรส 4 ไบต์ ---
+//
+//การสลับโหมดด้วย B7h ทิ้งสถานะไว้ในตัวชิป ถ้างานล้มกลางคัน สายหลุด หรือ
+//โปรแกรมตาย แล้วไม่ได้สลับกลับ ชิปจะค้างอยู่ที่โหมด 4 ไบต์ เครื่องมือตัวถัดไป
+//ที่มาอ่านด้วยแอดเดรส 3 ไบต์จะได้ข้อมูลผิดทั้งก้อนโดยไม่มีอะไรบอก
+//
+//ทางที่ปลอดภัยกว่าคือใช้ opcode ชุด 4 ไบต์ของชิปเอง (13h อ่าน 12h เขียน)
+//ซึ่งบอกแอดเดรสครบสี่ไบต์มากับคำสั่งเลย ไม่มีสถานะค้างอยู่ที่ไหน
+//ตาราง 4BAIT ของ SFDP เป็นคนบอกว่าชิปตัวนี้มี opcode ชุดนั้นหรือไม่
+var
+  Mode4BActive: boolean = False;
+
+function Native4BRead: boolean;
+begin
+  Result := Chip25Read4BOpcode <> 0;
+end;
+
+function Native4BWrite: boolean;
+begin
+  Result := Chip25PageProg4BOpcode <> 0;
+end;
+
+procedure Enter4B;
+begin
+  if Mode4BActive then Exit;
+  UsbAsp25_EN4B();
+  Mode4BActive := True;
+end;
+
+//เรียกซ้ำได้ปลอดภัย ใช้ในบล็อก finally เสมอ
+procedure Leave4B;
+begin
+  if not Mode4BActive then Exit;
+  UsbAsp25_EX4B();
+  Mode4BActive := False;
+end;
+
 //ลบเฉพาะเซกเตอร์ที่อยู่ในช่วง StartAddress ถึง StartAddress+RangeLen-1
 //ขอบถูกปัดให้ตรงเซกเตอร์ เพราะลบครึ่งเซกเตอร์ไม่ได้
 function EraseRange25(StartAddress, RangeLen, SectorSize: cardinal; Opcode: byte): boolean;
 const
   FLASH_SIZE_128MBIT = 16777216;
 var
-  ChipSize, Addr, EndAddr, Total, Idx: cardinal;
-  Use4B: boolean;
+  ChipSize, Addr, EndAddr: cardinal;
+  Total: integer;
+  Use4B, Native4B, UsePlan: boolean;
+  Plan: TErasePlan;
   OK: boolean;
 
   //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  //ตัวนับลูปต้องเป็นตัวแปรในตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
+  //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
   procedure DoWork;
+  var
+    Idx: integer;
   begin
   OK := False;
 
@@ -1391,42 +1487,67 @@ var
     Exit;
   end;
 
-  //ปัดจุดเริ่มลง ปัดจุดจบขึ้น ให้ตรงขอบเซกเตอร์
-  Addr := (StartAddress div SectorSize) * SectorSize;
-  EndAddr := StartAddress + RangeLen;
-  if EndAddr > ChipSize then EndAddr := ChipSize;
-  EndAddr := ((EndAddr + SectorSize - 1) div SectorSize) * SectorSize;
-  if EndAddr > ChipSize then EndAddr := ChipSize;
+  //ชิปที่บอกแผนผังเซกเตอร์ของตัวเองมาแล้ว ให้เดินตามแผนผังนั้น
+  //
+  //ได้สองอย่างที่การไล่ทีละเซกเตอร์ขนาดเดียวให้ไม่ได้
+  //  ถูกต้อง  ชิปที่มีบล็อกหัวหรือท้ายขนาดไม่เท่ากันจะถูกลบตามขนาดจริง
+  //  เร็ว     ช่วงยาว ๆ ใช้ opcode ก้อนใหญ่ที่สุดที่ยังอยู่ในช่วงที่ขอ
+  //           ลบ 8MB ด้วยบล็อก 64K ใช้คำสั่ง 158 ครั้งแทนที่จะเป็น 2048 ครั้ง
+  UsePlan := False;
+  if CurrentSFDPValid then
+    UsePlan := PlanEraseSFDP(CurrentSFDP, StartAddress, RangeLen, ChipSize, Plan);
 
-  Total := (EndAddr - Addr + SectorSize - 1) div SectorSize;
+  if not UsePlan then
+    if not PlanEraseUniform(StartAddress, RangeLen, SectorSize, ChipSize,
+                            Opcode, Plan) then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+
+  Total := Length(Plan);
   if Total = 0 then
   begin
     LogPrint(STR_CHECK_SETTINGS);
     Exit;
   end;
 
-  LogPrint(STR_ERASING_RANGE + '0x' + IntToHex(Addr, 8) + ' - 0x' + IntToHex(EndAddr - 1, 8) +
-           ' (' + IntToStr(Total) + ' x ' + IntToStr(SectorSize) + ' bytes, opcode 0x' +
-           IntToHex(Opcode, 2) + ')');
+  if not PlanBounds(Plan, Addr, EndAddr) then Exit;
 
+  if UsePlan then
+    LogPrint(Format(STR_ERASE_MAP, [Total, Addr, EndAddr - 1]))
+  else
+    LogPrint(STR_ERASING_RANGE + '0x' + IntToHex(Addr, 8) + ' - 0x' + IntToHex(EndAddr - 1, 8) +
+             ' (' + IntToStr(Total) + ' x ' + IntToStr(SectorSize) + ' bytes, opcode 0x' +
+             IntToHex(Opcode, 2) + ')');
+
+  //ชิปใหญ่กว่า 128Mbit ต้องใช้แอดเดรส 4 ไบต์
+  //ถ้าทุกขั้นในแผนมี opcode ชุด 4 ไบต์ของตัวเองครบ ก็ไม่ต้องสลับโหมดเลย
+  //ซึ่งปลอดภัยกว่ามาก เพราะการสลับโหมดทิ้งสถานะไว้ในตัวชิป งานที่ล้ม
+  //กลางคันจะทิ้งชิปไว้ที่โหมด 4 ไบต์ แล้วเครื่องมือตัวถัดไปจะอ่านได้ขยะ
   Use4B := ChipSize > FLASH_SIZE_128MBIT;
-  if Use4B then UsbAsp25_EN4B();
+  Native4B := Use4B and PlanAllHave4B(Plan);
+  if Native4B then LogPrint(STR_4B_NATIVE);
 
   SetProgressPos(0);
   SetProgressMax(Integer(Total));
-  Idx := 0;
+
+  //สลับโหมดเฉพาะตอนที่จำเป็นจริง ๆ และต้องกลับออกมาให้ได้เสมอ
+  if Use4B and (not Native4B) then Enter4B;
 
   try
-    while Addr < EndAddr do
+    for Idx := 0 to Total - 1 do
     begin
       UsbAsp25_WREN();
-      UsbAsp25_EraseSector(Opcode, Addr, Use4B);
+
+      if Native4B then
+        UsbAsp25_EraseSector(Plan[Idx].Opcode4B, Plan[Idx].Addr, True)
+      else
+        UsbAsp25_EraseSector(Plan[Idx].Opcode, Plan[Idx].Addr, Use4B);
 
       if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
 
-      Inc(Addr, SectorSize);
-      Inc(Idx);
-      SetProgressPos(Integer(Idx));
+      SetProgressPos(Idx + 1);
       OpProcessMessages;
 
       if UserCancel then Exit;
@@ -1434,7 +1555,7 @@ var
 
     OK := True;
   finally
-    if Use4B then UsbAsp25_EX4B();
+    Leave4B;
     UsbAsp25_Wrdi();
     SetProgressPos(0);
   end;
@@ -1509,14 +1630,40 @@ begin
 
   UsbAsp25_ReadID(ID);
 
-  s9F := UpperCase(IntToHex(ID.ID9FH[0], 2) + IntToHex(ID.ID9FH[1], 2) + IntToHex(ID.ID9FH[2], 2));
-  s90 := UpperCase(IntToHex(ID.ID90H[0], 2) + IntToHex(ID.ID90H[1], 2));
-  sAB := UpperCase(IntToHex(ID.IDABH, 2));
-  s15 := UpperCase(IntToHex(ID.ID15H[0], 2) + IntToHex(ID.ID15H[1], 2));
+  //คำสั่งที่ไม่ได้คำตอบต้องแสดงว่าไม่ได้คำตอบ ไม่ใช่แสดงค่าที่ค้างในบัฟเฟอร์
+  //เดิมสายที่เงียบสนิทจะพิมพ์ออกมาว่า ABh=AB และ 90h=9000 ซึ่งคือ opcode
+  //ของเราเองสะท้อนกลับ ดูเหมือนชิปตอบอยู่ แล้วคนก็ไปตามหาปัญหาผิดเรื่อง
+  if ID.Got9F then
+    s9F := UpperCase(IntToHex(ID.ID9FH[0], 2) + IntToHex(ID.ID9FH[1], 2) + IntToHex(ID.ID9FH[2], 2))
+  else
+    s9F := '--';
+  if ID.Got90 then
+    s90 := UpperCase(IntToHex(ID.ID90H[0], 2) + IntToHex(ID.ID90H[1], 2))
+  else
+    s90 := '--';
+  if ID.GotAB then
+    sAB := UpperCase(IntToHex(ID.IDABH, 2))
+  else
+    sAB := '--';
+  if ID.Got15 then
+    s15 := UpperCase(IntToHex(ID.ID15H[0], 2) + IntToHex(ID.ID15H[1], 2))
+  else
+    s15 := '--';
 
-  if (Expected = s9F) or (Expected = s90) or (Expected = sAB) or (Expected = s15) then
+  //เทียบเฉพาะคำสั่งที่ได้คำตอบจริง
+  if (ID.Got9F and (Expected = s9F)) or (ID.Got90 and (Expected = s90)) or
+     (ID.GotAB and (Expected = sAB)) or (ID.Got15 and (Expected = s15)) then
   begin
     LogPrint(STR_ID_OK + Expected);
+    Exit;
+  end;
+
+  //ไม่มีคำสั่งไหนได้คำตอบเลย เป็นคนละเรื่องกับชิปผิดรุ่น และคำแนะนำก็คนละอย่าง
+  //บอกให้ตรงเรื่อง ไม่งั้นคนจะไปไล่เปลี่ยนรุ่นชิปในเมนูทั้งที่ปัญหาอยู่ที่สาย
+  if not (ID.Got9F or ID.Got90 or ID.GotAB or ID.Got15) then
+  begin
+    LogPrint(STR_ID_NO_ANSWER);
+    Result := MessageDlg('AsProgrammer', STR_ID_NO_ANSWER_Q, mtWarning, [mbYes, mbNo], 0) = mrYes;
     Exit;
   end;
 
@@ -1533,8 +1680,18 @@ function VoltageWarningOK: boolean;
 begin
   Result := True;
 
-  //ธรรมเนียมของ chiplist คือใส่ _1.8V ต่อท้ายชื่อรุ่น
-  if Pos('1.8V', UpperCase(CurrentICParam.Name)) = 0 then Exit;
+  //เดิมดูจากชื่อรุ่นอย่างเดียว ตามธรรมเนียมที่ใส่ _1.8V ต่อท้าย
+  //ซึ่งพลาดชิป 1.8V ที่ชื่อไม่ได้บอก และนั่นคือกลุ่มใหญ่
+  //  W25Q64FW  W25Q256FW  (id EF60xx)   MX25U6435F   GD25LQ32
+  //ทั้งหมดนี้พังทันทีถ้าได้รับ 3.3V ซึ่งเป็นสิ่งที่เกิดขึ้นบ่อยที่สุด
+  //ตอนนี้จึงเชื่อค่า vcc ใน chiplist ก่อน แล้วค่อยถอยไปดูชื่อ
+  if CurrentICParam.Vcc <> '' then
+  begin
+    //ระบุมาแล้วว่าแรงดันเท่าไร ถ้าไม่ใช่ 1.8 ก็ไม่ต้องเตือน
+    if Pos('1.8', CurrentICParam.Vcc) = 0 then Exit;
+  end
+  else
+    if Pos('1.8V', UpperCase(CurrentICParam.Name)) = 0 then Exit;
 
   //Bus Pirate ตั้งขาเป็น open-drain แล้วจ่ายไฟจากภายนอกได้ จึงไม่เตือน
   if AsProgrammer.Current_HW in [CHW_BUZZPIRAT, CHW_ARDUINO] then Exit;
@@ -1616,6 +1773,18 @@ procedure ApplySFDPHints(const Info: TSFDPInfo);
 begin
   Chip25SFDPRead := True;
 
+  //เก็บก่อนออก เพราะแผนผังเซกเตอร์กับตาราง 4BAIT อยู่คนละที่กับ DWORD-16
+  //ชิปที่ไม่มี DWORD-16 ก็ยังมีแผนผังเซกเตอร์ให้ใช้ได้
+  CurrentSFDP := Info;
+  CurrentSFDPValid := Info.Valid;
+
+  //ชิปที่มี opcode ชุด 4 ไบต์ของตัวเองไม่ต้องสลับโหมดเลย
+  if Info.Has4BAIT then
+  begin
+    Chip25Read4BOpcode := Info.Read4BOpcode;
+    Chip25PageProg4BOpcode := Info.PageProg4BOpcode;
+  end;
+
   if not Info.HasDword16 then Exit;
 
   if Info.SRWriteEnableOpcode <> 0 then
@@ -1655,8 +1824,11 @@ begin
     FillByte(ID.IDABH, 1, $FF);
     FillByte(ID.ID15H, 2, $FF);
     UsbAsp25_ReadID(ID);
-    LastID9F := UpperCase(IntToHex(ID.ID9FH[0], 2) + IntToHex(ID.ID9FH[1], 2) +
-                          IntToHex(ID.ID9FH[2], 2));
+    //จำไว้เฉพาะตอนที่ชิปตอบจริง ไม่งั้นรหัสที่จำไว้จะเป็น FFFFFF
+    //แล้วรหัสปลอมนั้นจะตามไปโผล่ในตารางชิปของผู้ใช้ตอนกดบันทึกชิปที่ตรวจพบ
+    if ID.Got9F then
+      LastID9F := UpperCase(IntToHex(ID.ID9FH[0], 2) + IntToHex(ID.ID9FH[1], 2) +
+                            IntToHex(ID.ID9FH[2], 2));
   end;
 
   //SFDP บอกวิธีเข้าโหมด 4 ไบต์ที่ถูกต้องของชิปตัวนี้ ถ้ามันมีตาราง
@@ -1666,6 +1838,83 @@ begin
     else
       //ไม่มีตาราง ก็ไม่ต้องมาลองใหม่ทุกครั้ง
       Chip25SFDPRead := True;
+end;
+
+//ชิปที่กำลังตรวจอยู่ใช้แอดเดรส 4 ไบต์หรือไม่
+//TBlockLockProc เป็นตัวชี้ฟังก์ชันธรรมดา ส่งพารามิเตอร์เพิ่มเข้าไปไม่ได้
+var
+  GuardUse4B: boolean = False;
+
+function GuardBlockLockReader(Addr: cardinal; out Locked: boolean): boolean;
+begin
+  Result := UsbAsp25_ReadBlockLock(Addr, GuardUse4B, Locked);
+end;
+
+//สแกนบิตล็อกรายบล็อกเมื่อ WPS = 1
+//
+//ความละเอียดของบิตล็อกไม่เท่ากันตลอดทั้งชิป แบบ Winbond คือ 64K ตรงกลาง
+//แต่ 4K ในบล็อกหัวและบล็อกท้าย ถ้าสแกนด้วย 64K ทั้งชิปจะพลาดเซกเตอร์ 4K
+//ที่ถูกล็อกอยู่ในบล็อกหัวหรือท้าย แล้วก็จะกลับไปเป็นปัญหาเดิมคือเขียนไม่ลง
+//โดยไม่มีใครบอก จึงแบ่งสแกนเป็นสามช่วงตามความละเอียดจริง
+function WPSBlocksLocked(StartAddr, Len, ChipSize: cardinal;
+  out LockedAt: cardinal; out AnyReadable: boolean): boolean;
+const
+  BOOT = 64 * 1024;
+  FINE = 4 * 1024;
+var
+  EndAddr, LoEnd, HiStart: cardinal;
+
+  //สแกนช่วงย่อยหนึ่งช่วง แล้วรวมผลเข้ากับตัวแปรผลลัพธ์
+  function Scan(FromA, ToA, Gran: cardinal): boolean;
+  var
+    R: boolean;
+    At: cardinal;
+  begin
+    Result := False;
+    if ToA <= FromA then Exit;
+    Result := BlockLockConflict(@GuardBlockLockReader, ChipSize, Gran,
+                                FromA, ToA - FromA, At, R);
+    if R then AnyReadable := True;
+    if Result then LockedAt := At;
+  end;
+
+  function LowerOf(A, B: cardinal): cardinal;
+  begin
+    if A < B then Result := A else Result := B;
+  end;
+
+  function HigherOf(A, B: cardinal): cardinal;
+  begin
+    if A > B then Result := A else Result := B;
+  end;
+
+begin
+  Result := False;
+  LockedAt := 0;
+  AnyReadable := False;
+
+  GuardUse4B := ChipSize > 16777216;
+
+  EndAddr := StartAddr + Len;
+  if EndAddr > ChipSize then EndAddr := ChipSize;
+  if EndAddr <= StartAddr then Exit;
+
+  //บล็อกหัวและบล็อกท้ายของชิป ซึ่งล็อกกันทีละ 4K
+  LoEnd := BOOT;
+  if LoEnd > ChipSize then LoEnd := ChipSize;
+  if ChipSize > BOOT then HiStart := ChipSize - BOOT else HiStart := ChipSize;
+
+  //หัวชิป
+  if StartAddr < LoEnd then
+    if Scan(StartAddr, LowerOf(EndAddr, LoEnd), FINE) then Exit(True);
+
+  //กลางชิป ล็อกกันทีละ 64K
+  if (EndAddr > LoEnd) and (StartAddr < HiStart) then
+    if Scan(HigherOf(StartAddr, LoEnd), LowerOf(EndAddr, HiStart), BOOT) then Exit(True);
+
+  //ท้ายชิป
+  if EndAddr > HiStart then
+    if Scan(HigherOf(StartAddr, HiStart), EndAddr, FINE) then Exit(True);
 end;
 
 //ด่านตรวจบิตป้องกันการเขียน
@@ -1679,6 +1928,7 @@ var
   P: TProtInfo;
   FromA, ToA, EndAddr: cardinal;
   ChipSize: cardinal;
+  WPSReadable: boolean;
 begin
   Result := True;
 
@@ -1701,12 +1951,40 @@ begin
 
   P := DecodeProt(SR1, SR2);
 
-  //WPS=1 แปลว่าชิปใช้ล็อกรายบล็อกแทนบิต BP ซึ่งอ่านจาก status register ไม่ได้
-  //บอกให้รู้ไว้ แต่ห้ามไม่ได้เพราะไม่รู้จริง ๆ ว่าบล็อกไหนถูกล็อก
+  //WPS = 1 แปลว่าบิต BP ไม่มีความหมายแล้ว พื้นที่ที่ถูกล็อกมาจากบิตรายบล็อก
+  //ซึ่งอ่านจาก status register ไม่ได้ ต้องไล่ถามทีละบล็อกด้วย 3Dh
+  //
+  //เดิมได้แค่พิมพ์ว่าตีความไม่ได้แล้วปล่อยผ่าน ซึ่งแปลว่าชิปกลุ่มนี้ไม่มี
+  //การ์ดกันเขียนเลยทั้งที่เป็นกลุ่มที่ล็อกไว้จริง ๆ บ่อยที่สุด
   if P.WPS then
   begin
     LogPrint(Format(STR_PROT_HEADER, [SR1, SR2]));
-    LogPrint(STR_PROT_CAVEAT);
+    LogPrint(STR_WPS_SCANNING);
+
+    if WPSBlocksLocked(StartAddr, Len, ChipSize, FromA, WPSReadable) then
+    begin
+      LogPrint(Format(STR_WPS_LOCKED, [FromA]));
+
+      if CLIMode and (not CLIForce) then
+      begin
+        LogPrint(STR_GUARD_REFUSED);
+        OpFail('target area is write protected by an individual block lock', FromA);
+        Exit(False);
+      end;
+
+      Result := AskUser(STR_GUARD_Q, False);
+      if not Result then
+        OpFail('target area is write protected by an individual block lock', FromA);
+      Exit;
+    end;
+
+    //อ่านบิตล็อกไม่ได้เลยแปลว่าไม่รู้ ซึ่งไม่เหมือนกับรู้ว่าไม่ล็อก
+    //บอกตรง ๆ ดีกว่าเงียบแล้วปล่อยผ่านเหมือนว่าตรวจแล้ว
+    if not WPSReadable then
+      LogPrint(STR_WPS_UNREADABLE)
+    else
+      LogPrint(STR_WPS_CLEAR);
+
     Exit;
   end;
 
@@ -2348,6 +2626,8 @@ var
   SkipPage: boolean;
   Retry, BadOffset: integer;
   OpStarted: TDateTime;
+  Use4B, Native4B: boolean;
+  WriteOp, ReadOp: byte;
 
   //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
   //ตัวนับลูปต้องเป็นตัวแปรในตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
@@ -2375,8 +2655,26 @@ var
   Retry := 0;
   OpStarted := Now;
 
-  if WriteSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
+  //ชิปที่มีคำสั่งชุด 4 ไบต์ของตัวเองครบทั้งเขียน (12h) และอ่าน (13h)
+  //ไม่ต้องสลับโหมดเลย ต้องมีครบทั้งคู่เพราะรอบตรวจหลังเขียนต้องอ่านกลับ
+  //ถ้ามีแค่อย่างเดียวก็สลับโหมดตามเดิมซึ่งยังถูกต้องอยู่
+  Use4B := WriteSize > FLASH_SIZE_128MBIT;
+  Native4B := Use4B and Native4BWrite and Native4BRead;
 
+  if Native4B then
+  begin
+    WriteOp := Chip25PageProg4BOpcode;
+    ReadOp := Chip25Read4BOpcode;
+    LogPrint(STR_4B_NATIVE);
+  end
+  else
+  begin
+    WriteOp := $02;
+    ReadOp := $03;
+    if Use4B then Enter4B;
+  end;
+
+  try
   while (Address-StartAddress) < WriteSize do
   begin
     //ต้องรีเซ็ตทุกเพจ เพราะตัวแปร local ที่มีค่าเริ่มต้นใน FPC เป็นแบบ static
@@ -2389,9 +2687,14 @@ var
     (WriteType = WT_PAGE) then UsbAsp25_WREN();
 
     //คำนวณขนาดบัฟเฟอร์เพจแรก กันไม่ให้บัฟเฟอร์วนกลับเมื่อชนขอบแอดเดรส
-        if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 2) then
-           PageSize := (OpUI.ChipSize - StartAddress) mod PageSize else
-              PageSize := PageSizeTemp;
+    //ที่ต้องการคือจำนวนไบต์ที่เหลือจนถึงขอบเพจถัดไป ไม่ใช่เศษของขนาดชิป
+    //สูตรเดิม (ChipSize - StartAddress) mod PageSize คืน 0 เมื่อแอดเดรสเริ่ม
+    //ตรงขอบเพจพอดี เช่น 0x1000 บนชิป 8MB ผลคือ PageSize เป็นศูนย์
+    //Address ไม่ขยับ แล้วลูปวนไม่รู้จบจนกว่าผู้ใช้จะกดยกเลิก
+    if (StartAddress > 0) and (Address = StartAddress) and (PageSizeTemp > 2) then
+      PageSize := FirstChunkSize(StartAddress, PageSizeTemp)
+    else
+      PageSize := PageSizeTemp;
 
     if (WriteSize - (Address-StartAddress)) < PageSize then PageSize := (WriteSize - (Address-StartAddress));
     RomStream.ReadBuffer(DataChunk, PageSize);
@@ -2426,10 +2729,10 @@ var
 
       if not SkipPage then
       begin
-        if WriteSize > FLASH_SIZE_128MBIT then //หน่วยความจำใหญ่กว่า 128Mbit
+        if Use4B then //หน่วยความจำใหญ่กว่า 128Mbit
         begin
           //ใช้แอดเดรส 4 ไบต์
-          BytesWrite := BytesWrite + UsbAsp25_Write32bitAddr($02, Address, datachunk, PageSize)
+          BytesWrite := BytesWrite + UsbAsp25_Write32bitAddr(WriteOp, Address, datachunk, PageSize)
         end
         else //หน่วยความจำไม่เกิน 128Mbit
           BytesWrite := BytesWrite + UsbAsp25_Write($02, Address, datachunk, PageSize);
@@ -2442,8 +2745,8 @@ var
     if (OpUI.AutoCheck) and (WriteType = WT_PAGE) then
     begin
 	  
-      if WriteSize > FLASH_SIZE_128MBIT then
-        UsbAsp25_Read32bitAddr($03, Address, datachunk2, PageSize)
+      if Use4B then
+        UsbAsp25_Read32bitAddr(ReadOp, Address, datachunk2, PageSize)
       else
         UsbAsp25_Read($03, Address, datachunk2, PageSize);
 
@@ -2486,8 +2789,10 @@ var
     if UserCancel then Break;
   end;
 
-  if WriteSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
-  UsbAsp25_Wrdi(); //สำหรับ sst
+  finally
+    Leave4B;
+    UsbAsp25_Wrdi(); //สำหรับ sst
+  end;
 
   OpProgress(Address - StartAddress, WriteSize);
 
@@ -2812,6 +3117,8 @@ var
   Address: cardinal;
   ProgressPos: integer;
   OpStarted: TDateTime;
+  Use4B: boolean;
+  ReadOp: byte;
 
   //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
   procedure DoWork;
@@ -2843,14 +3150,26 @@ var
 
   RomStream.Clear;
 
-  if ChipSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
+  //ชิปที่มีคำสั่งอ่านชุด 4 ไบต์ของตัวเอง (13h) ไม่ต้องสลับโหมดเลย
+  Use4B := ChipSize > FLASH_SIZE_128MBIT;
+  if Use4B and Native4BRead then
+  begin
+    ReadOp := Chip25Read4BOpcode;
+    LogPrint(STR_4B_NATIVE);
+  end
+  else
+  begin
+    ReadOp := $03;
+    if Use4B then Enter4B;
+  end;
 
+  try
   while Address < ChipSize do
   begin
     if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
 
-    if ChipSize > FLASH_SIZE_128MBIT then
-      BytesRead := BytesRead + UsbAsp25_Read32bitAddr($03, Address, datachunk, ChunkSize)
+    if Use4B then
+      BytesRead := BytesRead + UsbAsp25_Read32bitAddr(ReadOp, Address, datachunk, ChunkSize)
     else
       BytesRead := BytesRead + UsbAsp25_Read($03, Address, datachunk, ChunkSize);
 
@@ -2865,7 +3184,9 @@ var
     if UserCancel then Break;
   end;
 
-  if ChipSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
+  finally
+    Leave4B;
+  end;
 
   OpProgress(Address - StartAddress, ChipSize - StartAddress);
 
@@ -3037,6 +3358,8 @@ var
   Address: cardinal;
   ProgressPos: integer;
   OpStarted: TDateTime;
+  Use4B: boolean;
+  ReadOp: byte;
 
   //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
   //ตัวนับลูปต้องเป็นตัวแปรในตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
@@ -3066,14 +3389,23 @@ var
   ProgressPos := 0;
   OpStarted := Now;
 
-  if DataSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
+  //ชิปที่มีคำสั่งอ่านชุด 4 ไบต์ของตัวเอง (13h) ไม่ต้องสลับโหมดเลย
+  Use4B := DataSize > FLASH_SIZE_128MBIT;
+  if Use4B and Native4BRead then
+    ReadOp := Chip25Read4BOpcode
+  else
+  begin
+    ReadOp := $03;
+    if Use4B then Enter4B;
+  end;
 
+  try
   while (Address-StartAddress) < DataSize do
   begin
     if ChunkSize > (DataSize - (Address-StartAddress)) then ChunkSize := DataSize - (Address-StartAddress);
 
-    if DataSize > FLASH_SIZE_128MBIT then
-        BytesRead := BytesRead + UsbAsp25_Read32bitAddr($03, Address, datachunk, ChunkSize)
+    if Use4B then
+        BytesRead := BytesRead + UsbAsp25_Read32bitAddr(ReadOp, Address, datachunk, ChunkSize)
       else
         BytesRead := BytesRead + UsbAsp25_Read($03, Address, datachunk, ChunkSize);
 
@@ -3098,7 +3430,9 @@ var
     if UserCancel then Break;
   end;
 
-  if DataSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
+  finally
+    Leave4B;
+  end;
 
   OpProgress(Address - StartAddress, DataSize);
 
@@ -3683,6 +4017,7 @@ begin
   if Was <> ProgrammerPresent then
   begin
     Reset25ChipHints;
+    ForgetSFDP;
     LastChipUID := '';
     LastID9F := '';
   end;
@@ -3755,12 +4090,15 @@ begin
   //เปลี่ยนชิปแล้ว สิ่งที่รู้เกี่ยวกับตัวเก่าใช้ไม่ได้อีก
   //ถ้าไม่ล้าง opcode ที่เลือกตามยี่ห้อจะเป็นของชิปตัวก่อนหน้า
   Reset25ChipHints;
+  ForgetSFDP;
 
   Result := findchip.SelectChip(ChipListFile, AName);
   if not Result then
     Result := findchip.SelectChip(ChipListFile2, AName);
   if not Result then
     Result := findchip.SelectChip(ChipListFile3, AName);
+  if not Result then
+    Result := findchip.SelectChip(ChipListFile4, AName);
   UpdateChipInfo;
 end;
 
@@ -4669,10 +5007,24 @@ begin
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
 
-    IDstr9FH := Upcase(IntToHex(ID.ID9FH[0], 2)+IntToHex(ID.ID9FH[1], 2)+IntToHex(ID.ID9FH[2], 2));
-    IDstr90H := Upcase(IntToHex(ID.ID90H[0], 2)+IntToHex(ID.ID90H[1], 2));
-    IDstrABH := Upcase(IntToHex(ID.IDABH, 2));
-    IDstr15H := Upcase(IntToHex(ID.ID15H[0], 2)+IntToHex(ID.ID15H[1], 2));
+    //คำสั่งที่ไม่ได้คำตอบต้องขึ้นว่า -- ไม่ใช่ค่าที่ค้างอยู่ในบัฟเฟอร์
+    //และต้องไม่เอาไปค้นในตารางชิปด้วย เพราะมันไม่ใช่รหัสที่ชิปบอกมา
+    if ID.Got9F then
+      IDstr9FH := Upcase(IntToHex(ID.ID9FH[0], 2)+IntToHex(ID.ID9FH[1], 2)+IntToHex(ID.ID9FH[2], 2))
+    else
+      IDstr9FH := '--';
+    if ID.Got90 then
+      IDstr90H := Upcase(IntToHex(ID.ID90H[0], 2)+IntToHex(ID.ID90H[1], 2))
+    else
+      IDstr90H := '--';
+    if ID.GotAB then
+      IDstrABH := Upcase(IntToHex(ID.IDABH, 2))
+    else
+      IDstrABH := '--';
+    if ID.Got15 then
+      IDstr15H := Upcase(IntToHex(ID.ID15H[0], 2)+IntToHex(ID.ID15H[1], 2))
+    else
+      IDstr15H := '--';
 
     LogPrint('ID(9F): '+ IDstr9FH);
     LogPrint('ID(90): '+ IDstr90H);
@@ -4700,12 +5052,14 @@ begin
       FindChipInto(ChipListFile, '', IDstr9FH, Matches);
       FindChipInto(ChipListFile2, '', IDstr9FH, Matches);
       FindChipInto(ChipListFile3, '', IDstr9FH, Matches);
+      FindChipInto(ChipListFile4, '', IDstr9FH, Matches);
 
       if Matches.Count = 0 then
       begin
         FindChipInto(ChipListFile, '', IDstr90H, Matches);
         FindChipInto(ChipListFile2, '', IDstr90H, Matches);
         FindChipInto(ChipListFile3, '', IDstr90H, Matches);
+        FindChipInto(ChipListFile4, '', IDstr90H, Matches);
       end;
 
       if Matches.Count = 0 then
@@ -4713,6 +5067,7 @@ begin
         FindChipInto(ChipListFile, '', IDstrABH, Matches);
         FindChipInto(ChipListFile2, '', IDstrABH, Matches);
         FindChipInto(ChipListFile3, '', IDstrABH, Matches);
+        FindChipInto(ChipListFile4, '', IDstrABH, Matches);
       end;
 
       if Matches.Count = 0 then
@@ -4720,6 +5075,7 @@ begin
         FindChipInto(ChipListFile, '', IDstr15H, Matches);
         FindChipInto(ChipListFile2, '', IDstr15H, Matches);
         FindChipInto(ChipListFile3, '', IDstr15H, Matches);
+        FindChipInto(ChipListFile4, '', IDstr15H, Matches);
       end;
 
       if Matches.Count = 1 then
@@ -5980,6 +6336,9 @@ begin
               ' chips  (GPL-2.0-or-later)')
       else
         s.Add('chiplist-flashrom.xml  not loaded');
+      if ChipListFile4 <> nil then
+        s.Add('chiplist-ezp.xml       ' + IntToStr(CountChips(ChipListFile4)) +
+              ' chips  (converted from an EZP database)');
       if ChipListFile3 <> nil then
         s.Add('chiplist-user.xml      ' + IntToStr(CountChips(ChipListFile3)) +
               ' chips  (added by you)');
@@ -6203,6 +6562,7 @@ begin
   LoadChipList(ChipListFile);
   LoadChipList(ChipListFile2);
   LoadChipList(ChipListFile3);
+  LoadChipList(ChipListFile4);
   RomF := TMemoryStream.Create;
   ScriptEngine := TPasCalc.Create;
   ScriptsFunc.SetScriptFunctions(ScriptEngine);

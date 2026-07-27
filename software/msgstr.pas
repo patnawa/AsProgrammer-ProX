@@ -66,6 +66,15 @@ resourcestring
   STR_ID_MISMATCH        = 'Chip ID does not match the selected chip: expected ';
   STR_ID_MISMATCH_Q      = 'The chip in the socket does not match the selected one.'
                          + LineEnding + 'Continue anyway?';
+  STR_ID_NO_ANSWER       = 'No chip answered the id commands. Nothing was read back, '
+                         + 'so there is no id to compare. This is what a loose clip, '
+                         + 'an empty socket, a chip fitted the wrong way round or an '
+                         + 'unpowered chip all look like';
+  STR_ID_NO_ANSWER_Q     = 'No chip is answering. Nothing was read back from the socket.'
+                         + LineEnding + LineEnding
+                         + 'Check the clip or socket contact, the orientation and the '
+                         + 'supply, then press Read ID again.'
+                         + LineEnding + LineEnding + 'Continue anyway?';
   STR_ID_OK              = 'Chip ID matches: ';
   STR_BACKUP_MAKING      = 'Backing up the chip first...';
   STR_BACKUP_DONE        = 'Backup saved: ';
@@ -126,6 +135,17 @@ resourcestring
   STR_DIFF_TOO_MANY      = 'Too many differences to highlight them all, stopped early';
   STR_BUSY_TIMEOUT       = 'The chip stayed busy for more than %d seconds. Giving up. '
                          + 'Check the wiring, the supply voltage and the write protection';
+  STR_NOT_RESPONDING     = 'No chip is answering. The status register reads back as FF, '
+                         + 'which is what an empty socket looks like. Check that the chip '
+                         + 'is seated the right way round, powered, and that CS is wired';
+  STR_WPS_SCANNING       = 'WPS is set, so the individual block locks decide. Reading them';
+  STR_WPS_LOCKED         = 'Block 0x%.8x is locked by its own lock bit';
+  STR_WPS_UNREADABLE     = 'WPS is set but the block lock bits could not be read (3Dh). '
+                         + 'Whether the target area is protected is unknown';
+  STR_WPS_CLEAR          = 'Block locks checked: no locked block covers the target area';
+  STR_4B_NATIVE          = 'Using the chip''s own four byte opcodes, no mode switch needed';
+  STR_ERASE_MAP          = 'Erase plan from the SFDP sector map: %d commands covering '
+                         + '0x%.8x - 0x%.8x';
   STR_PAGE_RETRY         = 'Page verify failed, writing it again. Attempt ';
   STR_VOLT_WARN          = 'This chip is a 1.8 V part.'#13#10#13#10
                          + 'The selected programmer does not supply 1.8 V. Powering the chip '

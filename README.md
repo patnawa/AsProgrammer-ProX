@@ -26,7 +26,10 @@ programmers, while staying free and open source.
 | **Sector / block erase** | Erase only the sectors covering a range instead of the whole chip. 4 KB (`20h`), 32 KB (`52h`), 64 KB (`D8h`), or the size declared by the chip. |
 | **Smart write** | Unlock → erase just the needed sectors → write → verify, in one action. Patch a region of a BIOS without touching the rest. |
 | **SFDP auto-detect** | Reads the JEDEC JESD216 parameter table from the chip itself (`5Ah`) and fills in size, page size, address width and erase types. Works on chips missing from the database. Also reads the **4-byte address instruction table** (`FF84h`), **DWORD-16** (how *this* chip enters 4-byte mode, and whether its status register needs `06h` or `50h`) and the **sector map** (`FF81h`), so parts with boot blocks of a different size are reported instead of silently mis-erased. |
-| **Write protection guard** | Before every erase and write, the status register is decoded and the protected range compared against the target. A locked chip accepts the command and silently ignores it, which otherwise shows up much later as an unexplained verify failure. |
+| **Write protection guard** | Before every erase and write, the status register is decoded and the protected range compared against the target. A locked chip accepts the command and silently ignores it, which otherwise shows up much later as an unexplained verify failure. When `WPS=1` the BP bits mean nothing, so the individual block locks are read back one block at a time with `3Dh` — 4 KB granularity across the boot blocks, 64 KB elsewhere — instead of giving up and letting the write through unchecked. |
+| **Erase follows the chip's own map** | When the chip publishes an SFDP sector map, the erase is planned against it: boot-block parts are erased with the sector size that region actually uses, and long runs use the largest erase opcode that still fits inside the requested range. A whole-chip erase of a boot-block 8 MB part takes 158 commands instead of 2048. |
+| **Four byte addressing without mode switching** | Chips over 128 Mbit that publish a 4-byte address instruction table are driven with their own `13h` / `12h` / `21h` / `DCh` opcodes, so the chip is never left in a sticky 4-byte mode. Where a mode switch is still needed it is unwound in a `finally`, so a cancelled or failed job cannot leave the chip in a state the next tool reads as garbage. |
+| **Empty socket is named as such** | A missing, unpowered or back-to-front chip reads `FFh` from the status register, which looks exactly like "busy forever". That is now detected in half a second and reported as no chip answering, rather than after the full timeout — up to ten minutes on a chip erase — as "the chip stayed busy". |
 | **Save a detected chip** | A chip found only through SFDP can be written into `chiplist-user.xml` and is picked up from then on. Kept separate from the shipped list so a program update never overwrites it. |
 | **Production traceability** | Each chip's factory unique id (`4Bh`) is logged with a timestamp, the image CRC32 and pass/fail. Optionally refuses a chip whose id already passed, so nothing is programmed or shipped twice. |
 | **Job files** | A one-line `crc32=` file pins the approved image. If the loaded buffer does not match, the write is refused — the cheapest guard against programming the wrong revision. |
@@ -159,6 +162,8 @@ Data files, resolved relative to the working directory:
 ```
 AsProgrammer.exe
 chiplist.xml          chip database
+chiplist-flashrom.xml chips converted from flashrom (GPL-2.0-or-later)
+chiplist-ezp.xml      chips converted from an EZP programmer database
 chiplist-user.xml     chips you saved yourself (created on demand)
 settings.xml          saved options
 lang/                 translations (.po)
@@ -196,7 +201,33 @@ searched together.
 > time and never linked, so the program itself stays MIT. Delete the file if you would rather ship
 > MIT-only, and everything still works — the built-in list and SFDP detection cover the rest.
 
-A third list, `chiplist-user.xml`, holds chips you saved yourself. After **Chip → Detect chip via
+A third file, `chiplist-ezp.xml`, holds chips converted from the chip database that ships with
+the EZP2023+ / EZP2020 programmer software, by `tools/import_ezp.py`:
+
+```powershell
+python tools\import_ezp.py "EZP2023+.Dat" database.Dat -o chiplist-ezp.xml
+```
+
+The importer reads the EZP `.Dat` format directly — 68 byte records holding the name, the JEDEC
+id, the size and the page size — and skips every chip already present in the tables above, so it
+only ever adds. Chip ids and geometries are datasheet facts rather than authorship, but the
+selection is somebody else's compilation, so it is kept in its own file exactly like the flashrom
+table. Delete it and everything still works.
+
+Only the SPI families are imported. The I²C and MicroWire entries are skipped by default because
+chiplist needs an `addrtype` or an `addrbitlen` that the EZP file does not carry, and inventing one
+means reading or writing the wrong part of an EEPROM with no error at all; `--i2c` opts in to
+deriving `addrtype` from the standard 24Cxx geometries. `SPI_NAND` entries are skipped outright —
+NAND needs bad block handling, spare areas and ECC, none of which this program has, so listing
+those parts would only offer a chip it cannot actually read.
+
+Parts that run at 1.8 V are marked `vcc="1.8"` on the way in. That matters because the old check
+looked for `1.8V` in the chip *name*, and the largest group of 1.8 V parts — `W25Q64FW`,
+`W25Q256FW` and the rest of the `EF60xx` family, plus `MX25U`, `MT25QU` and `GD25LQ` — never say so
+in their names. Those chips are destroyed instantly by 3.3 V, and they were the ones getting no
+warning.
+
+A fourth list, `chiplist-user.xml`, holds chips you saved yourself. After **Chip → Detect chip via
 SFDP** the program offers to store what it found there, and `--save-chip NAME` does the same from
 the command line. It is deliberately a separate file: the shipped list is replaced on every update,
 this one is not.
@@ -244,8 +275,8 @@ invariant stops the build rather than reaching a chip. None of it needs hardware
 | Suite | Covers |
 |---|---|
 | `tests\fftest.lpr` | Intel HEX and S-record round trips, sparse files, bad checksums, extended linear addressing |
-| `tests\unittests.lpr` | SFDP parsing (basic table, DWORD-16, `FF84h`, sector maps), write protection decoding, the operation result channel, the production log and job files |
-| `tests\hwtests.lpr` | The real `spi25` protocol layer driven through `tests\mockhw.pas`, a programmer that exists only in memory. Asserts on the exact opcodes sent |
+| `tests\unittests.lpr` | SFDP parsing (basic table, DWORD-16, `FF84h`, sector maps), write protection decoding, individual block lock scanning, erase and write planning (`flashops`), the operation result channel, the production log and job files |
+| `tests\hwtests.lpr` | The real `spi25` and `i2c` protocol layers driven through `tests\mockhw.pas`, a programmer that exists only in memory. Asserts on the exact opcodes sent and on how each I²C address type is split |
 | `tools\validate_chiplist.py` | Duplicate chip entries, bad ids, page/sector/size sanity across both chip tables |
 
 The two Pascal suites need different versions of `spi25`: the logic tests link a stub that
@@ -262,6 +293,7 @@ records every byte and the tests assert on the transcript.
 software/
   main.pas / main.lfm     main window, flash operations, options
   spi25.pas               25-series SPI primitives (no LCL, no main — testable)
+  flashops.pas            erase and write planning arithmetic (likewise testable)
   spi45.pas spi95.pas     DataFlash and SPI EEPROM
   i2c.pas microwire.pas   I²C and MicroWire
   sfdp.pas                JESD216 parameter table parser
