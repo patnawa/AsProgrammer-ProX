@@ -25,6 +25,11 @@ type
     FReply: array of byte;
     FReplyPos: integer;
   public
+    //จำลองชิปที่ไม่ตอบ ซ็อกเก็ตว่าง คลิปหนีบไม่ติด หรือชิปไม่ได้รับไฟ
+    //การอ่านจะคืน 0 และไม่แตะบัฟเฟอร์เลย ซึ่งเป็นพฤติกรรมจริงของสายที่เงียบ
+    //และเป็นเงื่อนไขที่ทำให้ค่าที่ค้างอยู่ในบัฟเฟอร์ถูกรายงานผิดเป็นคำตอบ
+    FailReads: boolean;
+
     constructor Create;
 
     procedure Reset;
@@ -90,6 +95,7 @@ begin
   SetLength(FSent, 0);
   SetLength(FReply, 0);
   FReplyPos := 0;
+  FailReads := False;
 end;
 
 function TMockHardware.Transcript: string;
@@ -163,6 +169,9 @@ function TMockHardware.SPIRead(CS: byte; BufferLen: integer;
 var
   i: integer;
 begin
+  //สายเงียบ ไม่มีอะไรถูกเขียนลงบัฟเฟอร์ และคืนศูนย์ไบต์
+  if FailReads then Exit(0);
+
   for i := 0 to BufferLen - 1 do
   begin
     if FReplyPos <= High(FReply) then

@@ -31,6 +31,15 @@ type
     ID90H: array[0..1] of byte;
     IDABH: byte;
     ID15H: array[0..1] of byte;
+
+    //อ่านคำสั่งนั้นได้คำตอบจริงหรือไม่ แยกจากค่าที่อ่านมาได้
+    //
+    //"ไม่มีใครตอบ" กับ "ตอบมาว่า FF" เป็นคนละเรื่องกัน และเดิมแยกไม่ออก
+    //เพราะบัฟเฟอร์ตัวเดียวถูกใช้ทั้งตอนส่งและตอนรับ ถ้าการอ่านล้มเหลว
+    //ไบต์คำสั่งที่เพิ่งส่งไปจะยังค้างอยู่ แล้วถูกรายงานว่าเป็นคำตอบของชิป
+    //อาการที่เห็นคือ ABh=AB กับ 90h=9000 ซึ่งคือคำสั่งสะท้อนกลับมาเอง
+    //ไม่ใช่ข้อมูลจากชิป และมันทำให้คนไปตามหาปัญหาผิดที่
+    Got9F, Got90, GotAB, Got15: boolean;
   end;
 
 var
@@ -46,10 +55,34 @@ var
   //ชิปที่รู้ยี่ห้อแล้วแต่ยังไม่ได้อ่าน SFDP ยังไม่รู้วิธีเข้าโหมด 4 ไบต์
   Chip25SFDPRead: boolean = False;
 
+  //opcode ชุดแอดเดรส 4 ไบต์ตัวจริง มาจากตาราง 4BAIT (FF84h) 0 = ชิปไม่มี
+  //
+  //ชิปที่มี opcode ชุดนี้ไม่ต้องสลับโหมดเลย ซึ่งปลอดภัยกว่ามาก เพราะการ
+  //สลับโหมดทิ้งสถานะไว้ในตัวชิป ถ้าโปรแกรมตายหรือสายหลุดกลางคัน ชิปจะค้าง
+  //อยู่ที่โหมด 4 ไบต์ แล้วเครื่องมือตัวถัดไปที่มาอ่านจะได้ข้อมูลผิดทั้งหมด
+  Chip25Read4BOpcode: byte = 0;      //13h
+  Chip25PageProg4BOpcode: byte = 0;  //12h
+
 //ลืมสิ่งที่รู้ทั้งหมด ต้องเรียกเมื่อเปลี่ยนชิปหรือเปลี่ยนซ็อกเก็ต
 procedure Reset25ChipHints;
 
 function UsbAsp25_Busy(): boolean;
+
+//เหมือน UsbAsp25_Busy แต่คืน status register ดิบมาด้วย
+//
+//ผู้เรียกต้องแยกให้ออกระหว่างชิปที่กำลังยุ่งอยู่จริง กับชิปที่ไม่ตอบเลย
+//ซ็อกเก็ตว่าง สายขาด หรือชิปไม่ได้รับไฟ จะอ่าน status register ได้ FF ล้วน
+//ซึ่งบิต 0 ติดอยู่ แปลว่ายุ่งตลอดกาล ถ้าเชื่อค่านั้นก็จะรอจนหมดเวลา
+//ซึ่งบนคำสั่งลบทั้งชิปคือสิบนาที แล้วรายงานว่าชิปยุ่ง ซึ่งชี้ไปผิดทาง
+function UsbAsp25_BusyEx(out sreg: byte): boolean;
+
+//อ่านสถานะล็อกของบล็อกที่แอดเดรสนี้ opcode 3Dh
+//
+//ใช้กับชิปที่ตั้ง WPS = 1 ซึ่งแปลว่าบิต BP ไม่มีความหมายอีกต่อไป
+//และพื้นที่ที่ถูกล็อกมาจากบิตล็อกรายบล็อกแทน ซึ่งอ่านจาก status register ไม่ได้
+//คืน False เมื่ออ่านไม่สำเร็จ
+function UsbAsp25_ReadBlockLock(Addr: longword; FourByteAddr: boolean;
+  out Locked: boolean): boolean;
 
 function EnterProgMode25(spiSpeed: integer; SendAB: boolean = false): boolean;
 procedure ExitProgMode25;
@@ -96,6 +129,21 @@ begin
   Chip25Entry4B := E4B_UNKNOWN;
   Chip25SRWrenOpcode := 0;
   Chip25SFDPRead := False;
+  Chip25Read4BOpcode := 0;
+  Chip25PageProg4BOpcode := 0;
+end;
+
+function UsbAsp25_BusyEx(out sreg: byte): boolean;
+var
+  n: integer;
+begin
+  sreg := $FF;
+  n := UsbAsp25_ReadSR(sreg);
+
+  //อ่านไม่ได้เลยก็ถือว่ายังไม่พร้อม และปล่อยให้ค่า FF บอกเรื่องราวเอง
+  if n <= 0 then sreg := $FF;
+
+  Result := IsBitSet(sreg, 0);
 end;
 
 //รอจนกว่าชิปจะพร้อม
@@ -103,11 +151,52 @@ function UsbAsp25_Busy: boolean;
 var
   sreg: byte;
 begin
-  Result := True;
-  sreg := $FF;
+  Result := UsbAsp25_BusyEx(sreg);
+end;
 
-  UsbAsp25_ReadSR(sreg);
-  if not IsBitSet(sreg, 0) then Result := False;
+function UsbAsp25_ReadBlockLock(Addr: longword; FourByteAddr: boolean;
+  out Locked: boolean): boolean;
+var
+  buff: array[0..4] of byte;
+  value: byte;
+  len, n: integer;
+begin
+  Locked := False;
+
+  buff[0] := $3D;
+  if FourByteAddr then
+  begin
+    buff[1] := hi(hi(addr));
+    buff[2] := lo(hi(addr));
+    buff[3] := hi(lo(addr));
+    buff[4] := lo(lo(addr));
+    len := 5;
+  end
+  else
+  begin
+    buff[1] := hi(addr);
+    buff[2] := hi(lo(addr));
+    buff[3] := lo(addr);
+    len := 4;
+  end;
+
+  value := $FF;
+
+  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
+    n := AsProgrammer.Programmer.SPIWriteRead(1, len, buff, 1, value)
+  else
+  begin
+    SPIWrite(0, len, buff);
+    n := SPIRead(1, 1, value);
+  end;
+
+  //FF ล้วนคือคำตอบของชิปที่ไม่รู้จักคำสั่งนี้ หรือของซ็อกเก็ตที่ว่างอยู่
+  //อย่าตีความว่าถูกล็อก เพราะจะกลายเป็นห้ามเขียนทั้งที่ไม่มีอะไรล็อก
+  if (n <= 0) or (value = $FF) then Exit(False);
+
+  //บิต 0 คือสถานะล็อกของบล็อกที่แอดเดรสนี้ตกอยู่
+  Locked := IsBitSet(value, 0);
+  Result := True;
 end;
 
 //เข้าสู่โหมดโปรแกรม
@@ -131,36 +220,57 @@ end;
 function UsbAsp25_ReadID(var ID: MEMORY_ID): integer;
 var
   buffer: array[0..3] of byte;
+
+  //อ่านคำตอบของคำสั่งที่เพิ่งส่งไป
+  //
+  //ต้องล้างบัฟเฟอร์ก่อนอ่านทุกครั้ง เพราะบัฟเฟอร์ตัวเดียวกันนี้เพิ่งถูกใช้
+  //ส่ง opcode ออกไป ถ้าไม่ล้างแล้วการอ่านล้มเหลว ไบต์ที่ค้างอยู่คือ opcode
+  //ของเราเอง ซึ่งจะถูกรายงานออกไปเหมือนเป็นคำตอบของชิป
+  //เดิมทาง 9Fh กับ 15h ล้าง แต่ทาง 90h กับ ABh ไม่ล้าง
+  function ReadReply(Len: integer): boolean;
+  begin
+    FillByte(buffer, 4, $FF);
+    Result := SPIRead(1, Len, buffer) = Len;
+    if not Result then FillByte(buffer, 4, $FF);
+  end;
+
 begin
+  Result := 0;
+
   //9F
   buffer[0] := $9F;
   SPIWrite(0, 1, buffer);
-  FillByte(buffer, 4, $FF);
-  result := SPIRead(1, 3, buffer);
+  ID.Got9F := ReadReply(3);
   move(buffer, ID.ID9FH, 3);
+  if ID.Got9F then Inc(Result);
 
   //จำรหัสผู้ผลิตไว้ ทุกคำสั่งที่ต่างกันตามยี่ห้อจะดูจากค่านี้
   //00 กับ FF แปลว่าไม่มีชิปตอบ อย่าจำไว้เพราะจะทำให้เลือก opcode ผิด
-  if (ID.ID9FH[0] <> $00) and (ID.ID9FH[0] <> $FF) then
+  if ID.Got9F and (ID.ID9FH[0] <> $00) and (ID.ID9FH[0] <> $FF) then
     Chip25ManufID := ID.ID9FH[0];
+
   //90
   FillByte(buffer, 4, 0);
   buffer[0] := $90;
   SPIWrite(0, 4, buffer);
-  result := SPIRead(1, 2, buffer);
+  ID.Got90 := ReadReply(2);
   move(buffer, ID.ID90H, 2);
+  if ID.Got90 then Inc(Result);
+
   //AB
   FillByte(buffer, 4, 0);
   buffer[0] := $AB;
   SPIWrite(0, 4, buffer);
-  result := SPIRead(1, 1, buffer);
+  ID.GotAB := ReadReply(1);
   move(buffer, ID.IDABH, 1);
+  if ID.GotAB then Inc(Result);
+
   //15
   buffer[0] := $15;
   SPIWrite(0, 1, buffer);
-  FillByte(buffer, 4, $FF);
-  result := SPIRead(1, 2, buffer);
+  ID.Got15 := ReadReply(2);
   move(buffer, ID.ID15H, 2);
+  if ID.Got15 then Inc(Result);
 end;
 
 //อ่านตาราง SFDP (JESD216) opcode 5Ah: แอดเดรส 3 ไบต์ + ไบต์หลอก 1 ไบต์
