@@ -55,6 +55,19 @@ function UsbAspI2C_BUSY(Address: byte): Boolean;
 function BuildI2CAddr(DevAddr, AddrType: byte; Address: longword;
   out A: TI2CAddr): boolean;
 
+//จำนวนตำแหน่งสูงสุดที่รูปแบบแอดเดรสนี้อ้างถึงได้
+//คืน 0 เมื่อไม่รู้จักรูปแบบ
+function I2CAddrCapacity(AddrType: byte): longword;
+
+//ตรวจทั้งต้นและปลายช่วงก่อนที่บิตสูงของแอดเดรสจะถูกตัดทิ้ง
+function I2CAddressRangeValid(AddrType: byte; Address: longword;
+  DataLen: integer): boolean;
+
+//จำนวนไบต์ที่ส่งต่อเนื่องได้โดยไม่ข้ามขอบที่บิตแอดเดรสย้ายไปอยู่ใน
+//control byte ชิปจะไม่ carry บิตข้ามขอบนี้ระหว่าง sequential read/write
+function I2CChunkToBankBoundary(AddrType: byte; Address: longword;
+  Requested: integer): integer;
+
 function UsbAspI2C_Read(DevAddr, AddrType: byte; Address: longword;var buffer: array of byte; bufflen: integer): integer;
 function UsbAspI2C_Write(DevAddr, AddrType: byte; Address: longword; buffer: array of byte; bufflen: integer): integer;
 
@@ -66,6 +79,11 @@ function UsbAspI2C_Write(DevAddr, AddrType: byte; Address: longword; buffer: arr
 //
 //คืน False เมื่อรอจนหมดเวลาแล้วชิปยังไม่ตอบ
 function UsbAspI2C_WaitReady(DevByte: byte; TimeoutMs: integer): boolean;
+
+//เหมือนด้านบน แต่สร้าง control byte จากแอดเดรสจริง จึง poll bank เดียวกับ
+//คำสั่งเขียนที่เพิ่งส่งไป
+function UsbAspI2C_WaitReadyAt(DevAddr, AddrType: byte; Address: longword;
+  TimeoutMs: integer): boolean;
 
 implementation
 
@@ -80,22 +98,92 @@ end;
 function UsbAspI2C_BUSY(Address: byte): Boolean;
 begin
   AsProgrammer.Programmer.I2CStart;
-  Result := not AsProgrammer.Programmer.I2CWriteByte(Address);
+  //ACK polling ต้องเป็นคำสั่งเขียนเสมอ
+  Result := not AsProgrammer.Programmer.I2CWriteByte(Address and $FE);
   AsProgrammer.Programmer.I2CStop;
 end;
 
 function UsbAspI2C_WaitReady(DevByte: byte; TimeoutMs: integer): boolean;
 var
-  Started: TDateTime;
+  Deadline: QWord;
 begin
-  Started := Now;
+  if TimeoutMs < 0 then Exit(False);
+  Deadline := GetTickCount64 + QWord(TimeoutMs);
 
   repeat
     if not UsbAspI2C_BUSY(DevByte) then Exit(True);
-  until MilliSecondsBetween(Now, Started) > TimeoutMs;
+    if GetTickCount64 >= Deadline then Break;
+    //ไม่ยิง USB/I2C แบบ tight loop จนกินทั้ง CPU และบัส
+    Sleep(1);
+  until False;
 
-  //ถามครั้งสุดท้ายหลังหมดเวลา เผื่อชิปเพิ่งพร้อมพอดี
-  Result := not UsbAspI2C_BUSY(DevByte);
+  Result := False;
+end;
+
+function I2CAddrCapacity(AddrType: byte): longword;
+begin
+  case AddrType of
+    I2C_ADDR_TYPE_7BIT:       Result := 128;
+    I2C_ADDR_TYPE_1BYTE:      Result := 256;
+    I2C_ADDR_TYPE_1BYTE_1BIT: Result := 512;
+    I2C_ADDR_TYPE_1BYTE_2BIT: Result := 1024;
+    I2C_ADDR_TYPE_1BYTE_3BIT: Result := 2048;
+    I2C_ADDR_TYPE_2BYTE:      Result := 65536;
+    I2C_ADDR_TYPE_2BYTE_1BIT,
+    I2C_ADDR_TYPE_24LC1025:   Result := 131072;
+  else
+    Result := 0;
+  end;
+end;
+
+function I2CBankSize(AddrType: byte): longword;
+begin
+  case AddrType of
+    I2C_ADDR_TYPE_7BIT:       Result := 128;
+    I2C_ADDR_TYPE_1BYTE,
+    I2C_ADDR_TYPE_1BYTE_1BIT,
+    I2C_ADDR_TYPE_1BYTE_2BIT,
+    I2C_ADDR_TYPE_1BYTE_3BIT: Result := 256;
+    I2C_ADDR_TYPE_2BYTE,
+    I2C_ADDR_TYPE_2BYTE_1BIT,
+    I2C_ADDR_TYPE_24LC1025:   Result := 65536;
+  else
+    Result := 0;
+  end;
+end;
+
+function I2CAddressRangeValid(AddrType: byte; Address: longword;
+  DataLen: integer): boolean;
+var
+  Capacity: longword;
+  EndAddr: QWord;
+begin
+  Result := False;
+  if DataLen < 0 then Exit;
+
+  Capacity := I2CAddrCapacity(AddrType);
+  if Capacity = 0 then Exit;
+
+  EndAddr := QWord(Address) + QWord(DataLen);
+  Result := (Address < Capacity) and (EndAddr <= QWord(Capacity));
+end;
+
+function I2CChunkToBankBoundary(AddrType: byte; Address: longword;
+  Requested: integer): integer;
+var
+  BankSize, Remain: longword;
+begin
+  Result := 0;
+  if Requested <= 0 then Exit;
+
+  BankSize := I2CBankSize(AddrType);
+  if BankSize = 0 then Exit;
+
+  Remain := BankSize - (Address mod BankSize);
+  if QWord(Requested) < QWord(Remain) then
+    Result := Requested
+  else
+    Result := integer(Remain);
 end;
 
 function BuildI2CAddr(DevAddr, AddrType: byte; Address: longword;
@@ -111,10 +199,16 @@ function BuildI2CAddr(DevAddr, AddrType: byte; Address: longword;
   end;
 
 begin
-  A.DevByte := DevAddr;
+  //Output ต้องอยู่ในสถานะปลอดภัยแม้ validation ล้มเหลวก่อนเข้า case
+  A.DevByte := 0;
   A.AddrBytes[0] := 0;
   A.AddrBytes[1] := 0;
   A.AddrLen := 0;
+  Result := False;
+
+  //ห้ามปล่อยให้บิตสูงหายไปเงียบ ๆ แล้ววนกลับไปเขียนต้นชิป
+  if not I2CAddressRangeValid(AddrType, Address, 0) then Exit;
+  A.DevByte := DevAddr and $FE;
   Result := True;
 
   case AddrType of
@@ -187,21 +281,50 @@ begin
   end;
 end;
 
+function UsbAspI2C_WaitReadyAt(DevAddr, AddrType: byte; Address: longword;
+  TimeoutMs: integer): boolean;
+var
+  A: TI2CAddr;
+begin
+  if not BuildI2CAddr(DevAddr, AddrType, Address, A) then Exit(False);
+  Result := UsbAspI2C_WaitReady(A.DevByte, TimeoutMs);
+end;
+
 //คืนจำนวนไบต์ที่อ่านได้
 function UsbAspI2C_Read(DevAddr, AddrType: byte; Address: longword; var buffer: array of byte; bufflen: integer): integer;
 var
   A: TI2CAddr;
-  wBuffer: array of byte;
-  i: integer;
+  wBuffer, rBuffer: array of byte;
+  i, Chunk, Got, Total: integer;
+  CurAddr: longword;
 begin
-  if not BuildI2CAddr(DevAddr, AddrType, Address, A) then Exit(-1);
+  if (bufflen < 0) or (bufflen > Length(buffer)) then Exit(-1);
+  if bufflen = 0 then Exit(0);
+  if not I2CAddressRangeValid(AddrType, Address, bufflen) then Exit(-1);
 
-  SetLength(wBuffer, A.AddrLen);
-  for i := 0 to A.AddrLen - 1 do
-    wBuffer[i] := A.AddrBytes[i];
+  Total := 0;
+  CurAddr := Address;
+  while Total < bufflen do
+  begin
+    Chunk := I2CChunkToBankBoundary(AddrType, CurAddr, bufflen - Total);
+    if Chunk <= 0 then Exit(-1);
+    if not BuildI2CAddr(DevAddr, AddrType, CurAddr, A) then Exit(-1);
 
-  Result := AsProgrammer.Programmer.I2CReadWrite(A.DevByte, A.AddrLen, wBuffer,
-                                                bufflen, buffer) - A.AddrLen;
+    SetLength(wBuffer, A.AddrLen);
+    for i := 0 to A.AddrLen - 1 do
+      wBuffer[i] := A.AddrBytes[i];
+    SetLength(rBuffer, Chunk);
+
+    Got := AsProgrammer.Programmer.I2CReadWrite(A.DevByte, A.AddrLen, wBuffer,
+                                               Chunk, rBuffer);
+    if Got <> A.AddrLen + Chunk then Exit(-1);
+
+    Move(rBuffer[0], buffer[Total], Chunk);
+    Inc(Total, Chunk);
+    Inc(CurAddr, longword(Chunk));
+  end;
+
+  Result := Total;
 end;
 
 //คืนจำนวนไบต์ที่เขียนได้
@@ -210,23 +333,38 @@ var
   A: TI2CAddr;
   wBuffer: array of byte;
   dummy: byte;
-  i: integer;
+  i, Chunk, Sent, Total: integer;
+  CurAddr: longword;
 begin
-  if not BuildI2CAddr(DevAddr, AddrType, Address, A) then Exit(-1);
+  if (bufflen < 0) or (bufflen > Length(buffer)) then Exit(-1);
+  if bufflen = 0 then Exit(0);
+  if not I2CAddressRangeValid(AddrType, Address, bufflen) then Exit(-1);
 
-  SetLength(wBuffer, A.AddrLen + bufflen);
-  for i := 0 to A.AddrLen - 1 do
-    wBuffer[i] := A.AddrBytes[i];
-  if bufflen > 0 then
-    move(buffer, wBuffer[A.AddrLen], bufflen);
+  Total := 0;
+  CurAddr := Address;
+  while Total < bufflen do
+  begin
+    Chunk := I2CChunkToBankBoundary(AddrType, CurAddr, bufflen - Total);
+    if Chunk <= 0 then Exit(-1);
+    if not BuildI2CAddr(DevAddr, AddrType, CurAddr, A) then Exit(-1);
 
-  Result := AsProgrammer.Programmer.I2CReadWrite(A.DevByte, A.AddrLen + bufflen,
-                                                wBuffer, 0, dummy) - A.AddrLen;
+    SetLength(wBuffer, A.AddrLen + Chunk);
+    for i := 0 to A.AddrLen - 1 do
+      wBuffer[i] := A.AddrBytes[i];
+    Move(buffer[Total], wBuffer[A.AddrLen], Chunk);
 
-  //ชิปกำลังเขียนลงเซลล์อยู่ ถามจนกว่าจะตอบรับ แทนที่จะหน่วงเวลาเดา ๆ
-  //ถ้าไม่รอแล้วยิงเพจถัดไปทันที ชิปจะไม่ตอบรับ แล้วข้อมูลเพจนั้นหายเงียบ ๆ
-  if Result > 0 then
-    UsbAspI2C_WaitReady(A.DevByte, I2C_WRITE_CYCLE_MS);
+    Sent := AsProgrammer.Programmer.I2CReadWrite(A.DevByte, A.AddrLen + Chunk,
+                                                wBuffer, 0, dummy);
+    if Sent <> A.AddrLen + Chunk then Exit(-1);
+
+    //ต้อง poll control byte ของ bank ที่เพิ่งเขียน และ timeout ต้องเป็นผลล้มเหลว
+    if not UsbAspI2C_WaitReady(A.DevByte, I2C_WRITE_CYCLE_MS) then Exit(-1);
+
+    Inc(Total, Chunk);
+    Inc(CurAddr, longword(Chunk));
+  end;
+
+  Result := Total;
 end;
 
 end.

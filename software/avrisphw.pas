@@ -111,7 +111,7 @@ end;
 
 function TAvrispHardware.GetLastError: string;
 begin
-  result := usb_strerror;
+  result := usb_strerror();
   if UpCase(result) = 'NO ERROR' then
     result := FStrError;
 end;

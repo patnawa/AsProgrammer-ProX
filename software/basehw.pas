@@ -5,7 +5,7 @@ unit BaseHW;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, electricalpreflight;
 
 type
 
@@ -29,7 +29,20 @@ public
   procedure SPIDeinit; virtual; abstract;
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; virtual; abstract;
   function SPIWrite(CS: byte; BufferLen: integer; buffer: array of byte): integer; virtual; abstract;
-  function SPIWriteRead(CS: byte; WBufferLen: integer; WBuffer: array of byte;RBufferLen: integer; var RBuffer: array of byte): integer; virtual; abstract;
+  //Default split transaction for programmers that keep CS asserted across
+  //SPIWrite(CS=0) and SPIRead(CS=1).  Backends requiring one native combined
+  //exchange (for example Bus Pirate) override this method.
+  function SPIWriteRead(CS: byte; WBufferLen: integer;
+    WBuffer: array of byte; RBufferLen: integer;
+    var RBuffer: array of byte): integer; virtual;
+
+  //Production admission asks the backend for measured, model-specific facts.
+  //The default is deliberately "unknown" so a backend cannot enter strict
+  //production merely because no one implemented its electrical contract.
+  function GetElectricalCapabilities(
+    out Capabilities: TProgrammerElectricalCapabilities): boolean; virtual;
+  function GetElectricalObservation(
+    out Observation: TElectricalObservation): boolean; virtual;
 
   //I2C
   procedure I2CInit; virtual; abstract;
@@ -80,6 +93,61 @@ var
   AsProgrammer: TAsProgrammer;
 
 implementation
+
+function TBaseHardware.SPIWriteRead(CS: byte; WBufferLen: integer;
+  WBuffer: array of byte; RBufferLen: integer;
+  var RBuffer: array of byte): integer;
+var
+  Sent: integer;
+  Dummy: array[0..0] of byte;
+begin
+  Result := -1;
+  if (WBufferLen < 0) or (RBufferLen < 0) or
+     (WBufferLen > Length(WBuffer)) or
+     (RBufferLen > Length(RBuffer)) then Exit;
+
+  //ถ้าไม่มีเฟสอ่าน ต้องส่งด้วย CS ของผู้เรียกในทรานสเฟอร์เดียว: การส่งด้วย
+  //CS=0 แล้ว Exit ทิ้งไว้จะค้าง CS ต่ำ และ opcode ของคำสั่งถัดไปจะกลายเป็น
+  //ข้อมูลต่อท้ายคำสั่งเดิม
+  if RBufferLen = 0 then
+  begin
+    if WBufferLen = 0 then Exit(0);
+    Sent := SPIWrite(CS, WBufferLen, WBuffer);
+    if Sent = WBufferLen then Result := 0;
+    Exit;
+  end;
+
+  if WBufferLen > 0 then
+  begin
+    Sent := SPIWrite(0, WBufferLen, WBuffer);
+    if Sent <> WBufferLen then
+    begin
+      //ส่งไม่ครบ: CS อาจยังต่ำอยู่ ปล่อยบัสแบบ best effort ก่อนรายงานล้มเหลว
+      //เฟรมที่ขาดกลางคันชิปจะทิ้งเองตอน CS ยก ปล่อยค้างไว้อันตรายกว่า
+      Dummy[0] := $FF;
+      SPIRead(1, 1, Dummy);
+      Exit;
+    end;
+  end;
+
+  Result := SPIRead(CS, RBufferLen, RBuffer);
+  if Result <> RBufferLen then Result := -1;
+end;
+
+function TBaseHardware.GetElectricalCapabilities(
+  out Capabilities: TProgrammerElectricalCapabilities): boolean;
+begin
+  FillChar(Capabilities, SizeOf(Capabilities), 0);
+  Capabilities.Known := False;
+  Result := False;
+end;
+
+function TBaseHardware.GetElectricalObservation(
+  out Observation: TElectricalObservation): boolean;
+begin
+  FillChar(Observation, SizeOf(Observation), 0);
+  Result := False;
+end;
 
 constructor TAsProgrammer.Create;
 begin

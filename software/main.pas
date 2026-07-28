@@ -16,7 +16,9 @@ uses
   XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
   utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, serialnum, jedec, protbits,
-  opresult, prodlog, chipsave, flashops,
+  opresult, prodlog, chipsave, flashops, imgcheck,
+  operationmodel, norplanner, norengine, spi25noradapter, prodcrypto,
+  prodevidence,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
 
@@ -113,6 +115,13 @@ type
     MenuArduinoCOMPort: TMenuItem;
     MenuBuzzpiratCOMPort: TMenuItem;
     MenuSkipFF: TMenuItem;
+    //ตัวเลือกที่เพิ่มมาในรุ่น 4.4
+    MenuFastRead: TMenuItem;
+    MenuResetChip: TMenuItem;
+    MenuVerifyErase: TMenuItem;
+    MenuDoubleRead: TMenuItem;
+    MenuCheckContact: TMenuItem;
+    MenuScanImage: TMenuItem;
     MenuEraseRangeAuto: TMenuItem;
     MenuEraseRange4K: TMenuItem;
     MenuEraseRange32K: TMenuItem;
@@ -300,7 +309,17 @@ type
     procedure StartAddressEditKeyPress(Sender: TObject; var Key: char);
     procedure VerifyFlash(BlankCheck: boolean = false);
   private
-    { ส่วนประกาศแบบ private }
+    FWorkflowPanel: TPanel;
+    FWorkflowTitle: TLabel;
+    FWorkflowState: TLabel;
+    FWorkflowDetect: TButton;
+    FWorkflowOpen: TButton;
+    FWorkflowSmart: TButton;
+    FWorkflowRead: TButton;
+    FWorkflowVerify: TButton;
+    procedure CreateWorkflowBar;
+    procedure UpdateWorkflowText;
+    procedure UpdateWorkflowState;
   public
     { ส่วนประกาศแบบ public }
 
@@ -338,6 +357,16 @@ type
 
   //เขียนหนึ่งบรรทัดลงบันทึกการผลิต ใช้ผลของงานล่าสุดเป็นตัวตัดสินผ่านหรือไม่ผ่าน
   procedure WriteProdLogEntry(Size, CRC: cardinal; const UID: string);
+
+  //เข้าโหมดโปรแกรม SPI ด้วยความเร็วที่ตั้งไว้บนหน้าจอ
+  //โหมดบรรทัดคำสั่งต้องเรียกเองสำหรับงานที่ไม่ได้ผ่านปุ่มบนหน้าจอ
+  function EnterProgModeSPI25: boolean;
+
+  //ดัมป์ตาราง SFDP ดิบ ๆ ลงไฟล์ ต้องอยู่ในโหมดโปรแกรมแล้ว
+  function DumpSFDPToFile(const FileName: string; out ErrMsg: string): boolean;
+
+  //พิมพ์คำอธิบายตาราง SFDP ลง log
+  procedure LogSFDPDetails(const Info: TSFDPInfo);
 
 const
   SPI_CMD_25             = 0;
@@ -414,16 +443,64 @@ var
 
   //เลขประจำตัวของชิปที่อ่านได้ครั้งล่าสุด ใช้ตอนเขียนบันทึกการผลิต
   LastChipUID: string = '';
+  //True only when the complete eight-byte 4Bh reply was transferred.  An
+  //empty UID after an exact reply means "unsupported/all blank"; an empty UID
+  //after a short reply means the electrical transaction itself was invalid.
+  LastChipUIDTransferExact: boolean = False;
+
+  //คำเตือนจากการดูตัวข้อมูลที่อ่านมาได้ล่าสุด สตริงว่างแปลว่าไม่มีอะไรน่าสงสัย
+  //เก็บไว้ให้โหมดบรรทัดคำสั่งรายงานต่อได้ โดยไม่ต้องไปแกะข้อความจาก log
+  LastImageWarning: string = '';
+
+  //โหมดบรรทัดคำสั่งสั่งจำนวนรอบการอ่านมาเองได้ 0 = ใช้ค่าจากหน้าจอ
+  CLIReadPasses: integer = 0;
 
   //รหัส 9Fh ที่อ่านได้ครั้งล่าสุด ใช้ตอนบันทึกชิปใหม่ลงตารางของผู้ใช้
   LastID9F: string = '';
 
   //ไฟล์งานที่โหลดไว้ ถ้ามี
   CurrentJob: TJobFile;
+  //A configured job that failed to load must never be indistinguishable from
+  //"no job configured".  The old Loaded=False shortcut silently disabled the
+  //production guard after a missing, truncated, or malformed job file.
+  CurrentJobLoadError: string = '';
 
   //เลขรันนิ่งอัตโนมัติและการผลิตเป็นชุด
   //อยู่ในส่วน interface เพราะโหมดบรรทัดคำสั่งต้องทับค่าบางตัวได้
   ProdSettings: TProdSettings;
+
+  //Set only by authenticated production-job admission in cli.pas.  Smart
+  //Write captures these values into its evidence bridge before execution.
+  StrictProductionMode: boolean = False;
+  StrictProductionJobID: string = '';
+  StrictProductionJobRevision: cardinal = 0;
+  StrictEvidenceDirectory: string = '';
+  //กุญแจของสถานีสำหรับเซ็นหลักฐาน (ตัวเดียวกับที่ตรวจ manifest) ถูกตั้งค่า
+  //เฉพาะช่วง strict run และถูกล้างใน finally ของ cli.pas เสมอ
+  StrictEvidenceKeyID: string = '';
+  StrictEvidenceKey: TBytes = nil;
+  //OperationID ของ strict run ล่าสุด ให้ cli.pas เอาไปบันทึกลงสถานะกันซ้ำ
+  LastStrictRunID: string = '';
+
+  //โหมดดูแผนอย่างเดียวของ Smart Write: อ่านชิป วางแผน พิมพ์แผน แล้วจบ
+  //โดยไม่แตะ status register และไม่ส่งคำสั่งทำลายข้อมูลใด ๆ (--plan-only)
+  SmartWritePlanOnly: boolean = False;
+  StrictProductionUIDRequired: boolean = False;
+  StrictProductionReadPasses: cardinal = 2;
+  StrictProductionProfileHash: string = '';
+  StrictProductionImageHash: string = '';
+  StrictProductionExpectedID: string = '';
+  StrictProductionPageSize: cardinal = 0;
+  StrictProductionEraseSize: cardinal = 0;
+  StrictProductionEraseOpcode: byte = 0;
+  StrictAdmittedProgrammerID: string = '';
+
+  //Identity and digest of the exact personalized image used by the current
+  //write.  Never regenerate a random serial while logging the same unit.
+  CurrentSerial: TSerialAllocation;
+  CurrentSerialValid: boolean = False;
+  CurrentSerialReserved: boolean = False;
+  LastProgramCRC: cardinal = 0;
 implementation
 
 
@@ -452,8 +529,36 @@ type
     procedure ProgressReset;
   end;
 
+  //Bridges the headless typed NOR executor to the existing GUI/CLI result
+  //surface.  It contains no mutable operation inputs: those are captured in
+  //TOperationRequest and TNORPlan before the device worker starts.
+  TNORUIBridge = class
+  public
+    EvidenceSize: cardinal;
+    EvidenceCRC: cardinal;
+    EvidenceUID: string;
+    EvidenceCommitted: boolean;
+    StrictMode: boolean;
+    StrictJobID: string;
+    StrictJobRevision: cardinal;
+    EvidenceDirectory: string;
+    EvidenceKeyID: string;
+    EvidenceKey: TBytes;
+    OperatorName: string;
+    ProgrammerID: string;
+    ReadPasses: cardinal;
+    SerialText: string;
+    PhysicalVerifyCompleted: boolean;
+    procedure Receive(const Event: TOperationEvent);
+    function CommitEvidence(const Request: TOperationRequest;
+      out ErrorText: string): boolean;
+    function CommitFailureEvidence(const Request: TOperationRequest;
+      const FailureText: string; out ErrorText: string): boolean;
+  end;
+
 var
   UIProxy: TUIProxy;
+  ActiveNORCancellation: TCancellationToken = nil;
 
   //กันการเรียกซ้อน เพราะเมนูไม่เหมือนปุ่มบนแถบเครื่องมือ
   //มันยังคลิกได้อยู่ตอนที่ thread หลักกำลังปั๊ม message
@@ -466,6 +571,11 @@ var
     SkipFF: boolean;
     AutoCheck: boolean;
     IgnoreBusy: boolean;
+    FastRead: boolean;
+    VerifyErase: boolean;
+    ScanImage: boolean;
+    ReadPasses: integer;   //อ่านซ้ำกี่รอบแล้วเทียบกัน 1 = รอบเดียวแบบเดิม
+    I2CAddrType: integer;  //ชนิดแอดเดรสของ I2C อ่านจาก control ไม่ได้บน thread
   end;
 
 procedure TUIProxy.SyncLog;
@@ -579,6 +689,50 @@ begin
     MainForm.ProgressBar.Position := V;
 end;
 
+//ตัวนับความคืบหน้าของงานที่กำลังทำอยู่
+//
+//เดิมหลายเส้นทางนับด้วยการอ่านค่าเดิมจาก ProgressBar แล้วบวกหนึ่ง ซึ่งอ่าน
+//control จาก thread เบื้องหลังไม่ได้ นั่นคือเหตุผลเดียวที่เส้นทางเหล่านั้น
+//ยังทำงานเบื้องหลังไม่ได้ ตัวนับที่เก็บไว้เองแก้ปัญหานั้นโดยไม่ต้องแตะอะไรอีก
+var
+  ProgressCounter: integer = 0;
+
+procedure ProgressReset(Max: integer);
+begin
+  ProgressCounter := 0;
+  SetProgressMax(Max);
+  SetProgressPos(0);
+end;
+
+procedure ProgressStep(By: integer = 1);
+begin
+  Inc(ProgressCounter, By);
+  SetProgressPos(ProgressCounter);
+end;
+
+procedure TNORUIBridge.Receive(const Event: TOperationEvent);
+var
+  Done, Total: cardinal;
+begin
+  case Event.Kind of
+    evProgress:
+      begin
+        if Event.BytesDone > High(cardinal) then Done := High(cardinal)
+        else Done := cardinal(Event.BytesDone);
+        if Event.BytesTotal > High(cardinal) then Total := High(cardinal)
+        else Total := cardinal(Event.BytesTotal);
+        OpProgress(Done, Total);
+        if Total <= cardinal(High(integer)) then
+        begin
+          SetProgressMax(integer(Total));
+          if Done <= cardinal(High(integer)) then SetProgressPos(integer(Done));
+        end;
+      end;
+    evWarning:
+      LogPrint('NOR warning: ' + Event.MessageText);
+  end;
+end;
+
 //อ่านสถานะหน้าจอเก็บไว้ ต้องเรียกจาก thread หลักเท่านั้น
 //และต้องเรียกก่อนเริ่มงาน
 procedure CaptureUIState;
@@ -590,6 +744,18 @@ begin
   OpUI.SkipFF     := MainForm.MenuSkipFF.Checked;
   OpUI.AutoCheck  := MainForm.MenuAutoCheck.Checked;
   OpUI.IgnoreBusy := MainForm.MenuIgnoreBusyBit.Checked;
+
+  OpUI.FastRead    := MainForm.MenuFastRead.Checked;
+  OpUI.VerifyErase := MainForm.MenuVerifyErase.Checked;
+  OpUI.ScanImage   := MainForm.MenuScanImage.Checked;
+  OpUI.I2CAddrType := MainForm.ComboAddrType.ItemIndex;
+
+  if CLIReadPasses > 0 then
+    OpUI.ReadPasses := CLIReadPasses
+  else if MainForm.MenuDoubleRead.Checked then
+    OpUI.ReadPasses := 2
+  else
+    OpUI.ReadPasses := 1;
 end;
 
 procedure SyncUI_ICParam();
@@ -617,21 +783,24 @@ end;
 
 function UserCancel(): boolean;
 begin
-  Result := false;
-  if MainForm.ButtonCancel.Tag <> 0 then
+  Result := OperationCancellationRequested;
+  if Result then
   begin
-    LogPrint(STR_USER_CANCEL);
-    OpCancel;
+    //Only report the request once.  Busy waits deliberately keep polling the
+    //command already in flight; cancellation prevents the next command.
+    if not LastOp.Cancelled then
+    begin
+      LogPrint(STR_USER_CANCEL);
+      OpCancel;
+    end;
 
     if InWorkerThread then
       UIProxy.ProgressReset
     else
     begin
       MainForm.ProgressBar.Style := pbstNormal;
-      MainForm.ProgressBar.Position:= 0;
+      SetProgressPos(0);
     end;
-
-    Result := true;
   end;
 end;
 
@@ -731,6 +900,7 @@ begin
   TPOTranslator(LRSTranslator).UpdateTranslation(ChipSearchForm);
   TPOTranslator(LRSTranslator).UpdateTranslation(sregeditForm);
   TPOTranslator(LRSTranslator).UpdateTranslation(SearchForm);
+  UpdateWorkflowText;
 end;
 
 procedure LoadLangList();
@@ -1029,6 +1199,169 @@ begin
 
   MainForm.LabelChipName.Font.Color := AccentColor;
   MainForm.LabelChipName.Font.Style := [fsBold];
+
+  if MainForm.FWorkflowPanel <> nil then
+  begin
+    MainForm.FWorkflowPanel.Color := ChromeColor;
+    MainForm.FWorkflowTitle.Font.Color := TextColor;
+    MainForm.FWorkflowState.Font.Color := TextColor;
+
+    MainForm.FWorkflowDetect.Color := SurfaceColor;
+    MainForm.FWorkflowDetect.Font.Color := TextColor;
+    MainForm.FWorkflowOpen.Color := SurfaceColor;
+    MainForm.FWorkflowOpen.Font.Color := TextColor;
+    MainForm.FWorkflowRead.Color := SurfaceColor;
+    MainForm.FWorkflowRead.Font.Color := TextColor;
+    MainForm.FWorkflowVerify.Color := SurfaceColor;
+    MainForm.FWorkflowVerify.Font.Color := TextColor;
+
+    MainForm.FWorkflowSmart.Color := SurfaceColor;
+    MainForm.FWorkflowSmart.Font.Color := AccentColor;
+    MainForm.FWorkflowSmart.Font.Style := [fsBold];
+    MainForm.UpdateWorkflowState;
+  end;
+end;
+
+//แถบนี้ทำให้เส้นทางที่ปลอดภัยมองเห็นได้ตลอดเวลา แทนที่จะซ่อน Smart Write
+//ไว้หลังลูกศรเล็ก ๆ ของปุ่ม Write ผู้ใช้ขั้นสูงยังใช้ปุ่มเดิมและเมนูเดิมได้
+//ทั้งหมด จึงไม่มีการเปลี่ยนความหมายของคำสั่งเก่า
+procedure TMainForm.CreateWorkflowBar;
+const
+  BarHeight = 50;
+  ButtonTop = 8;
+  ButtonHeight = 34;
+
+  procedure MakeButton(out B: TButton; ALeft, AWidth: integer;
+    Handler: TNotifyEvent);
+  begin
+    B := TButton.Create(Self);
+    B.Parent := FWorkflowPanel;
+    B.SetBounds(ALeft, ButtonTop, AWidth, ButtonHeight);
+    B.OnClick := Handler;
+    B.TabStop := True;
+  end;
+
+begin
+  if FWorkflowPanel <> nil then Exit;
+
+  FWorkflowPanel := TPanel.Create(Self);
+  FWorkflowPanel.Parent := Self;
+  FWorkflowPanel.Name := 'WorkflowPanel';
+  FWorkflowPanel.BevelOuter := bvNone;
+  FWorkflowPanel.Width := ClientWidth;
+  FWorkflowPanel.Height := BarHeight;
+  FWorkflowPanel.Top := ToolBar.Height;
+  FWorkflowPanel.Align := alTop;
+
+  FWorkflowTitle := TLabel.Create(Self);
+  FWorkflowTitle.Parent := FWorkflowPanel;
+  FWorkflowTitle.SetBounds(12, 5, 88, 40);
+  FWorkflowTitle.Alignment := taCenter;
+  FWorkflowTitle.Layout := tlCenter;
+  FWorkflowTitle.AutoSize := False;
+  FWorkflowTitle.Font.Style := [fsBold];
+
+  MakeButton(FWorkflowDetect, 106, 110, @ButtonReadIDClick);
+  MakeButton(FWorkflowOpen,   222, 110, @ButtonOpenHexClick);
+  MakeButton(FWorkflowSmart,  338, 122, @MenuSmartWriteClick);
+  MakeButton(FWorkflowRead,   466,  96, @ButtonReadClick);
+  MakeButton(FWorkflowVerify, 568,  86, @ButtonVerifyClick);
+
+  FWorkflowState := TLabel.Create(Self);
+  FWorkflowState.Parent := FWorkflowPanel;
+  FWorkflowState.SetBounds(670, 5, FWorkflowPanel.ClientWidth - 682, 40);
+  FWorkflowState.Anchors := [akLeft, akTop, akRight];
+  FWorkflowState.Alignment := taRightJustify;
+  FWorkflowState.Layout := tlCenter;
+  FWorkflowState.AutoSize := False;
+  FWorkflowState.ShowHint := True;
+
+  UpdateWorkflowText;
+end;
+
+procedure TMainForm.UpdateWorkflowText;
+begin
+  if FWorkflowPanel = nil then Exit;
+
+  FWorkflowTitle.Caption := STR_WORKFLOW_TITLE;
+  FWorkflowDetect.Caption := STR_WORKFLOW_DETECT;
+  FWorkflowOpen.Caption := STR_WORKFLOW_OPEN;
+  FWorkflowSmart.Caption := STR_WORKFLOW_SMART;
+  FWorkflowRead.Caption := STR_WORKFLOW_READ;
+  FWorkflowVerify.Caption := STR_WORKFLOW_VERIFY;
+
+  FWorkflowDetect.Hint := STR_WORKFLOW_DETECT + ' (F5)';
+  FWorkflowDetect.ShowHint := True;
+  FWorkflowOpen.Hint := STR_WORKFLOW_OPEN + ' (Ctrl+O)';
+  FWorkflowOpen.ShowHint := True;
+  FWorkflowSmart.Hint :=
+    'Preserve neighbouring bytes, erase only when required, program, and verify'
+    + ' (Ctrl+Shift+P)';
+  FWorkflowSmart.ShowHint := True;
+  FWorkflowRead.Hint := STR_WORKFLOW_READ + ' (Ctrl+R)';
+  FWorkflowRead.ShowHint := True;
+  FWorkflowVerify.Hint := STR_WORKFLOW_VERIFY + ' (Ctrl+Shift+V)';
+  FWorkflowVerify.ShowHint := True;
+
+  UpdateWorkflowState;
+end;
+
+//บอกขั้นต่อไปด้วยสถานะจริงของโปรแกรม และปิดเฉพาะปุ่มลัดชุดใหม่เมื่อเงื่อนไข
+//ยังไม่ครบ ปุ่มดั้งเดิมยังอยู่เพื่อไม่ขวางงานวิเคราะห์/ฮาร์ดแวร์แบบพิเศษ
+procedure TMainForm.UpdateWorkflowState;
+var
+  HasBuffer, IsNOR: boolean;
+  StateText: string;
+  StateColor: TColor;
+begin
+  if FWorkflowPanel = nil then Exit;
+
+  HasBuffer := MPHexEditorEx.DataSize > 0;
+  IsNOR := RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25);
+
+  FWorkflowOpen.Enabled := not OperationRunning;
+  FWorkflowDetect.Enabled := (not OperationRunning) and
+    ProgrammerPresent and RadioSPI.Checked;
+  FWorkflowRead.Enabled := (not OperationRunning) and
+    ProgrammerPresent and ChipDetected;
+  FWorkflowVerify.Enabled := FWorkflowRead.Enabled and HasBuffer;
+  FWorkflowSmart.Enabled := FWorkflowVerify.Enabled and IsNOR;
+
+  if OperationRunning then
+  begin
+    StateText := STR_WORKFLOW_RUNNING;
+    StateColor := TColor($2BB3F3);
+  end
+  else if not ProgrammerPresent then
+  begin
+    StateText := STR_WORKFLOW_CONNECT;
+    StateColor := TColor($6E8EB0);
+  end
+  else if not ChipDetected then
+  begin
+    StateText := STR_WORKFLOW_PICK_CHIP;
+    StateColor := TColor($D16E0A);
+  end
+  else if not HasBuffer then
+  begin
+    StateText := STR_WORKFLOW_LOAD;
+    StateColor := TColor($D16E0A);
+  end
+  else if IsNOR then
+  begin
+    StateText := STR_WORKFLOW_READY;
+    StateColor := TColor($5B9E2E);
+  end
+  else
+  begin
+    StateText := STR_WORKFLOW_LEGACY;
+    StateColor := TColor($5B9E2E);
+  end;
+
+  FWorkflowState.Caption := StateText;
+  FWorkflowState.Hint := StateText;
+  FWorkflowState.Font.Color := StateColor;
+  FWorkflowState.Font.Style := [fsBold];
 end;
 
 //------------------------------------------------------------------------
@@ -1289,6 +1622,7 @@ begin
 
   ChipDetected := (CurrentICParam.Size > 0) or (UISize > 0);
   MainForm.ChipView.Invalidate;
+  MainForm.UpdateWorkflowState;
 end;
 
 //แผงด้านซ้ายในไฟล์ฟอร์มถูกวางไว้แบบพิกัดตายตัวและแคบเกินไป
@@ -1368,36 +1702,172 @@ const
   //เพื่อจะได้คำตอบที่ชี้ไปผิดเรื่อง
   NOT_RESPONDING_MS = 500;
 var
-  Started: TDateTime;
+  Started, Elapsed: QWord;
   sreg: byte;
-  AllOnes: boolean;
+  AllOnes, CancelSeen: boolean;
 begin
   Result := True;
-  Started := Now;
+  Started := GetTickCount64;
   AllOnes := True;
+  CancelSeen := False;
 
   while UsbAsp25_BusyEx(sreg) do
   begin
     if sreg <> $FF then AllOnes := False;
 
     OpProcessMessages;
-    if UserCancel then Exit(False);
+    //A program/erase command cannot be cancelled on the wire.  Closing the
+    //programmer immediately can leave the part busy and make EX4B/WRDI cleanup
+    //get ignored.  Record the request, drain the current command, then stop.
+    if UserCancel then CancelSeen := True;
 
-    if AllOnes and (MilliSecondsBetween(Now, Started) > NOT_RESPONDING_MS) then
+    Elapsed := GetTickCount64 - Started;
+
+    if AllOnes and (Elapsed > NOT_RESPONDING_MS) then
     begin
       LogPrint(STR_NOT_RESPONDING);
       OpFail('no chip is answering: the status register reads back as FF');
       Exit(False);
     end;
 
-    if MilliSecondsBetween(Now, Started) > TimeoutMs then
+    if Elapsed > QWord(TimeoutMs) then
     begin
       LogPrint(Format(STR_BUSY_TIMEOUT, [TimeoutMs div 1000]));
       OpFail(Format('the chip stayed busy for more than %d seconds',
                     [TimeoutMs div 1000]));
       Exit(False);
     end;
+
+    Sleep(1);
   end;
+
+  if OperationCancellationRequested then
+  begin
+    if not LastOp.Cancelled then OpCancel;
+    CancelSeen := True;
+  end;
+  if CancelSeen then Result := False;
+end;
+
+//95-series EEPROM uses the same WIP/WEL bit positions as SPI NOR, but its
+//protocol unit has its own exact-transfer status reader.  Never poll it through
+//the 25-series shortcut because that hides a failed command phase.
+function WaitNotBusy95(TimeoutMs: integer): boolean;
+var
+  Started: QWord;
+  Status: byte;
+  CancelSeen: boolean;
+begin
+  Result := False;
+  Started := GetTickCount64;
+  CancelSeen := False;
+
+  repeat
+    if UsbAsp95_ReadSR(Status) <> 1 then
+    begin
+      OpFail('the SPI EEPROM status register could not be read exactly');
+      Exit;
+    end;
+    if Status = $FF then
+    begin
+      OpFail('no SPI EEPROM is answering: status reads as FF');
+      Exit;
+    end;
+    if (Status and $01) = 0 then Break;
+
+    OpProcessMessages;
+    if UserCancel then CancelSeen := True;
+    if GetTickCount64 - Started > QWord(TimeoutMs) then
+    begin
+      OpFail(Format('the SPI EEPROM stayed busy for more than %d seconds',
+                    [TimeoutMs div 1000]));
+      Exit;
+    end;
+    Sleep(1);
+  until False;
+
+  if OperationCancellationRequested then
+  begin
+    if not LastOp.Cancelled then OpCancel;
+    CancelSeen := True;
+  end;
+  Result := not CancelSeen;
+end;
+
+function WaitNotBusy45(TimeoutMs: integer): boolean;
+var
+  Started: QWord;
+  Status: byte;
+  CancelSeen: boolean;
+begin
+  Result := False;
+  Started := GetTickCount64;
+  CancelSeen := False;
+
+  repeat
+  begin
+    if UsbAsp45_ReadSR(Status) <> 1 then
+    begin
+      OpFail('the DataFlash status register could not be read exactly');
+      Exit;
+    end;
+    //FF ล้วนคือบัสที่ไม่มีใครขับ ไม่ใช่ชิปที่พร้อม (density code 1111 ไม่มีจริง)
+    //ถ้าเชื่อบิต 7 ของค่านั้น คลิปที่หลุดกลางงานเขียนจะ "พร้อม" ทันทีทุกหน้า
+    if Status = $FF then
+    begin
+      OpFail('the DataFlash status bus reads FF; no chip is answering');
+      Exit;
+    end;
+    if (Status and $80) <> 0 then Break;
+
+    OpProcessMessages;
+    if UserCancel then CancelSeen := True;
+    if GetTickCount64 - Started > QWord(TimeoutMs) then
+    begin
+      OpFail(Format('DataFlash stayed busy for more than %d seconds',
+                    [TimeoutMs div 1000]));
+      Exit(False);
+    end;
+    Sleep(1);
+  end;
+  until False;
+
+  if OperationCancellationRequested then
+  begin
+    if not LastOp.Cancelled then OpCancel;
+    CancelSeen := True;
+  end;
+  Result := not CancelSeen;
+end;
+
+function WaitNotBusyMW(TimeoutMs: integer): boolean;
+var
+  Started: QWord;
+  CancelSeen: boolean;
+begin
+  Result := True;
+  Started := GetTickCount64;
+  CancelSeen := False;
+
+  while UsbAspMW_Busy do
+  begin
+    OpProcessMessages;
+    if UserCancel then CancelSeen := True;
+    if GetTickCount64 - Started > QWord(TimeoutMs) then
+    begin
+      OpFail(Format('MicroWire EEPROM stayed busy for more than %d seconds',
+                    [TimeoutMs div 1000]));
+      Exit(False);
+    end;
+    Sleep(1);
+  end;
+
+  if OperationCancellationRequested then
+  begin
+    if not LastOp.Cancelled then OpCancel;
+    CancelSeen := True;
+  end;
+  if CancelSeen then Result := False;
 end;
 
 //ตาราง SFDP ของชิปตัวที่เสียบอยู่ เก็บไว้ทั้งก้อน เพราะทั้งแผนผังเซกเตอร์
@@ -1435,19 +1905,416 @@ begin
   Result := Chip25PageProg4BOpcode <> 0;
 end;
 
-procedure Enter4B;
+function Enter4B: boolean;
 begin
-  if Mode4BActive then Exit;
-  UsbAsp25_EN4B();
+  if Mode4BActive then Exit(True);
+  if UsbAsp25_EN4B() <> 1 then
+  begin
+    OpFail('the SPI NOR did not accept an exact enter-4-byte-address command');
+    Exit(False);
+  end;
   Mode4BActive := True;
+  Result := True;
 end;
 
 //เรียกซ้ำได้ปลอดภัย ใช้ในบล็อก finally เสมอ
 procedure Leave4B;
 begin
   if not Mode4BActive then Exit;
-  UsbAsp25_EX4B();
-  Mode4BActive := False;
+  if UsbAsp25_EX4B() = 1 then
+    Mode4BActive := False
+  else
+    OpFail('the SPI NOR 4-byte-address cleanup command was not transferred exactly');
+end;
+
+//--- เพดานรอที่มาจากตัวชิปเอง ---
+//
+//ค่าคงที่ก้อนเดียวใช้กับชิปทุกตัวผิดทั้งสองทาง ชิป 256Mbit ที่ลบทั้งตัวจริง ๆ
+//ใช้เวลาเกินสิบนาทีจะถูกตัดบทว่าล้มเหลวทั้งที่กำลังทำงานอยู่ ส่วนเพจที่ควร
+//เขียนเสร็จใน 3 มิลลิวินาทีต้องรอจนครบ 5 วินาทีก่อนจะยอมบอกว่าชิปไม่ตอบ
+//JESD216 rev A เก็บเวลาจริงของชิปแต่ละตัวไว้ใน DWORD-10 กับ DWORD-11 อยู่แล้ว
+const
+  BUSY_CEILING_PAGE   = 30000;
+  BUSY_CEILING_SECTOR = 300000;
+  BUSY_CEILING_CHIP   = 3600000;
+
+function PageProgTimeout: integer;
+var
+  Declared: cardinal;
+begin
+  Declared := 0;
+  if CurrentSFDPValid and CurrentSFDP.HasTiming then
+    Declared := CurrentSFDP.PageProgTimeMaxMs;
+  Result := integer(BusyTimeoutMs(Declared, BUSY_TIMEOUT_PAGE, BUSY_CEILING_PAGE));
+end;
+
+function EraseTimeoutFor(SectorSize: cardinal): integer;
+var
+  Declared: cardinal;
+begin
+  Declared := 0;
+  if CurrentSFDPValid and CurrentSFDP.HasTiming then
+    Declared := SFDPEraseTimeoutForSize(CurrentSFDP, SectorSize);
+  Result := integer(BusyTimeoutMs(Declared, BUSY_TIMEOUT_SECTOR, BUSY_CEILING_SECTOR));
+end;
+
+function ChipEraseTimeout: integer;
+var
+  Declared: cardinal;
+begin
+  Declared := 0;
+  if CurrentSFDPValid and CurrentSFDP.HasTiming then
+    Declared := CurrentSFDP.ChipEraseTimeMaxMs;
+  Result := integer(BusyTimeoutMs(Declared, BUSY_TIMEOUT_CHIP, BUSY_CEILING_CHIP));
+end;
+
+//Build the exact erase geometry consumed by the transactional NOR planner.
+//An unresolved SFDP sector map is never replaced with a guessed uniform map:
+//doing so can erase across a hybrid-region boundary and destroy neighbours.
+function BuildCurrentNORGeometry(ChipSize, PageSize: cardinal;
+  Native4BOpcodes: boolean; out Geometry: TNORGeometry;
+  out ErrorText: string): boolean;
+var
+  RegionIndex, EraseType, BestType, BlockIndex: integer;
+  RegionBase, BlockCount, TotalBlocks, j: QWord;
+  BlockSize: cardinal;
+  BlockOpcode, StandardOpcode, NativeOpcode: byte;
+
+  function NativeOpcodeFor(Size: cardinal; Standard: byte;
+    out Opcode: byte): boolean;
+  var
+    t: integer;
+  begin
+    Opcode := Standard;
+    if not Native4BOpcodes then Exit(True);
+
+    Result := False;
+    if not CurrentSFDPValid then
+    begin
+      ErrorText := 'dedicated 4-byte erase opcodes require valid SFDP data';
+      Exit;
+    end;
+    for t := 1 to 4 do
+      if (CurrentSFDP.EraseTypes[t].Size = Size) and
+         (CurrentSFDP.EraseTypes[t].Opcode = Standard) and
+         (CurrentSFDP.EraseTypes[t].Opcode4B <> 0) then
+      begin
+        Opcode := CurrentSFDP.EraseTypes[t].Opcode4B;
+        Exit(True);
+      end;
+    ErrorText := Format(
+      'SFDP has no dedicated 4-byte erase opcode for %d-byte opcode %.2x',
+      [Size, Standard]);
+  end;
+
+begin
+  FillChar(Geometry, SizeOf(Geometry), 0);
+  Geometry.ErasedValue := $FF;
+  ErrorText := '';
+  Result := False;
+
+  if (ChipSize = 0) or (PageSize = 0) then
+  begin
+    ErrorText := 'chip size and page size must be non-zero';
+    Exit;
+  end;
+  if CurrentSFDPValid and (CurrentSFDP.Density <> 0) and
+     (CurrentSFDP.Density <> ChipSize) then
+  begin
+    ErrorText := Format(
+      'selected chip size %d disagrees with the live SFDP density %d',
+      [ChipSize, CurrentSFDP.Density]);
+    Exit;
+  end;
+  if CurrentSFDPValid and CurrentSFDP.SectorMapDeclared and
+     (not CurrentSFDP.HasSectorMap) then
+  begin
+    ErrorText :=
+      'the chip declares an SFDP sector map, but its active map is ambiguous or invalid';
+    Exit;
+  end;
+
+  if CurrentSFDPValid and CurrentSFDP.HasSectorMap then
+  begin
+    Geometry.ChipSize := ChipSize;
+    Geometry.PageSize := PageSize;
+    TotalBlocks := 0;
+    RegionBase := 0;
+
+    //First pass selects an erase type that is valid and aligned throughout
+    //each region and obtains an exact allocation size.
+    for RegionIndex := 0 to CurrentSFDP.RegionCount - 1 do
+    begin
+      BestType := 0;
+      for EraseType := 1 to 4 do
+        if ((CurrentSFDP.Regions[RegionIndex].EraseTypeMask and
+             (1 shl (EraseType - 1))) <> 0) and
+           (CurrentSFDP.EraseTypes[EraseType].Size > 0) and
+           ((BestType = 0) or
+            (CurrentSFDP.EraseTypes[EraseType].Size <
+             CurrentSFDP.EraseTypes[BestType].Size)) and
+           ((RegionBase mod CurrentSFDP.EraseTypes[EraseType].Size) = 0) and
+           ((CurrentSFDP.Regions[RegionIndex].Size mod
+             CurrentSFDP.EraseTypes[EraseType].Size) = 0) then
+          BestType := EraseType;
+
+      if BestType = 0 then
+      begin
+        ErrorText := Format(
+          'SFDP region %d has no erase type aligned to the whole region',
+          [RegionIndex]);
+        Exit;
+      end;
+      BlockCount := CurrentSFDP.Regions[RegionIndex].Size div
+                    CurrentSFDP.EraseTypes[BestType].Size;
+      if BlockCount > QWord(High(SizeInt)) - TotalBlocks then
+      begin
+        ErrorText := 'SFDP erase-block count does not fit this build';
+        Exit;
+      end;
+      Inc(TotalBlocks, BlockCount);
+      Inc(RegionBase, CurrentSFDP.Regions[RegionIndex].Size);
+    end;
+
+    if RegionBase <> ChipSize then
+    begin
+      ErrorText := 'SFDP sector-map regions do not cover the selected chip';
+      Exit;
+    end;
+
+    SetLength(Geometry.Blocks, SizeInt(TotalBlocks));
+    RegionBase := 0;
+    BlockIndex := 0;
+    for RegionIndex := 0 to CurrentSFDP.RegionCount - 1 do
+    begin
+      BestType := 0;
+      for EraseType := 1 to 4 do
+        if ((CurrentSFDP.Regions[RegionIndex].EraseTypeMask and
+             (1 shl (EraseType - 1))) <> 0) and
+           (CurrentSFDP.EraseTypes[EraseType].Size > 0) and
+           ((BestType = 0) or
+            (CurrentSFDP.EraseTypes[EraseType].Size <
+             CurrentSFDP.EraseTypes[BestType].Size)) and
+           ((RegionBase mod CurrentSFDP.EraseTypes[EraseType].Size) = 0) and
+           ((CurrentSFDP.Regions[RegionIndex].Size mod
+             CurrentSFDP.EraseTypes[EraseType].Size) = 0) then
+          BestType := EraseType;
+
+      BlockSize := CurrentSFDP.EraseTypes[BestType].Size;
+      StandardOpcode := CurrentSFDP.EraseTypes[BestType].Opcode;
+      if not NativeOpcodeFor(BlockSize, StandardOpcode, NativeOpcode) then Exit;
+      BlockCount := CurrentSFDP.Regions[RegionIndex].Size div BlockSize;
+      j := 0;
+      while j < BlockCount do
+      begin
+        Geometry.Blocks[BlockIndex].Address :=
+          RegionBase + j * QWord(BlockSize);
+        Geometry.Blocks[BlockIndex].Size := BlockSize;
+        Geometry.Blocks[BlockIndex].Opcode := NativeOpcode;
+        Inc(BlockIndex);
+        Inc(j);
+      end;
+      Inc(RegionBase, CurrentSFDP.Regions[RegionIndex].Size);
+    end;
+    Exit(ValidateNORGeometry(Geometry, ErrorText));
+  end;
+
+  BlockSize := 0;
+  StandardOpcode := 0;
+  if CurrentSFDPValid then
+    SFDPSmallestErase(CurrentSFDP, BlockSize, StandardOpcode);
+  if BlockSize = 0 then
+  begin
+    BlockSize := CurrentSectorSize;
+    StandardOpcode := CurrentSectorOpcode;
+  end;
+  if not NativeOpcodeFor(BlockSize, StandardOpcode, BlockOpcode) then Exit;
+  Result := BuildUniformNORGeometry(ChipSize, PageSize, BlockSize,
+                                    BlockOpcode, Geometry, ErrorText);
+end;
+
+//--- ชิปแจ้งความล้มเหลวเอง ---
+//
+//หลายยี่ห้อล้างบิต BUSY ตามปกติแล้วยกธงไว้ในรีจิสเตอร์อีกตัว เดิมโปรแกรม
+//ไม่เคยอ่านธงนั้น ความล้มเหลวจึงไปโผล่ตอนตรวจข้อมูลกลับ หรือไม่โผล่เลยถ้า
+//ปิดการตรวจไว้ ซึ่งแปลว่าชิปที่ลบไม่สำเร็จผ่านด่านออกไปได้
+function ChipReportedFailure(const Context: string): boolean;
+var
+  Op, V, SR1: byte;
+  Have: boolean;
+  F: TPEFail;
+begin
+  Result := False;
+
+  Op := VendorStatusOpcode(Chip25ManufID);
+  V := 0;
+  Have := False;
+  if Op <> 0 then Have := UsbAsp25_ReadVendorStatus(Op, V);
+
+  //Spansion เก็บธงไว้ใน SR1 เอง ยี่ห้ออื่นไม่ต้องอ่านซ้ำ
+  SR1 := 0;
+  if Chip25ManufID = $01 then UsbAsp25_ReadSR(SR1);
+
+  F := ProgEraseFail(Chip25ManufID, SR1, V, Have);
+  if F = peNone then Exit;
+
+  LogPrint(Format(STR_CHIP_REPORTED_FAIL, [PEFailText(F)]) + ' (' + Context + ')');
+  OpFail(PEFailText(F));
+
+  //ธงของ Micron ค้างอยู่จนกว่าจะถูกล้าง ไม่ล้างแล้วงานถัดไปจะถูกกล่าวหาซ้ำ
+  if Chip25ManufID = $20 then UsbAsp25_ClearFlagStatus;
+
+  Result := True;
+end;
+
+//สั่ง WREN แล้วยืนยันว่าแลตช์ติดจริง คืน False พร้อมรายงานเมื่อไม่ติด
+function WrenOK: boolean;
+var
+  WEL: boolean;
+begin
+  Result := UsbAsp25_WrenChecked(WEL);
+  if Result then Exit;
+
+  LogPrint(STR_WREN_REFUSED);
+  OpFail('the chip did not accept write enable, WEL stayed clear');
+end;
+
+//--- ด่านตรวจก่อนแตะข้อมูล ---
+
+//ปลุกชิปที่เครื่องมือตัวก่อนทิ้งไว้ในโหมดที่ตอบคำสั่งปกติไม่ได้
+//
+//ชิปที่ค้างอยู่ในโหมด QPI หรือค้างอยู่ในโหมดแอดเดรส 4 ไบต์ตอบ 9Fh ด้วย
+//00 หรือ FF ล้วน ซึ่งอ่านออกมาเหมือนชิปตายสนิทหรือซ็อกเก็ตว่าง ทั้งที่ยังดีอยู่
+//คืน True เมื่อได้ลองกู้แล้ว ผู้เรียกต้องอ่านรหัสใหม่อีกรอบ
+function TryRecoverMuteChip(const Seen: byte): boolean;
+begin
+  Result := False;
+  if (Seen <> $00) and (Seen <> $FF) then Exit;
+
+  LogPrint(Format(STR_QPI_RECOVER, [Seen]));
+  UsbAsp25_ExitQPI;
+  UsbAsp25_SoftReset;
+  Result := True;
+end;
+
+//อ่านรหัสชิปซ้ำ ๆ แล้วดูว่าได้ค่าเดิมทุกครั้งหรือไม่
+//
+//คลิปหนีบ SOIC ที่ขาใดขาหนึ่งแตะไม่สนิทให้ผลที่ดูปกติทุกอย่าง ไฟล์ที่ได้
+//มีขนาดถูกต้อง อ่านครบทุกไบต์ ไม่มีข้อความผิดพลาดใด ๆ แล้วมีไบต์ผิดอยู่
+//กลางไฟล์ซึ่งไม่มีใครสังเกตจนกว่าจะเอาไปใช้จริง
+//
+//การอ่าน 9Fh แปดครั้งใช้เวลาไม่ถึงเสี้ยววินาที และจับปัญหานี้ได้ตั้งแต่
+//ก่อนไปแตะข้อมูล ซึ่งเป็นจุดเดียวที่จับได้แบบไม่ต้องเดา
+function ContactIsStable: boolean;
+const
+  PASSES = 8;
+var
+  ID: MEMORY_ID;
+  Ref, Cur: string;
+  i: integer;
+  Recovered: boolean;
+begin
+  Result := True;
+  if not MainForm.MenuCheckContact.Checked then Exit;
+  if not MainForm.RadioSPI.Checked then Exit;
+  if MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25 then Exit;
+
+  LogPrint(STR_CONTACT_CHECKING);
+  Ref := '';
+  Recovered := False;
+
+  i := 1;
+  while i <= PASSES do
+  begin
+    FillChar(ID, SizeOf(ID), 0);
+    UsbAsp25_ReadID(ID);
+
+    //ชิปที่ตอบ 00 หรือ FF ล้วนอาจแค่ค้างอยู่ในโหมดที่คุยด้วยแบบนี้ไม่ได้
+    //ลองกู้หนึ่งครั้งแล้วเริ่มนับใหม่ ดีกว่ารายงานว่าไม่มีชิป
+    if (not Recovered) and (ID.ID9FH[0] = ID.ID9FH[1]) and
+       (ID.ID9FH[1] = ID.ID9FH[2]) and TryRecoverMuteChip(ID.ID9FH[0]) then
+    begin
+      Recovered := True;
+      Ref := '';
+      i := 1;
+      Continue;
+    end;
+
+    Cur := IntToHex(ID.ID9FH[0], 2) + IntToHex(ID.ID9FH[1], 2) +
+           IntToHex(ID.ID9FH[2], 2);
+
+    //00 หรือ FF ล้วนคือซ็อกเก็ตว่าง สายขาด หรือชิปไม่ได้รับไฟ ค่าเหล่านี้
+    //"นิ่ง" ทุกครั้งที่อ่าน จึงผ่านการตรวจความนิ่งไปได้อย่างสบาย แล้วเราจะ
+    //ขึ้นข้อความว่าการเชื่อมต่อมั่นคงให้กับซ็อกเก็ตที่ไม่มีชิปอยู่เลย
+    //ซึ่งชี้ให้คนไปตามหาปัญหาผิดที่ทั้งหมด
+    if (Cur = '000000') or (Cur = 'FFFFFF') then
+    begin
+      LogPrint(STR_NOT_RESPONDING);
+      OpFail('no chip is answering: the id reads back as ' + Cur);
+      Exit(False);
+    end;
+
+    if Ref = '' then
+      Ref := Cur
+    else if Cur <> Ref then
+    begin
+      LogPrint(Format(STR_CONTACT_UNSTABLE, [Ref, Cur]));
+      OpFail(Format('the chip id is not stable: %s then %s', [Ref, Cur]));
+      Exit(False);
+    end;
+
+    Inc(i);
+  end;
+
+  LogPrint(Format(STR_CONTACT_OK, [PASSES]));
+end;
+
+//--- การเลือก opcode อ่าน ---
+//
+//เดิมการเลือกถูกคัดลอกไว้สามที่ คือตอนอ่าน ตอนตรวจหลังเขียนทีละเพจ และตอน
+//ตรวจข้อมูลทั้งก้อน แก้ที่หนึ่งแล้วลืมอีกสองที่คือความผิดพลาดที่รอเกิดอยู่แล้ว
+//
+//03h ไม่มีไบต์หลอก จึงเร็วกว่าในแง่จำนวนไบต์ แต่ดาต้าชีตให้เพดานความถี่ไว้
+//แค่ 33 ถึง 50 MHz ส่วน 0Bh ไปได้ถึง 104 MHz เครื่องที่รองรับอยู่ยิงได้ถึง
+//30 MHz ขึ้นไปซึ่งอยู่ริมเพดานของ 03h พอดี อาการคือข้อมูลเพี้ยนเป็นครั้งคราว
+procedure PickReadOpcode(Native4B: boolean; out Opcode: byte; out Fast: boolean);
+begin
+  Fast := OpUI.FastRead and Chip25FastRead;
+
+  if Native4B then
+  begin
+    if Fast and (Chip25FastRead4BOpcode <> 0) then
+      Opcode := Chip25FastRead4BOpcode
+    else
+    begin
+      Fast := False;
+      Opcode := Chip25Read4BOpcode;
+    end;
+    Exit;
+  end;
+
+  //ชิปที่ถูกสลับเข้าโหมด 4 ไบต์แล้วใช้ opcode ชุดเดียวกับโหมด 3 ไบต์
+  //ต่างกันแค่จำนวนไบต์แอดเดรสที่ตามหลัง ซึ่ง Use4B เป็นตัวบอก
+  if Fast then Opcode := $0B else Opcode := $03;
+end;
+
+function ReadData25(Opcode: byte; Fast, Use4B: boolean; Addr: cardinal;
+  var Buf: array of byte; Len: integer): integer;
+begin
+  if Use4B then
+  begin
+    if Fast then
+      Result := UsbAsp25_ReadFast32bitAddr(Opcode, Addr, Buf, Len)
+    else
+      Result := UsbAsp25_Read32bitAddr(Opcode, Addr, Buf, Len);
+  end
+  else
+  begin
+    if Fast then
+      Result := UsbAsp25_ReadFast(Opcode, Addr, Buf, Len)
+    else
+      Result := UsbAsp25_Read(Opcode, Addr, Buf, Len);
+  end;
 end;
 
 //ลบเฉพาะเซกเตอร์ที่อยู่ในช่วง StartAddress ถึง StartAddress+RangeLen-1
@@ -1467,7 +2334,11 @@ var
   //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
   procedure DoWork;
   var
-    Idx: integer;
+    Idx, Byt, Sent, Got: integer;
+    EtaMs: QWord;
+    Probe: array[0..15] of byte;
+    ChkOp: byte;
+    ChkFast, ReadNative4B: boolean;
   begin
   OK := False;
 
@@ -1502,14 +2373,16 @@ var
                             Opcode, Plan) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
-      Exit;
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
     end;
 
   Total := Length(Plan);
   if Total = 0 then
   begin
     LogPrint(STR_CHECK_SETTINGS);
-    Exit;
+    OpFail('the chip size, the page size or the range is not usable');
+    exit;
   end;
 
   if not PlanBounds(Plan, Addr, EndAddr) then Exit;
@@ -1521,11 +2394,19 @@ var
              ' (' + IntToStr(Total) + ' x ' + IntToStr(SectorSize) + ' bytes, opcode 0x' +
              IntToHex(Opcode, 2) + ')');
 
+  //เพดานเวลารวมจากตัวเลขที่ชิปประกาศเอง จะได้รู้ล่วงหน้าว่ารอได้แค่ไหน
+  EtaMs := 0;
+  for Idx := 0 to Total - 1 do
+    Inc(EtaMs, QWord(EraseTimeoutFor(Plan[Idx].Size)));
+  if EtaMs >= 2000 then
+    LogPrint(Format('The chip itself declares this erase may take up to %d s',
+                    [(EtaMs + 999) div 1000]));
+
   //ชิปใหญ่กว่า 128Mbit ต้องใช้แอดเดรส 4 ไบต์
   //ถ้าทุกขั้นในแผนมี opcode ชุด 4 ไบต์ของตัวเองครบ ก็ไม่ต้องสลับโหมดเลย
   //ซึ่งปลอดภัยกว่ามาก เพราะการสลับโหมดทิ้งสถานะไว้ในตัวชิป งานที่ล้ม
   //กลางคันจะทิ้งชิปไว้ที่โหมด 4 ไบต์ แล้วเครื่องมือตัวถัดไปจะอ่านได้ขยะ
-  Use4B := ChipSize > FLASH_SIZE_128MBIT;
+  Use4B := Needs4ByteAddress(StartAddress, RangeLen, ChipSize);
   Native4B := Use4B and PlanAllHave4B(Plan);
   if Native4B then LogPrint(STR_4B_NATIVE);
 
@@ -1533,24 +2414,95 @@ var
   SetProgressMax(Integer(Total));
 
   //สลับโหมดเฉพาะตอนที่จำเป็นจริง ๆ และต้องกลับออกมาให้ได้เสมอ
-  if Use4B and (not Native4B) then Enter4B;
+  if Use4B and (not Native4B) then
+    if not Enter4B then Exit;
 
   try
     for Idx := 0 to Total - 1 do
     begin
-      UsbAsp25_WREN();
+      //WEL is cleared by every accepted erase command.  Therefore every
+      //sector needs a new WREN followed by an observed WEL=1; checking only
+      //the first sector can silently skip all remaining sectors.
+      if not WrenOK then Exit;
 
       if Native4B then
-        UsbAsp25_EraseSector(Plan[Idx].Opcode4B, Plan[Idx].Addr, True)
+        Sent := UsbAsp25_EraseSector(Plan[Idx].Opcode4B,
+                                    Plan[Idx].Addr, True)
       else
-        UsbAsp25_EraseSector(Plan[Idx].Opcode, Plan[Idx].Addr, Use4B);
+        Sent := UsbAsp25_EraseSector(Plan[Idx].Opcode,
+                                    Plan[Idx].Addr, Use4B);
+      if Sent <> 4 + Ord(Use4B) then
+      begin
+        OpFail(Format('short erase command: sent %d of %d bytes',
+                      [Sent, 4 + Ord(Use4B)]), Plan[Idx].Addr);
+        Exit;
+      end
+      ;
 
-      if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
+      if not WaitNotBusy25(EraseTimeoutFor(Plan[Idx].Size)) then Exit;
+
+      //ชิปแจ้งเองว่าคำสั่งลบล้มเหลวหรือไม่
+      if ChipReportedFailure('erase at 0x' + IntToHex(Plan[Idx].Addr, 8)) then Exit;
 
       SetProgressPos(Idx + 1);
       OpProcessMessages;
 
       if UserCancel then Exit;
+    end;
+
+    //ตรวจว่าคำสั่งลบทำงานจริง
+    //
+    //ชิปที่ยังถูกป้องกันอยู่จะรับคำสั่งลบ ล้างบิต BUSY ตามปกติ แล้วไม่ลบ
+    //อะไรเลย เดิมโปรแกรมเชื่อว่าสำเร็จเพราะไม่มีอะไรฟ้อง ข้อมูลเก่ายังอยู่ครบ
+    //แล้วการเขียนทับลงไปให้ผลที่อธิบายไม่ได้
+    //
+    //ดูแค่ต้นของแต่ละก้อนที่สั่งลบ ไม่ได้ไล่ทุกไบต์ เพราะอาการที่จับอยู่คือ
+    //"ลบแล้วไม่มีอะไรเกิดขึ้น" ซึ่งเห็นได้จากไบต์แรกของก้อน และการไล่ทั้ง
+    //ช่วงจะทำให้เวลาที่ใช้เพิ่มเป็นสองเท่าเพื่อข้อมูลที่ไม่ได้เพิ่มขึ้น
+    if OpUI.VerifyErase then
+    begin
+      LogPrint(STR_BLANK_AFTER_ERASE);
+
+      //Native4B ข้างบนหมายถึง "ทุกขั้นในแผนมี opcode ลบชุด 4 ไบต์" ซึ่งเป็น
+      //คนละเรื่องกับการมี opcode อ่านชุด 4 ไบต์ เอามาตัดสินการอ่านไม่ได้
+      //
+      //ถ้าเอามาใช้ ชิปที่มี opcode ลบชุด 4 ไบต์แต่ไม่มี opcode อ่านชุดนั้น
+      //จะได้ Chip25Read4BOpcode ซึ่งเป็นศูนย์ แล้วเราจะส่ง opcode 00h ออกไป
+      //ซึ่งไม่มีนิยามในดาต้าชีตของชิปไหนเลย
+      ReadNative4B := Use4B and Native4BRead;
+
+      //ทางลบที่ใช้ opcode ชุด 4 ไบต์ไม่ได้สลับโหมดไว้ ถ้าทางอ่านไม่มี opcode
+      //ชุดนั้นของตัวเอง ก็ต้องสลับโหมดก่อน ไม่งั้นแอดเดรส 4 ไบต์ที่ส่งออกไป
+      //จะถูกชิปตีความเป็นแอดเดรส 3 ไบต์บวกไบต์ข้อมูล
+      if Use4B and (not ReadNative4B) then
+        if not Enter4B then Exit;
+
+      PickReadOpcode(ReadNative4B, ChkOp, ChkFast);
+
+      for Idx := 0 to Total - 1 do
+      begin
+        Got := ReadData25(ChkOp, ChkFast, Use4B, Plan[Idx].Addr,
+                          Probe, SizeOf(Probe));
+        if Got <> SizeOf(Probe) then
+        begin
+          OpFail(Format('short erase-verification read: received %d of %d bytes',
+                        [Got, SizeOf(Probe)]), Plan[Idx].Addr);
+          Exit;
+        end;
+
+        for Byt := 0 to SizeOf(Probe) - 1 do
+          if Probe[Byt] <> $FF then
+          begin
+            LogPrint(Format(STR_ERASE_DID_NOT_TAKE,
+                            [Plan[Idx].Addr + cardinal(Byt), Probe[Byt]]));
+            OpFail('the erase did not take, the area still holds data',
+                   Plan[Idx].Addr + cardinal(Byt));
+            Exit;
+          end;
+
+        OpProcessMessages;
+        if UserCancel then Exit;
+      end;
     end;
 
     OK := True;
@@ -1574,14 +2526,75 @@ procedure ChipErase25;
   procedure DoWork;
   var
     Started: TDateTime;
+    Spot, Byt: integer;
+    At: int64;
+    Probe: array[0..15] of byte;
+    ChkOp: byte;
+    ChkFast, Use4B, Native4B: boolean;
+    Got: integer;
   begin
-    UsbAsp25_WREN();
-    UsbAsp25_ChipErase();
+    //ชิปที่ไม่ยอมรับ write enable จะรับคำสั่งลบไปแล้วไม่ทำอะไร แล้วเราจะรอ
+    //อยู่นานถึงสิบนาทีเพื่อจะได้คำตอบที่ชี้ไปผิดเรื่อง
+    if not WrenOK then Exit;
+    if UsbAsp25_ChipErase() <> 1 then
+    begin
+      OpFail('the SPI NOR chip-erase command was not transferred exactly');
+      Exit;
+    end;
 
     LogPrint(STR_ERASE_NOTICE);
+    //บอกเพดานเวลาที่มาจากตัวชิปเองไว้ก่อน จะได้ไม่มีใครถอดสายกลางคันเพราะ
+    //คิดว่าโปรแกรมค้าง ชิป 256Mbit ลบทั้งตัวอาจใช้เวลาหลายนาทีจริง ๆ
+    LogPrint(Format('The chip itself declares this erase may take up to %d s',
+                    [ChipEraseTimeout div 1000]));
     Started := Now;
 
-    if not WaitNotBusy25(BUSY_TIMEOUT_CHIP) then Exit;
+    if not WaitNotBusy25(ChipEraseTimeout) then Exit;
+
+    if ChipReportedFailure('chip erase') then Exit;
+
+    //สุ่มดูสิบหกจุดกระจายทั่วชิปว่าถูกลบจริง ชิปที่ยังถูกป้องกันอยู่จะรับ
+    //คำสั่งไปแล้วไม่ทำอะไร ซึ่งเดิมไม่มีอะไรฟ้องเลย
+    if OpUI.VerifyErase and (OpUI.ChipSize > 0) then
+    begin
+      LogPrint(STR_BLANK_AFTER_ERASE);
+      Use4B := OpUI.ChipSize > 16777216;
+      Native4B := Use4B and Native4BRead;
+      if Use4B and (not Native4B) then
+        if not Enter4B then Exit;
+      PickReadOpcode(Native4B, ChkOp, ChkFast);
+
+      try
+        for Spot := 0 to 15 do
+        begin
+          At := (int64(OpUI.ChipSize) * Spot) div 16;
+          Got := ReadData25(ChkOp, ChkFast, Use4B, cardinal(At),
+                            Probe, SizeOf(Probe));
+          if Got <> SizeOf(Probe) then
+          begin
+            OpFail(Format(
+              'short chip-erase verification read: received %d of %d bytes',
+              [Got, SizeOf(Probe)]), At);
+            Exit;
+          end;
+
+          for Byt := 0 to SizeOf(Probe) - 1 do
+            if Probe[Byt] <> $FF then
+            begin
+              LogPrint(Format(STR_ERASE_DID_NOT_TAKE,
+                              [cardinal(At) + cardinal(Byt), Probe[Byt]]));
+              OpFail('the chip erase did not take, the chip still holds data',
+                     At + Byt);
+              Exit;
+            end;
+
+          OpProcessMessages;
+          if UserCancel then Exit;
+        end;
+      finally
+        Leave4B;
+      end;
+    end;
 
     //การลบทั้งชิปเป็นไปไม่ได้ที่จะเสร็จในเสี้ยววินาที เกือบทุกครั้ง
     //แปลว่าชิปปฏิเสธคำสั่งเพราะยังถูกป้องกันการเขียนอยู่
@@ -1600,6 +2613,151 @@ end;
 //ตัวจริงอยู่ถัดลงไปในไฟล์ ประกาศไว้ก่อนเพราะการสำรองข้อมูลอัตโนมัติต้องใช้
 procedure ReadFlash25(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal); forward;
 
+//อ่านซ้ำอีกหลายรอบแล้วเทียบกับรอบแรก
+//
+//นี่คือด่านเดียวที่จับ "อ่านครบทุกไบต์แต่ได้ข้อมูลผิด" ได้ ซึ่งเป็นความ
+//ล้มเหลวที่เงียบที่สุดของงานประเภทนี้ คลิปหนีบที่ขาใดขาหนึ่งแตะไม่สนิท
+//ให้ไฟล์ที่ขนาดถูก อ่านครบ ไม่มีข้อความผิดพลาด และมีไบต์ผิดอยู่ข้างใน
+//
+//เมื่อสองรอบไม่ตรงกัน เราบอกไม่ได้ว่ารอบไหนถูก และไม่ควรเดา
+//สิ่งที่บอกได้คือดัมป์นี้เชื่อไม่ได้ ซึ่งเป็นข้อมูลที่มีค่ากว่าการเดา
+function ReadPassesAgree(First: TMemoryStream; StartAddress, Size: cardinal;
+  Passes: integer): boolean;
+var
+  Again: TMemoryStream;
+  Diff: cardinal;
+  At: int64;
+  i: integer;
+begin
+  Result := True;
+  if (Passes < 2) or (First = nil) or (First.Size = 0) then Exit;
+
+  Again := TMemoryStream.Create;
+  try
+    for i := 2 to Passes do
+    begin
+      LogPrint(Format(STR_READ_PASS, [i, Passes]));
+
+      ReadFlash25(Again, StartAddress, Size);
+      if UserCancel then Exit(False);
+      if not OpOK then Exit(False);
+
+      if Again.Size <> First.Size then
+      begin
+        OpFail(Format('read pass %d returned %d bytes, the first returned %d',
+                      [i, Again.Size, First.Size]));
+        Exit(False);
+      end;
+
+      At := FirstDifference(PByte(First.Memory), PByte(Again.Memory), First.Size);
+      if At >= 0 then
+      begin
+        Diff := CountDifferences(PByte(First.Memory), PByte(Again.Memory),
+                                 First.Size);
+        LogPrint(Format(STR_READ_UNSTABLE, [Diff, cardinal(At)]));
+        OpFail(Format('two reads of the same chip disagree in %d bytes', [Diff]),
+               At);
+        Exit(False);
+      end;
+    end;
+
+    LogPrint(STR_READ_STABLE);
+  finally
+    Again.Free;
+  end;
+end;
+
+//ดูตัวข้อมูลที่อ่านมาได้ ไม่ใช่ดูว่าการรับส่งสำเร็จ
+//
+//เป็นคำเตือน ไม่ใช่การตัดสิน ชิปเปล่าอ่านได้ FF ทั้งก้อนอย่างถูกต้องเสมอ
+//สิ่งที่ทำได้คือบอกว่าดัมป์นี้หน้าตาเหมือนความล้มเหลวแบบไหน แล้วให้คนตัดสิน
+procedure ScanDumpAndReport(Stream: TMemoryStream);
+var
+  S: TImgStats;
+  V: TImgVerdict;
+  Kind: string;
+begin
+  //ล้างก่อนทุกทางออก ไม่งั้นคำเตือนของงานก่อนหน้าจะไปโผล่ในบรรทัด JSON
+  //ของงานถัดไป ซึ่งเป็นงานที่อาจไม่ได้อ่านอะไรมาเลย
+  LastImageWarning := '';
+
+  if not OpUI.ScanImage then Exit;
+  if (Stream = nil) or (Stream.Size = 0) then Exit;
+
+  S := imgcheck.ScanImage(PByte(Stream.Memory), Stream.Size);
+  LogPrint(Format(STR_IMG_STATS, [StatsText(S)]));
+
+  Kind := DetectImageKind(PByte(Stream.Memory), Stream.Size);
+  if Kind <> '' then LogPrint(Format(STR_IMG_KIND, [Kind]));
+
+  V := ImageVerdict(S);
+  if V <> ivOK then
+  begin
+    LastImageWarning := VerdictText(V, S);
+    LogPrint(Format(STR_IMG_SUSPECT, [LastImageWarning]));
+  end;
+end;
+
+function EnterProgModeSPI25: boolean;
+begin
+  Result := EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+end;
+
+//ดัมป์ตาราง SFDP ดิบ ๆ ลงไฟล์
+//
+//อ่านมาเท่าที่หัวตารางบอกว่ามี ไม่ใช่จำนวนคงที่ที่เดาเอา ชิปที่มีตารางเสริม
+//หลายตารางจะยาวกว่าที่คนส่วนใหญ่คิด และการดัมป์มาไม่ครบทำให้ดัมป์นั้นใช้ไม่ได้
+function DumpSFDPToFile(const FileName: string; out ErrMsg: string): boolean;
+var
+  Extent: cardinal;
+  Buf: array of byte;
+  Got: integer;
+  F: TFileStream;
+begin
+  Result := False;
+  ErrMsg := '';
+
+  Extent := SFDPExtent(@UsbAsp25_ReadSFDP);
+  if Extent = 0 then
+  begin
+    ErrMsg := 'this chip has no SFDP table';
+    Exit;
+  end;
+
+  //ปัดขึ้นให้ลงตัวสี่ไบต์ ตารางนับเป็นดเวิร์ดเสมอ
+  Extent := ((Extent + 3) div 4) * 4;
+  SetLength(Buf, Extent);
+
+  //ส่งทั้งอาร์เรย์ ไม่ใช่ Buf[0] เพราะพารามิเตอร์เป็น open array
+  //การส่งสมาชิกตัวเดียวเข้าไปคือการบอกว่าอาร์เรย์ยาวหนึ่งไบต์ แล้วตัวรับ
+  //จะเขียนทะลุออกไปนอกขอบโดยไม่มีอะไรฟ้อง
+  Got := UsbAsp25_ReadSFDP(0, Buf, integer(Extent));
+  if Got < integer(Extent) then
+  begin
+    ErrMsg := Format('read only %d of %d bytes of the SFDP table',
+                     [Got, Extent]);
+    Exit;
+  end;
+
+  try
+    F := TFileStream.Create(FileName, fmCreate);
+    try
+      F.WriteBuffer(Buf[0], Extent);
+    finally
+      F.Free;
+    end;
+  except
+    on E: Exception do
+    begin
+      ErrMsg := E.Message;
+      Exit;
+    end;
+  end;
+
+  LogPrint(Format('SFDP table dumped: %d bytes to %s', [Extent, FileName]));
+  Result := True;
+end;
+
 //ตัวช่วยของงานเทียบข้อมูล ตัวจริงอยู่ท้ายไฟล์ แต่มีผู้เรียกอยู่ก่อนหน้านั้น
 function ReportDiff(const A, B: array of byte; Size: integer): integer; forward;
 function UIChipSize: cardinal; forward;
@@ -1615,11 +2773,15 @@ var
 begin
   Result := True;
 
-  if not MainForm.MenuCheckIDBefore.Checked then Exit;
+  if (not StrictProductionMode) and
+     (not MainForm.MenuCheckIDBefore.Checked) then Exit;
   if not MainForm.RadioSPI.Checked then Exit;
   if MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25 then Exit;
 
-  Expected := UpperCase(Trim(CurrentICParam.ID));
+  if StrictProductionMode then
+    Expected := UpperCase(Trim(StrictProductionExpectedID))
+  else
+    Expected := UpperCase(Trim(CurrentICParam.ID));
   //ชิปบางตัวไม่มี id จึงไม่มีอะไรให้ตรวจ
   if (Expected = '') or (Expected = '0') then Exit;
 
@@ -1650,6 +2812,24 @@ begin
   else
     s15 := '--';
 
+  //A signed production job binds the standard 9Fh identity.  Legacy fallback
+  //IDs and interactive overrides are deliberately unavailable at this trust
+  //boundary.
+  if StrictProductionMode then
+  begin
+    if ID.Got9F and (Expected = s9F) then
+    begin
+      LogPrint(STR_ID_OK + Expected);
+      Exit(True);
+    end;
+    if not ID.Got9F then
+      OpFail('strict production identity check received no exact JEDEC 9Fh reply')
+    else
+      OpFail('strict production JEDEC identity mismatch: expected ' +
+             Expected + ', received ' + s9F);
+    Exit(False);
+  end;
+
   //เทียบเฉพาะคำสั่งที่ได้คำตอบจริง
   if (ID.Got9F and (Expected = s9F)) or (ID.Got90 and (Expected = s90)) or
      (ID.GotAB and (Expected = sAB)) or (ID.Got15 and (Expected = s15)) then
@@ -1663,6 +2843,7 @@ begin
   if not (ID.Got9F or ID.Got90 or ID.GotAB or ID.Got15) then
   begin
     LogPrint(STR_ID_NO_ANSWER);
+    if CLIMode then Exit(False);
     Result := MessageDlg('AsProgrammer', STR_ID_NO_ANSWER_Q, mtWarning, [mbYes, mbNo], 0) = mrYes;
     Exit;
   end;
@@ -1670,6 +2851,7 @@ begin
   LogPrint(STR_ID_MISMATCH + Expected + ', read 9Fh=' + s9F + ' 90h=' + s90 +
            ' ABh=' + sAB + ' 15h=' + s15);
 
+  if CLIMode then Exit(False);
   Result := MessageDlg('AsProgrammer', STR_ID_MISMATCH_Q, mtWarning, [mbYes, mbNo], 0) = mrYes;
 end;
 
@@ -1679,6 +2861,9 @@ end;
 function VoltageWarningOK: boolean;
 begin
   Result := True;
+  //Strict production has already passed the typed measured electrical gate.
+  //Do not replace that result with a model-name heuristic or a dialog.
+  if StrictProductionMode then Exit;
 
   //เดิมดูจากชื่อรุ่นอย่างเดียว ตามธรรมเนียมที่ใส่ _1.8V ต่อท้าย
   //ซึ่งพลาดชิป 1.8V ที่ชื่อไม่ได้บอก และนั่นคือกลุ่มใหญ่
@@ -1695,6 +2880,12 @@ begin
 
   //Bus Pirate ตั้งขาเป็น open-drain แล้วจ่ายไฟจากภายนอกได้ จึงไม่เตือน
   if AsProgrammer.Current_HW in [CHW_BUZZPIRAT, CHW_ARDUINO] then Exit;
+
+  if CLIMode then
+  begin
+    LogPrint(STR_VOLT_ABORTED);
+    Exit(False);
+  end;
 
   Result := MessageDlg('AsProgrammer', STR_VOLT_WARN, mtWarning, [mbYes, mbNo], 0) = mrYes;
   if not Result then LogPrint(STR_VOLT_ABORTED);
@@ -1718,15 +2909,23 @@ end;
 function ReadChipUID: string;
 var
   Buf: array[0..7] of byte;
-  i: integer;
+  i, Got: integer;
   AllFF, AllZero: boolean;
 begin
   Result := '';
+  LastChipUIDTransferExact := False;
   if not MainForm.RadioSPI.Checked then Exit;
   if MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25 then Exit;
 
   FillByte(Buf, SizeOf(Buf), $FF);
-  UsbAsp25_ReadUniqueID(Buf);
+  Got := UsbAsp25_ReadUniqueID(Buf);
+  LastChipUIDTransferExact := Got = SizeOf(Buf);
+  if not LastChipUIDTransferExact then
+  begin
+    LogPrint(Format('Unique-ID read was short: received %d of %d bytes',
+                    [Got, SizeOf(Buf)]));
+    Exit;
+  end;
 
   AllFF := True;
   AllZero := True;
@@ -1783,7 +2982,12 @@ begin
   begin
     Chip25Read4BOpcode := Info.Read4BOpcode;
     Chip25PageProg4BOpcode := Info.PageProg4BOpcode;
+    Chip25FastRead4BOpcode := Info.FastRead4BOpcode;
   end;
+
+  //ชิปที่มีตาราง SFDP เป็นชิปตามมาตรฐาน JESD216 ซึ่งมีคำสั่งอ่านเร็ว 0Bh แน่นอน
+  //ชิปเก่าที่ไม่มีตารางจะไม่มีวันมาถึงบรรทัดนี้ จึงยังใช้ 03h ตามเดิม
+  Chip25FastRead := MainForm.MenuFastRead.Checked;
 
   if not Info.HasDword16 then Exit;
 
@@ -1895,8 +3099,8 @@ begin
 
   GuardUse4B := ChipSize > 16777216;
 
+  if (StartAddr >= ChipSize) or (Len > ChipSize - StartAddr) then Exit;
   EndAddr := StartAddr + Len;
-  if EndAddr > ChipSize then EndAddr := ChipSize;
   if EndAddr <= StartAddr then Exit;
 
   //บล็อกหัวและบล็อกท้ายของชิป ซึ่งล็อกกันทีละ 4K
@@ -1917,6 +3121,35 @@ begin
     if Scan(HigherOf(StartAddr, HiStart), EndAddr, FINE) then Exit(True);
 end;
 
+//อ่านค่า configuration register ที่ DecodeProtVendor ต้องใช้ตามยี่ห้อ
+//
+//Macronix (และ SST ที่ใช้แผนผัง BP เดียวกัน) เก็บทิศทางล็อกไว้ที่ 15h
+//Spansion เก็บ TBPROT ไว้ที่ 35h ซึ่งคือไบต์เดียวกับที่อ่านมาเป็น SR2 แล้ว
+//การอ่าน 15h บนชิป Spansion ที่ไม่มีรีจิสเตอร์นั้นได้ FF จากบัสลอย ซึ่งห้าม
+//เชื่อเป็นค่าจริงเด็ดขาด คืน False คือ "ไม่รู้" ให้ DecodeProtVendor ประกาศ
+//RangeKnown = False แทนที่จะตีความช่วงล็อกกลับหัว
+function ReadVendorCR(ManufID, SR2: byte; out CR: byte): boolean;
+begin
+  CR := 0;
+  Result := False;
+  case LayoutOf(ManufID) of
+    plMacronix, plSST:
+      begin
+        if UsbAsp25_ReadSR(CR, $15) <> 1 then Exit;
+        if CR = $FF then begin CR := 0; Exit; end;
+        Result := True;
+      end;
+    plSpansion:
+      begin
+        if SR2 = $FF then Exit;
+        CR := SR2;
+        Result := True;
+      end;
+  else
+    //แผนผังอื่นไม่ใช้ CR เลย ส่ง False ไปก็ไม่เสียข้อมูลอะไร
+  end;
+end;
+
 //ด่านตรวจบิตป้องกันการเขียน
 //
 //แฟลชที่ถูกล็อกอยู่จะรับคำสั่งลบหรือเขียนแล้วทิ้งไปเงียบ ๆ ไม่มีสัญญาณผิดพลาด
@@ -1924,7 +3157,8 @@ end;
 //ทั้งที่คำตอบอยู่ใน status register มาตั้งแต่ต้น
 function ProtectionGuardOK(StartAddr, Len: cardinal): boolean;
 var
-  SR1, SR2: byte;
+  SR1, SR2, CR: byte;
+  HaveCR: boolean;
   P: TProtInfo;
   FromA, ToA, EndAddr: cardinal;
   ChipSize: cardinal;
@@ -1938,18 +3172,49 @@ begin
 
   ChipSize := OpUI.ChipSize;
   if ChipSize = 0 then ChipSize := CurrentICParam.Size;
-  if ChipSize = 0 then Exit;
+  if (ChipSize = 0) or (StartAddr >= ChipSize) or
+     (Len > ChipSize - StartAddr) then
+  begin
+    OpFail('the protection-check range is outside the selected chip');
+    Exit(False);
+  end;
 
   SR1 := 0;
   SR2 := 0;
-  UsbAsp25_ReadSR(SR1, $05);
+  if UsbAsp25_ReadSR(SR1, $05) <> 1 then
+  begin
+    OpFail('the primary protection status register could not be read');
+    Exit(False);
+  end;
   UsbAsp25_ReadSR(SR2, $35);
+
+  //ต้องรู้ยี่ห้อก่อนตีความ: Macronix/ISSI มี BP สี่บิต Spansion ใช้บิต 6/5
+  //เป็นธงความผิดพลาด ตีความด้วยแผนผัง Winbond จะรายงานช่วงล็อกเล็กกว่าจริง
+  //แล้วการ์ดตัวนี้จะปล่อยงานเขียนผ่านทั้งที่ชิปจะทิ้งมันเงียบ ๆ
+  EnsureChipHints;
+  HaveCR := ReadVendorCR(Chip25ManufID, SR2, CR);
 
   //ชิปที่ไม่มี status register ตัวที่สองจะปล่อยสายค้างไว้ อ่านได้ FF ล้วน
   //ถ้าเชื่อค่านั้น CMP กับ WPS จะดูเหมือนถูกตั้ง แล้วการตีความจะผิดทั้งหมด
   if SR2 = $FF then SR2 := 0;
 
-  P := DecodeProt(SR1, SR2);
+  P := DecodeProtVendor(Chip25ManufID, SR1, SR2, CR, HaveCR);
+
+  //มีของถูกล็อกอยู่แต่บอกช่วงไม่ได้ = ไม่รู้ ไม่ใช่ปลอดภัย
+  if not P.RangeKnown then
+  begin
+    LogPrint(Format(STR_PROT_HEADER, [SR1, SR2]));
+    if CLIMode and (not CLIForce) then
+    begin
+      LogPrint(STR_GUARD_REFUSED);
+      OpFail('the chip reports write protection but the locked range could not be decoded');
+      Exit(False);
+    end;
+    Result := AskUser(STR_GUARD_Q, False);
+    if not Result then
+      OpFail('the chip reports write protection but the locked range could not be decoded');
+    Exit;
+  end;
 
   //WPS = 1 แปลว่าบิต BP ไม่มีความหมายแล้ว พื้นที่ที่ถูกล็อกมาจากบิตรายบล็อก
   //ซึ่งอ่านจาก status register ไม่ได้ ต้องไล่ถามทีละบล็อกด้วย 3Dh
@@ -1981,7 +3246,11 @@ begin
     //อ่านบิตล็อกไม่ได้เลยแปลว่าไม่รู้ ซึ่งไม่เหมือนกับรู้ว่าไม่ล็อก
     //บอกตรง ๆ ดีกว่าเงียบแล้วปล่อยผ่านเหมือนว่าตรวจแล้ว
     if not WPSReadable then
-      LogPrint(STR_WPS_UNREADABLE)
+    begin
+      LogPrint(STR_WPS_UNREADABLE);
+      OpFail('individual block-lock state could not be read');
+      Exit(False);
+    end
     else
       LogPrint(STR_WPS_CLEAR);
 
@@ -2026,6 +3295,21 @@ var
   ErrMsg: string;
 begin
   Result := True;
+  //The authenticated, versioned production manifest supersedes the legacy
+  //three-field CRC job file.  Applying both policies can only create stale
+  //configuration failures after the strict job has already been admitted.
+  if StrictProductionMode then Exit;
+  if CurrentJobLoadError <> '' then
+  begin
+    LogPrint(STR_JOB_FAILED + CurrentJobLoadError);
+    OpFail('configured job file is unusable: ' + CurrentJobLoadError);
+    Exit(False);
+  end;
+  if (ProdSettings.JobFile <> '') and (not CurrentJob.Loaded) then
+  begin
+    OpFail('the configured job file was not loaded');
+    Exit(False);
+  end;
   if not CurrentJob.Loaded then Exit;
   if Size = 0 then Exit;
 
@@ -2048,27 +3332,37 @@ var
 begin
   FillChar(CurrentJob, SizeOf(CurrentJob), 0);
   CurrentJob.ChipName := '';
+  CurrentJobLoadError := '';
 
   if ProdSettings.JobFile = '' then Exit;
 
   if LoadJobFile(ProdSettings.JobFile, CurrentJob, ErrMsg) then
     LogPrint(STR_JOB_LOADED + ProdSettings.JobFile)
   else
+  begin
+    CurrentJobLoadError := ErrMsg;
     LogPrint(STR_JOB_FAILED + ErrMsg);
+  end;
 end;
 
-//หนึ่งบรรทัดต่อชิปหนึ่งตัว ผ่านหรือไม่ผ่านเอาจากผลของงานล่าสุด
-procedure WriteProdLogEntry(Size, CRC: cardinal; const UID: string);
+function TryAppendProdLogEntry(Size, CRC: cardinal; const UID: string;
+  out ErrorText: string): boolean;
 var
   Rec: TProdRecord;
 begin
-  if ProdSettings.ProdLogFile = '' then Exit;
+  Result := False;
+  ErrorText := '';
+  if ProdSettings.ProdLogFile = '' then
+  begin
+    ErrorText := 'no production evidence file is configured';
+    Exit;
+  end;
 
   Rec.TimeStamp := Now;
   Rec.ChipName := CurrentICParam.Name;
   Rec.UID := UID;
   Rec.Serial := '';
-  if ProdSettings.SNEnabled then Rec.Serial := SerialToStr(ProdSettings);
+  if CurrentSerialValid then Rec.Serial := CurrentSerial.Text;
   Rec.Operator_ := ProdSettings.Operator_;
   Rec.Size := Size;
   Rec.CRC32 := CRC;
@@ -2082,10 +3376,166 @@ begin
     Rec.Note := LastOp.ErrorText;
   end;
 
-  if AppendProdLog(ProdSettings.ProdLogFile, Rec) then
+  Result := AppendProdLog(ProdSettings.ProdLogFile, Rec);
+  if not Result then
+    ErrorText := 'cannot append ' + ProdSettings.ProdLogFile;
+end;
+
+//หนึ่งบรรทัดต่อชิปหนึ่งตัว ผ่านหรือไม่ผ่านเอาจากผลของงานล่าสุด
+procedure WriteProdLogEntry(Size, CRC: cardinal; const UID: string);
+var
+  Err: string;
+begin
+  if ProdSettings.ProdLogFile = '' then Exit;
+
+  if TryAppendProdLogEntry(Size, CRC, UID, Err) then
     LogPrint(STR_PROD_LOGGED + ProdSettings.ProdLogFile)
   else
+  begin
     LogPrint(STR_PROD_LOG_FAIL + ProdSettings.ProdLogFile);
+    OpFail('the production evidence could not be written: ' + Err);
+  end;
+end;
+
+function EvidenceValue(const Value: string): string;
+begin
+  Result := StringReplace(Value, #13, ' ', [rfReplaceAll]);
+  Result := StringReplace(Result, #10, ' ', [rfReplaceAll]);
+  Result := StringReplace(Result, #9, ' ', [rfReplaceAll]);
+end;
+
+function TNORUIBridge.CommitEvidence(const Request: TOperationRequest;
+  out ErrorText: string): boolean;
+var
+  Payload: TBytes;
+  Text: RawByteString;
+  FileName, PayloadHash, UIDText, LocalSerial: string;
+begin
+  if StrictMode then
+  begin
+    Result := False;
+    ErrorText := '';
+    if (EvidenceDirectory = '') or
+       (not DirectoryExists(EvidenceDirectory)) then
+    begin
+      ErrorText := 'strict evidence directory does not exist';
+      Exit;
+    end;
+    LocalSerial := SerialText;
+    if LocalSerial = '' then LocalSerial := 'none';
+    UIDText := Request.Chip.UniqueID;
+    if UIDText = '' then UIDText := 'none';
+    Text :=
+      'format=AsProgrammer-ProX/verified-programming' + #10 +
+      'version=1' + #10 +
+      'result=PASS' + #10 +
+      'job_id=' + EvidenceValue(StrictJobID) + #10 +
+      'job_revision=' + IntToStr(StrictJobRevision) + #10 +
+      'operation_id=' + EvidenceValue(Request.OperationID) + #10 +
+      'operator=' + EvidenceValue(OperatorName) + #10 +
+      'programmer_id=' + EvidenceValue(ProgrammerID) + #10 +
+      'chip=' + EvidenceValue(Request.Chip.Name) + #10 +
+      'jedec_id=' + Request.Chip.JedecID + #10 +
+      'chip_profile_sha256=' + Request.Chip.ProfileHash + #10 +
+      'uid=' + UIDText + #10 +
+      'start_address=' + IntToStr(Request.Target.Address) + #10 +
+      'length=' + IntToStr(Request.Target.Length) + #10 +
+      'image_sha256=' + Request.ImageHash + #10 +
+      'image_crc32=' + IntToHex(EvidenceCRC, 8) + #10 +
+      'serial=' + EvidenceValue(LocalSerial) + #10 +
+      'trusted_read_passes=' + IntToStr(ReadPasses) + #10 +
+      'backup=trusted_full_chip' + #10 +
+      'physical_verify=full_affected_blocks' + #10;
+    SetLength(Payload, Length(Text));
+    if Length(Text) > 0 then Move(Text[1], Payload[0], Length(Text));
+    FileName := IncludeTrailingPathDelimiter(EvidenceDirectory) +
+                Request.OperationID + '.evidence';
+    //Strict runs always sign under the station key, so evidence cannot be
+    //forged or re-attributed by anyone without it.  Admission guarantees the
+    //key is present; its absence here is a programming error, not a fallback.
+    if (EvidenceKeyID = '') or (Length(EvidenceKey) = 0) then
+    begin
+      ErrorText := 'strict evidence requires the station signing key';
+      Exit;
+    end;
+    Result := SaveSignedEvidenceAtomic(FileName, Request.OperationID, Payload,
+                EvidenceKeyID, EvidenceKey, PayloadHash, ErrorText);
+    EvidenceCommitted := Result;
+    if Result then
+      LogPrint('Durable production evidence (HMAC key ' + EvidenceKeyID +
+               '): ' + FileName + ' content SHA-256=' + PayloadHash);
+    Exit;
+  end;
+
+  Result := TryAppendProdLogEntry(EvidenceSize, EvidenceCRC, EvidenceUID,
+                                  ErrorText);
+  EvidenceCommitted := Result;
+  if Result then
+    LogPrint(STR_PROD_LOGGED + ProdSettings.ProdLogFile);
+end;
+
+function TNORUIBridge.CommitFailureEvidence(const Request: TOperationRequest;
+  const FailureText: string; out ErrorText: string): boolean;
+var
+  Payload: TBytes;
+  Text: RawByteString;
+  FileName, PayloadHash, UIDText, LocalSerial: string;
+begin
+  Result := False;
+  ErrorText := '';
+  if not StrictMode then
+  begin
+    ErrorText := 'failure envelopes are reserved for strict production mode';
+    Exit;
+  end;
+  if (EvidenceDirectory = '') or
+     (not DirectoryExists(EvidenceDirectory)) then
+  begin
+    ErrorText := 'strict evidence directory does not exist';
+    Exit;
+  end;
+
+  UIDText := Request.Chip.UniqueID;
+  if UIDText = '' then UIDText := 'none';
+  LocalSerial := SerialText;
+  if LocalSerial = '' then LocalSerial := 'none';
+  Text :=
+    'format=AsProgrammer-ProX/verified-programming' + #10 +
+    'version=1' + #10 +
+    'result=FAIL' + #10 +
+    'job_id=' + EvidenceValue(StrictJobID) + #10 +
+    'job_revision=' + IntToStr(StrictJobRevision) + #10 +
+    'operation_id=' + EvidenceValue(Request.OperationID) + #10 +
+    'operator=' + EvidenceValue(OperatorName) + #10 +
+    'programmer_id=' + EvidenceValue(ProgrammerID) + #10 +
+    'chip=' + EvidenceValue(Request.Chip.Name) + #10 +
+    'jedec_id=' + Request.Chip.JedecID + #10 +
+    'chip_profile_sha256=' + Request.Chip.ProfileHash + #10 +
+    'uid=' + UIDText + #10 +
+    'start_address=' + IntToStr(Request.Target.Address) + #10 +
+    'length=' + IntToStr(Request.Target.Length) + #10 +
+    'image_sha256=' + Request.ImageHash + #10 +
+    'image_crc32=' + IntToHex(EvidenceCRC, 8) + #10 +
+    'serial=' + EvidenceValue(LocalSerial) + #10 +
+    'trusted_read_passes=' + IntToStr(ReadPasses) + #10 +
+    'physical_verify=' +
+      IfThen(PhysicalVerifyCompleted, 'completed', 'not_completed') + #10 +
+    'error=' + EvidenceValue(FailureText) + #10;
+  SetLength(Payload, Length(Text));
+  if Length(Text) > 0 then Move(Text[1], Payload[0], Length(Text));
+  FileName := IncludeTrailingPathDelimiter(EvidenceDirectory) +
+              Request.OperationID + '.evidence';
+  if (EvidenceKeyID = '') or (Length(EvidenceKey) = 0) then
+  begin
+    ErrorText := 'strict evidence requires the station signing key';
+    Exit;
+  end;
+  Result := SaveSignedEvidenceAtomic(FileName, Request.OperationID, Payload,
+              EvidenceKeyID, EvidenceKey, PayloadHash, ErrorText);
+  EvidenceCommitted := Result;
+  if Result then
+    LogPrint('Durable failure evidence (HMAC key ' + EvidenceKeyID +
+             '): ' + FileName + ' content SHA-256=' + PayloadHash);
 end;
 
 //ชิปตัวนี้เคยเขียนผ่านไปแล้วหรือยัง
@@ -2093,9 +3543,14 @@ end;
 function DuplicateChipGuardOK(const UID: string): boolean;
 begin
   Result := True;
+  if StrictProductionMode then Exit;
   if not ProdSettings.CheckUID then Exit;
   if ProdSettings.ProdLogFile = '' then Exit;
-  if UID = '' then Exit;
+  if (not LastChipUIDTransferExact) or (UID = '') then
+  begin
+    OpFail('duplicate-UID checking is enabled but no exact usable UID was read');
+    Exit(False);
+  end;
 
   if not ProdLogHasPassedUID(ProdSettings.ProdLogFile, UID) then Exit;
 
@@ -2175,8 +3630,10 @@ function BlankCheckBeforeWrite(StartAddress, Len: cardinal): boolean;
 var
   Chunk: array[0..2047] of byte;
   Addr, Remain: cardinal;
-  n, i: integer;
+  n, i, Got: integer;
   BlankByte: byte;
+  Use4B, Native4B, FastRead: boolean;
+  ReadOp: byte;
 begin
   Result := True;
 
@@ -2190,62 +3647,116 @@ begin
   Addr := StartAddress;
   Remain := Len;
 
-  while Remain > 0 do
-  begin
-    n := SizeOf(Chunk);
-    if cardinal(n) > Remain then n := Remain;
+  Use4B := Needs4ByteAddress(StartAddress, Len, OpUI.ChipSize);
+  Native4B := Use4B and Native4BRead;
+  //EN4B ที่ส่งไม่ผ่านแปลว่าชิปยังอยู่โหมด 3 ไบต์ อ่านต่อไปคือคนละแอดเดรส
+  if Use4B and (not Native4B) then
+    if not Enter4B then Exit(False);
+  PickReadOpcode(Native4B, ReadOp, FastRead);
 
-    FillByte(Chunk, SizeOf(Chunk), 0);
-    UsbAsp25_Read($03, Addr, Chunk, n);
+  try
+    while Remain > 0 do
+    begin
+      n := SizeOf(Chunk);
+      if cardinal(n) > Remain then n := Remain;
 
-    for i := 0 to n - 1 do
-      if Chunk[i] <> BlankByte then
+      FillByte(Chunk, SizeOf(Chunk), 0);
+      Got := ReadData25(ReadOp, FastRead, Use4B, Addr, Chunk, n);
+      if Got <> n then
       begin
-        LogPrint(STR_NOT_BLANK + IntToHex(Addr + cardinal(i), 8));
-        Result := MessageDlg('AsProgrammer', STR_NOT_BLANK_Q,
-                             mtWarning, [mbYes, mbNo], 0) = mrYes;
-        Exit;
+        OpFail(Format('short read during blank check: received %d of %d bytes',
+                      [Got, n]), Addr);
+        Exit(False);
       end;
 
-    Inc(Addr, cardinal(n));
-    Dec(Remain, cardinal(n));
+      for i := 0 to n - 1 do
+        if Chunk[i] <> BlankByte then
+        begin
+          LogPrint(STR_NOT_BLANK + IntToHex(Addr + cardinal(i), 8));
+          Result := AskUser(STR_NOT_BLANK_Q, False);
+          if not Result then
+            OpFail('the target area is not erased',
+                   Addr + cardinal(i));
+          Exit;
+        end;
 
-    OpProcessMessages;
-    if UserCancel then Exit(False);
+      Inc(Addr, cardinal(n));
+      Dec(Remain, cardinal(n));
+
+      OpProcessMessages;
+      if UserCancel then Exit(False);
+    end;
+  finally
+    Leave4B;
   end;
 end;
 
 //สำรองเนื้อหาชิปก่อนเขียนหรือลบ
 //คืน False เมื่อสำรองไม่สำเร็จ ซึ่งแปลว่าห้ามทำต่อ
-function AutoBackupChip: boolean;
+function AutoBackupChip(TrustedCopy: TMemoryStream = nil): boolean;
 var
   Backup: TMemoryStream;
-  Dir, FileName, ChipName: string;
-  i: integer;
+  Dir, FileName, TempName, ChipName: string;
+  i, RequiredPasses: integer;
+  SaveFile: boolean;
 begin
   Result := True;
+  FileName := '';
+  TempName := '';
+  SaveFile := MainForm.MenuAutoBackup.Checked;
 
-  if not MainForm.MenuAutoBackup.Checked then Exit;
-  if not MainForm.RadioSPI.Checked then Exit;
-  if MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25 then Exit;
-  if OpUI.ChipSize = 0 then Exit;
+  //A caller asking for TrustedCopy is the transactional planner, not merely
+  //the optional backup-file feature.  It always needs two matching full-chip
+  //reads even when the user chose not to publish a backup file.
+  if (not SaveFile) and (TrustedCopy = nil) then Exit;
+  if (not MainForm.RadioSPI.Checked) or
+     (MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25) or
+     (OpUI.ChipSize = 0) then
+  begin
+    //ผู้เรียกที่ขอ TrustedCopy คือตัววางแผนธุรกรรมซึ่งเป็น SPI25 เท่านั้น
+    //มาถึงตรงนี้ได้แปลว่าผิดจริงและต้องล้ม ส่วนฟีเจอร์สำรองไฟล์อัตโนมัติ
+    //บนตระกูลอื่น (95/45/KB/I2C/MW) ต้องข้ามแบบบอกกล่าวเหมือนเดิม ไม่ใช่
+    //ล้มงานเขียนทั้งงานด้วยข้อความที่โทษ backup ทั้งที่ปัญหาคือตระกูลชิป
+    if TrustedCopy <> nil then Exit(False);
+    LogPrint(STR_BACKUP_SKIPPED);
+    Exit;
+  end;
 
-  Dir := 'backup' + DirectorySeparator;
-  if not DirectoryExists(Dir) then
-    if not CreateDir(Dir) then
+  RequiredPasses := 2;
+  if StrictProductionMode then
+  begin
+    if (StrictProductionReadPasses < 2) or
+       (StrictProductionReadPasses > 16) then
     begin
-      LogPrint(STR_BACKUP_FAILED);
+      OpFail('strict production read-pass count must be between 2 and 16');
       Exit(False);
     end;
+    RequiredPasses := StrictProductionReadPasses;
+  end;
 
-  //ชื่อชิปจะไปอยู่ในชื่อไฟล์ ต้องล้างอักขระที่ใช้ไม่ได้ออกก่อน
-  ChipName := CurrentICParam.Name;
-  if ChipName = '' then ChipName := 'chip';
-  for i := 1 to Length(ChipName) do
-    if not (ChipName[i] in ['0'..'9', 'A'..'Z', 'a'..'z', '_', '-', '.']) then
-      ChipName[i] := '_';
+  if SaveFile then
+  begin
+    Dir := 'backup' + DirectorySeparator;
+    if not DirectoryExists(Dir) then
+      if not CreateDir(Dir) then
+      begin
+        LogPrint(STR_BACKUP_FAILED);
+        Exit(False);
+      end;
 
-  FileName := Dir + ChipName + '_' + FormatDateTime('yyyymmdd-hhnnss', Now) + '.bin';
+    //ชื่อชิปจะไปอยู่ในชื่อไฟล์ ต้องล้างอักขระที่ใช้ไม่ได้ออกก่อน
+    ChipName := CurrentICParam.Name;
+    if ChipName = '' then ChipName := 'chip';
+    for i := 1 to Length(ChipName) do
+      if not (ChipName[i] in
+              ['0'..'9', 'A'..'Z', 'a'..'z', '_', '-', '.']) then
+        ChipName[i] := '_';
+
+    FileName := Dir + ChipName + '_' +
+                FormatDateTime('yyyymmdd-hhnnss-zzz', Now) + '-' +
+                IntToHex(GetTickCount64 and $FFFF, 4) + '.bin';
+    TempName := FileName + '.tmp';
+  end;
 
   LogPrint(STR_BACKUP_MAKING);
 
@@ -2253,45 +3764,110 @@ begin
   try
     ReadFlash25(Backup, 0, OpUI.ChipSize);
 
-    if Backup.Size < OpUI.ChipSize then
+    if (not OpOK) or (Backup.Size <> OpUI.ChipSize) then
     begin
       LogPrint(STR_BACKUP_FAILED);
       Exit(False);
     end;
 
-    Backup.SaveToFile(FileName);
-    LogPrint(STR_BACKUP_DONE + FileName);
+    //A full-size wrong read is possible with a marginal clip, so a backup is
+    //trusted only after an independent second pass matches byte-for-byte.
+    if not ReadPassesAgree(Backup, 0, OpUI.ChipSize, RequiredPasses) then
+    begin
+      LogPrint(STR_BACKUP_FAILED);
+      Exit(False);
+    end;
+
+    //The differential programmer needs the exact trusted bytes used for the
+    //backup so it can restore neighbours in every erased block.  Return a
+    //copy only after both independent reads agreed.
+    if TrustedCopy <> nil then
+    begin
+      TrustedCopy.Clear;
+      Backup.Position := 0;
+      TrustedCopy.CopyFrom(Backup, Backup.Size);
+      TrustedCopy.Position := 0;
+    end;
+
+    if SaveFile then
+    begin
+      //Publish atomically.  A crash or full disk may leave a .tmp file, but can
+      //never leave a truncated file carrying the final backup name.
+      Backup.SaveToFile(TempName);
+      if (not FileExists(TempName)) or
+         (FileSizeUtf8(TempName) <> int64(OpUI.ChipSize)) then
+      begin
+        DeleteFile(TempName);
+        LogPrint(STR_BACKUP_FAILED);
+        Exit(False);
+      end;
+      if not RenameFile(TempName, FileName) then
+      begin
+        DeleteFile(TempName);
+        LogPrint(STR_BACKUP_FAILED);
+        Exit(False);
+      end;
+      LogPrint(STR_BACKUP_DONE + FileName);
+    end;
   finally
+    if (TempName <> '') and FileExists(TempName) then DeleteFile(TempName);
     Backup.Free;
   end;
 end;
 
 //ใส่เลขรันนิ่งตัวถัดไปลงในสตรีมก่อนเขียน และถ้ากำหนดไฟล์บันทึกไว้
 //ก็เขียนเลขที่จ่ายไปต่อท้ายไฟล์นั้นด้วย
-procedure ApplySerialToStream(Stream: TMemoryStream);
+function ApplySerialToStream(Stream: TMemoryStream): boolean;
 var
   Data: array of byte;
   Size: integer;
   LogF: TextFile;
 begin
-  if not ProdSettings.SNEnabled then Exit;
+  //ทุกทางออกที่ล้มเหลวต้อง OpFail ด้วย: ผู้เรียกทำแค่ `if not ... then Exit`
+  //ถ้าคืน False เงียบ ๆ งานเขียนจะถูกยกเลิกทั้งที่ LastOp ยังไม่ถูกทำเครื่องหมาย
+  //ว่าล้มเหลว แล้วสรุปท้ายงาน (รวมถึงบรรทัด PASS ในบันทึกการผลิต) จะโกหก
+  Result := False;
+  if Stream = nil then
+  begin
+    OpFail('there is no buffer to apply a serial number to');
+    Exit;
+  end;
 
   Size := Stream.Size;
-  if Size = 0 then Exit;
+  if Size = 0 then
+  begin
+    OpFail('the buffer is empty; nothing would be written');
+    Exit;
+  end;
 
-  if ProdSettings.SNAddress + ProdSettings.SNLength > cardinal(Size) then
+  if not ProdSettings.SNEnabled then
+  begin
+    LastProgramCRC := UpdateCRC32($FFFFFFFF, Stream.Memory, Stream.Size);
+    Exit(True);
+  end;
+
+  if not CurrentSerialValid then
+  begin
+    AllocateSerial(ProdSettings, CurrentSerial);
+    CurrentSerialValid := CurrentSerial.Valid;
+  end;
+
+  if (not CurrentSerialValid) or
+     (int64(ProdSettings.SNAddress) + CurrentSerial.Len > Size) then
   begin
     LogPrint(STR_SERIAL_NOFIT);
-    Exit;
+    OpFail('the serial number does not fit in the image');
+    Exit(False);
   end;
 
   SetLength(Data, Size);
   Stream.Position := 0;
   Stream.ReadBuffer(Data[0], Size);
 
-  if ApplySerial(ProdSettings, Data, cardinal(Size)) then
+  if ApplyAllocatedSerial(CurrentSerial, ProdSettings.SNAddress,
+                          Data, cardinal(Size)) then
   begin
-    LogPrint(STR_SERIAL_WRITTEN + SerialToStr(ProdSettings) +
+    LogPrint(STR_SERIAL_WRITTEN + CurrentSerial.Text +
              ' @ 0x' + IntToHex(ProdSettings.SNAddress, 6));
 
     if ProdSettings.SNLogFile <> '' then
@@ -2299,17 +3875,49 @@ begin
         AssignFile(LogF, ProdSettings.SNLogFile);
         if FileExists(ProdSettings.SNLogFile) then Append(LogF) else Rewrite(LogF);
         WriteLn(LogF, FormatDateTime('yyyy-mm-dd hh:nn:ss', Now) + #9 +
-                      CurrentICParam.Name + #9 + SerialToStr(ProdSettings));
+                      CurrentICParam.Name + #9 + CurrentSerial.Text);
         CloseFile(LogF);
       except
-        LogPrint('Cannot write the serial number log file');
+        on E: Exception do
+        begin
+          LogPrint('Cannot write the serial number log file');
+          OpFail('the serial-number evidence could not be written: ' +
+                 E.Message);
+          Exit(False);
+        end;
       end;
 
     Stream.Position := 0;
     Stream.WriteBuffer(Data[0], Size);
-  end;
+    LastProgramCRC := UpdateCRC32($FFFFFFFF, @Data[0], Size);
+    Result := True;
+  end
+  else
+    OpFail('the allocated serial number could not be applied to the image');
 
   Stream.Position := 0;
+end;
+
+//Persist the counter before the first programming command.  Failed units may
+//consume a serial, but a crash can never cause that identity to be issued to a
+//second physical unit.
+function ReserveCurrentSerial: boolean;
+begin
+  Result := True;
+  if (not ProdSettings.SNEnabled) or (not CurrentSerialValid) or
+     CurrentSerialReserved then Exit;
+
+  try
+    ProdSettings.SNValue := ProdSettings.SNValue + ProdSettings.SNStep;
+    SaveOptions(SettingsFile);
+    CurrentSerialReserved := True;
+  except
+    on E: Exception do
+    begin
+      OpFail('the serial reservation could not be persisted: ' + E.Message);
+      Result := False;
+    end;
+  end;
 end;
 
 //เติมค่าที่อ่านได้จาก SFDP ลงในหน้าจอและใน CurrentICParam
@@ -2522,13 +4130,17 @@ end;
 procedure ReadFlashMW(var RomStream: TMemoryStream; AddrBitLen: byte; StartAddress, ChipSize: cardinal);
 var
   ChunkSize: Word;
-  BytesRead: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..2047] of byte;
   Address: cardinal;
-begin
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  procedure DoWork;
+  begin
   if (StartAddress >= ChipSize) or (ChipSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -2538,7 +4150,7 @@ begin
   LogPrint(STR_READING_FLASH);
   BytesRead := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+  ProgressReset(ChipSize div ChunkSize);
 
   RomStream.Clear;
 
@@ -2546,22 +4158,36 @@ begin
   begin
     //if ChunkSize > ((ChipSize div 2) - Address) then ChunkSize := (ChipSize div 2) - Address;
 
-    BytesRead := BytesRead + UsbAspMW_Read(AddrBitLen, Address, datachunk, ChunkSize);
-    RomStream.WriteBuffer(datachunk, ChunkSize);
+    Got := UsbAspMW_Read(AddrBitLen, Address, datachunk, ChunkSize);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('MicroWire short read: received %d of %d bytes',
+                    [Got, ChunkSize]), int64(Address) * 2);
+      Break;
+    end;
+    Inc(BytesRead, Got);
+    RomStream.WriteBuffer(datachunk, Got);
     Inc(Address, ChunkSize div 2);
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 2;
-    Application.ProcessMessages;
+    ProgressStep(2);
+    OpProcessMessages;
 
     if UserCancel then Break;
   end;
 
   if BytesRead <> ChipSize then
-    LogPrint(STR_WRONG_BYTES_READ)
+    begin
+      LogPrint(STR_WRONG_BYTES_READ);
+      OpFail('the number of bytes read does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure WriteFlashMW(var RomStream: TMemoryStream; AddrBitLen: byte; StartAddress, ChipSize: cardinal);
@@ -2569,49 +4195,76 @@ var
   DataChunk: array[0..2047] of byte;
   Address, BytesWrite: cardinal;
   ChunkSize: Word;
-begin
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  procedure DoWork;
+  var
+    Wrote: integer;
+  begin
   if (StartAddress >= ChipSize) or (ChipSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
   LogPrint(STR_WRITING_FLASH);
   BytesWrite := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := ChipSize;
+  ProgressReset(ChipSize);
 
   ChunkSize := 2;
 
   if ChunkSize > ChipSize then ChunkSize := ChipSize;
 
-  UsbAspMW_EWEN(AddrBitLen);
-
-  while Address < ChipSize div 2 do
+  if UsbAspMW_Ewen(AddrBitLen) <> AddrBitLen + 3 then
   begin
-    RomStream.ReadBuffer(DataChunk, ChunkSize);
-
-    BytesWrite := BytesWrite + UsbAspMW_Write(AddrBitLen, Address, datachunk, ChunkSize);
-    Inc(Address, ChunkSize div 2);
-
-    while UsbAspMW_Busy do
-    begin
-       Application.ProcessMessages;
-       if UserCancel then Exit;
-    end; 
-
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + ChunkSize;
-    Application.ProcessMessages;
-
-    if UserCancel then Break;
+    OpFail('the MicroWire EEPROM did not accept EWEN');
+    Exit;
   end;
 
-  if BytesWrite <> ChipSize then
-    LogPrint(STR_WRONG_BYTES_WRITE)
-  else
-    LogPrint(STR_DONE);
+  try
+    while Address < ChipSize div 2 do
+    begin
+      RomStream.ReadBuffer(DataChunk, ChunkSize);
 
-  MainForm.ProgressBar.Position := 0;
+      Wrote := UsbAspMW_Write(AddrBitLen, Address, datachunk, ChunkSize);
+      if Wrote <> ChunkSize then
+      begin
+        OpFail(Format('MicroWire short write: sent %d of %d bytes',
+                      [Wrote, ChunkSize]), int64(Address) * 2);
+        Exit;
+      end;
+      Inc(BytesWrite, Wrote);
+      Inc(Address, ChunkSize div 2);
+
+      if not WaitNotBusyMW(BUSY_TIMEOUT_PAGE) then Exit;
+
+      ProgressStep(ChunkSize);
+      OpProcessMessages;
+
+      if UserCancel then Break;
+    end;
+
+    if BytesWrite <> ChipSize then
+      begin
+        LogPrint(STR_WRONG_BYTES_WRITE);
+        OpFail('the number of bytes written does not match the size asked for');
+      end
+    else
+      LogPrint(STR_DONE);
+  finally
+    //Always put a serial EEPROM back into write-disabled state, including
+    //after cancel, timeout, or a short transfer.
+    if UsbAspMW_Ewds(AddrBitLen) <> AddrBitLen + 3 then
+      OpFail('the MicroWire EEPROM could not be returned to EWDS');
+  end;
+
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure WriteFlash25(var RomStream: TMemoryStream; StartAddress, WriteSize: cardinal; PageSize: word; WriteType: integer);
@@ -2626,7 +4279,7 @@ var
   SkipPage: boolean;
   Retry, BadOffset: integer;
   OpStarted: TDateTime;
-  Use4B, Native4B: boolean;
+  Use4B, Native4B, FastRead: boolean;
   WriteOp, ReadOp: byte;
 
   //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
@@ -2634,11 +4287,15 @@ var
   //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
   procedure DoWork;
   var
-    i: integer;
+    i, Wrote, Got: integer;
+    WEL: boolean;
   begin
-  if (WriteSize = 0) then
+  if (WriteSize = 0) or (PageSize = 0) or
+     (PageSize > SizeOf(DataChunk)) or
+     (StartAddress > High(cardinal) - WriteSize) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -2658,21 +4315,29 @@ var
   //ชิปที่มีคำสั่งชุด 4 ไบต์ของตัวเองครบทั้งเขียน (12h) และอ่าน (13h)
   //ไม่ต้องสลับโหมดเลย ต้องมีครบทั้งคู่เพราะรอบตรวจหลังเขียนต้องอ่านกลับ
   //ถ้ามีแค่อย่างเดียวก็สลับโหมดตามเดิมซึ่งยังถูกต้องอยู่
-  Use4B := WriteSize > FLASH_SIZE_128MBIT;
+  //
+  //ตัวตัดสินคือขนาดชิปกับแอดเดรสที่จะแตะ ไม่ใช่ขนาดของบัฟเฟอร์
+  //เดิมใช้ WriteSize ซึ่งแปลว่าการเขียนภาพ 4MB ลงชิป 32MB ที่แอดเดรส 16MB
+  //ถูกส่งด้วยแอดเดรส 3 ไบต์ แอดเดรสวนกลับ แล้วข้อมูลไปทับบล็อกแรกของชิป
+  Use4B := Needs4ByteAddress(StartAddress, WriteSize, OpUI.ChipSize);
   Native4B := Use4B and Native4BWrite and Native4BRead;
 
   if Native4B then
   begin
     WriteOp := Chip25PageProg4BOpcode;
-    ReadOp := Chip25Read4BOpcode;
     LogPrint(STR_4B_NATIVE);
   end
   else
   begin
     WriteOp := $02;
-    ReadOp := $03;
-    if Use4B then Enter4B;
+    //EN4B ที่ส่งไม่ผ่านแปลว่าชิปยังตีความแอดเดรสแบบ 3 ไบต์ เขียนต่อไป
+    //แอดเดรสจะวนกลับแล้วไปทับบล็อกแรกของชิปก่อนที่งานจะถูกรายงานว่าล้มเหลว
+    if Use4B then
+      if not Enter4B then Exit;
   end;
+
+  //opcode ที่ใช้อ่านกลับตอนตรวจ เลือกที่เดียวกับตอนอ่านปกติ
+  PickReadOpcode(Native4B, ReadOp, FastRead);
 
   try
   while (Address-StartAddress) < WriteSize do
@@ -2684,7 +4349,15 @@ var
     //เฉพาะตอนเริ่มของ aai
     if (((WriteType = WT_SSTB) or (WriteType = WT_SSTW)) and (Address = StartAddress)) or
     //ตอนเริ่มเพจ
-    (WriteType = WT_PAGE) then UsbAsp25_WREN();
+    (WriteType = WT_PAGE) then
+    begin
+      //A page-program command clears WEL.  Confirm it for every independent
+      //page; a cable/WP#/transport failure after page one must not silently
+      //drop the rest of the image.  SST AAI is one continuous sequence, so it
+      //needs WREN only on its first item.
+      if (WriteType = WT_PAGE) or (Address = StartAddress) then
+        if not WrenOK then Exit;
+    end;
 
     //คำนวณขนาดบัฟเฟอร์เพจแรก กันไม่ให้บัฟเฟอร์วนกลับเมื่อชนขอบแอดเดรส
     //ที่ต้องการคือจำนวนไบต์ที่เหลือจนถึงขอบเพจถัดไป ไม่ใช่เศษของขนาดชิป
@@ -2698,20 +4371,21 @@ var
 
     if (WriteSize - (Address-StartAddress)) < PageSize then PageSize := (WriteSize - (Address-StartAddress));
     RomStream.ReadBuffer(DataChunk, PageSize);
+    Wrote := 0;
 
     if (WriteType = WT_SSTB) then
       if (Address = StartAddress) then //เขียนไบต์แรกพร้อมแอดเดรส
-        BytesWrite := BytesWrite + UsbAsp25_Write($AF, Address, datachunk, PageSize)
+        Wrote := UsbAsp25_Write($AF, Address, datachunk, PageSize)
         else
         //ไบต์ที่เหลือเขียนโดยไม่ต้องส่งแอดเดรส
-        BytesWrite := BytesWrite + UsbAsp25_WriteSSTB($AF, datachunk[0]);
+        Wrote := UsbAsp25_WriteSSTB($AF, datachunk[0]);
 
     if (WriteType = WT_SSTW) then
       if (Address = StartAddress) then //เขียนสองไบต์แรกพร้อมแอดเดรส
-        BytesWrite := BytesWrite + UsbAsp25_Write($AD, Address, datachunk, PageSize)
+        Wrote := UsbAsp25_Write($AD, Address, datachunk, PageSize)
         else
         //ไบต์ที่เหลือเขียนโดยไม่ต้องส่งแอดเดรส
-        BytesWrite := BytesWrite + UsbAsp25_WriteSSTW($AD, datachunk[0], datachunk[1]);
+        Wrote := UsbAsp25_WriteSSTW($AD, datachunk[0], datachunk[1]);
 
     if WriteType = WT_PAGE then
     begin
@@ -2725,6 +4399,28 @@ var
             SkipPage := False;
             Break;
           end;
+
+        //Skipping an FF page is safe only when the target is already FF.
+        //Otherwise old zero bits survive and an unchecked write can report
+        //success with stale data.  Prove this page blank using the same
+        //address strategy as the normal read path.
+        if SkipPage then
+        begin
+          Got := ReadData25(ReadOp, FastRead, Use4B, Address,
+                            DataChunk2, PageSize);
+          if Got <> PageSize then
+          begin
+            OpFail(Format('short read while checking a skipped page: received %d of %d bytes',
+                          [Got, PageSize]), Address);
+            Exit;
+          end;
+          for i := 0 to PageSize - 1 do
+            if DataChunk2[i] <> $FF then
+            begin
+              SkipPage := False;
+              Break;
+            end;
+        end;
       end;
 
       if not SkipPage then
@@ -2732,23 +4428,41 @@ var
         if Use4B then //หน่วยความจำใหญ่กว่า 128Mbit
         begin
           //ใช้แอดเดรส 4 ไบต์
-          BytesWrite := BytesWrite + UsbAsp25_Write32bitAddr(WriteOp, Address, datachunk, PageSize)
+          Wrote := UsbAsp25_Write32bitAddr(WriteOp, Address, datachunk, PageSize)
         end
         else //หน่วยความจำไม่เกิน 128Mbit
-          BytesWrite := BytesWrite + UsbAsp25_Write($02, Address, datachunk, PageSize);
-      end else BytesWrite := BytesWrite + PageSize;
+          Wrote := UsbAsp25_Write($02, Address, datachunk, PageSize);
+      end
+      else
+        Wrote := PageSize;
+    end;
+
+    if Wrote <> PageSize then
+    begin
+      OpFail(Format('SPI flash short write: sent %d of %d bytes',
+                    [Wrote, PageSize]), Address);
+      Exit;
     end;
 
     if (not OpUI.IgnoreBusy) and (not SkipPage) then  //ข้ามการตรวจสถานะ
-      if not WaitNotBusy25(BUSY_TIMEOUT_PAGE) then Exit;
+    begin
+      if not WaitNotBusy25(PageProgTimeout) then Exit;
+
+      //ชิปแจ้งเองว่าคำสั่งเขียนล้มเหลวหรือไม่ ตรวจเฉพาะเพจแรกกับทุก ๆ 256 เพจ
+      //เพราะการอ่านรีจิสเตอร์เพิ่มทุกเพจกินเวลาพอ ๆ กับการเขียนเอง
+      if (Address = StartAddress) or ((ProgressPos and $FF) = 0) then
+        if ChipReportedFailure('program at 0x' + IntToHex(Address, 8)) then Exit;
+    end;
 
     if (OpUI.AutoCheck) and (WriteType = WT_PAGE) then
     begin
-	  
-      if Use4B then
-        UsbAsp25_Read32bitAddr(ReadOp, Address, datachunk2, PageSize)
-      else
-        UsbAsp25_Read($03, Address, datachunk2, PageSize);
+      Got := ReadData25(ReadOp, FastRead, Use4B, Address, datachunk2, PageSize);
+      if Got <> PageSize then
+      begin
+        OpFail(Format('SPI flash short read after program: received %d of %d bytes',
+                      [Got, PageSize]), Address);
+        Exit;
+      end;
 
       BadOffset := -1;
       for i := 0 to PageSize - 1 do
@@ -2780,6 +4494,7 @@ var
       Retry := 0;
     end;
 
+    Inc(BytesWrite, PageSize);
     Inc(Address, PageSize);
     Inc(ProgressPos);
     SetProgressPos(ProgressPos);
@@ -2819,64 +4534,102 @@ var
   DataChunk2: array[0..2047] of byte;
   Address, BytesWrite: cardinal;
   PageSizeTemp: word;
-  i: integer;
-begin
-  if (WriteSize = 0) then
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  //ตัวนับลูปต้องเป็นตัวแปรของตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
+  //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
+  procedure DoWork;
+  var
+    i, Wrote, Got: integer;
+    WEL: boolean;
+  begin
+  if (WriteSize = 0) or (PageSize = 0) or
+     (PageSize > SizeOf(DataChunk)) or
+     (not SPI95AddressRangeValid(ChipSize, StartAddress, WriteSize)) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
-  if MainForm.MenuAutoCheck.Checked then
+  if OpUI.AutoCheck then
     LogPrint(STR_WRITING_FLASH_WCHK) else
       LogPrint(STR_WRITING_FLASH);
 
   PageSizeTemp := PageSize;
   BytesWrite := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := WriteSize div PageSize;
+  ProgressReset(WriteSize div PageSize);
 
   while (Address-StartAddress) < WriteSize do
   begin
-    UsbAsp95_WREN();
+    if not UsbAsp95_WrenChecked(WEL) then
+    begin
+      OpFail('the SPI EEPROM did not latch write enable (WEL stayed clear)',
+             Address);
+      Exit;
+    end;
 
-    //คำนวณขนาดบัฟเฟอร์เพจแรก กันไม่ให้บัฟเฟอร์วนกลับเมื่อชนขอบแอดเดรส
-        if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 1) then
-           PageSize := (ChipSize - StartAddress) mod PageSize else
-              PageSize := PageSizeTemp;
-
-    if (WriteSize - (Address-StartAddress)) < PageSize then PageSize := (WriteSize - (Address-StartAddress));
+    PageSize := SPI95PageChunk(Address,
+      WriteSize - (Address - StartAddress), PageSizeTemp);
+    if PageSize = 0 then
+    begin
+      OpFail('the SPI EEPROM page size worked out to zero', Address);
+      Exit;
+    end;
     RomStream.ReadBuffer(DataChunk, PageSize);
 
-    BytesWrite := BytesWrite + UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
-
-    if not MainForm.MenuIgnoreBusyBit.Checked then  //ข้ามการตรวจสถานะ
-      if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
-
-    if MainForm.MenuAutoCheck.Checked then
+    Wrote := UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
+    if Wrote <> PageSize then
     begin
-      UsbAsp95_Read(ChipSize, Address, datachunk2, PageSize);
+      OpFail(Format('SPI EEPROM short write: sent %d of %d bytes',
+                    [Wrote, PageSize]), Address);
+      Exit;
+    end;
+
+    if not OpUI.IgnoreBusy then  //ข้ามการตรวจสถานะ
+      if not WaitNotBusy95(BUSY_TIMEOUT_SECTOR) then Exit;
+
+    if OpUI.AutoCheck then
+    begin
+      Got := UsbAsp95_Read(ChipSize, Address, datachunk2, PageSize);
+      if Got <> PageSize then
+      begin
+        OpFail(Format('SPI EEPROM short read after program: received %d of %d bytes',
+                      [Got, PageSize]), Address);
+        Exit;
+      end;
       for i:=0 to PageSize-1 do
         if DataChunk2[i] <> DataChunk[i] then
         begin
           LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
-          MainForm.ProgressBar.Position := 0;
+          OpFail('the SPI EEPROM page did not read back as written',
+                 Address + cardinal(i));
+          SetProgressPos(0);
           Exit;
         end;
     end;
 
+    Inc(BytesWrite, PageSize);
     Inc(Address, PageSize);
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
     if UserCancel then Break;
   end;
 
   if BytesWrite <> WriteSize then
-    LogPrint(STR_WRONG_BYTES_WRITE)
+    begin
+      LogPrint(STR_WRONG_BYTES_WRITE);
+      OpFail('the number of bytes written does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure EraseEEPROM25(StartAddress, WriteSize: cardinal; PageSize: word; ChipSize: integer);
@@ -2884,56 +4637,101 @@ var
   DataChunk: array[0..2047] of byte;
   DataChunk2: array[0..2047] of byte;
   Address, BytesWrite: cardinal;
-  i: integer;
-begin
-  if (StartAddress >= WriteSize) or (WriteSize = 0) {or (PageSize > WriteSize)} then
+  PageSizeTemp: word;
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  //ตัวนับลูปต้องเป็นตัวแปรของตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
+  //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
+  procedure DoWork;
+  var
+    i, Wrote, Got: integer;
+    WEL: boolean;
+  begin
+  if (StartAddress >= WriteSize) or (WriteSize = 0) or (PageSize = 0) or
+     (PageSize > SizeOf(DataChunk)) or
+     (not SPI95AddressRangeValid(ChipSize, StartAddress,
+                                 WriteSize - StartAddress)) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
   BytesWrite := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := WriteSize div PageSize;
+  PageSizeTemp := PageSize;
+  ProgressReset(WriteSize div PageSize);
 
   while Address < WriteSize do
   begin
-    UsbAsp95_WREN();
+    if not UsbAsp95_WrenChecked(WEL) then
+    begin
+      OpFail('the SPI EEPROM did not latch write enable (WEL stayed clear)',
+             Address);
+      Exit;
+    end;
 
-    if (WriteSize - Address) < PageSize then PageSize := (WriteSize - Address);
+    PageSize := SPI95PageChunk(Address, WriteSize - Address, PageSizeTemp);
+    if PageSize = 0 then
+    begin
+      OpFail('the SPI EEPROM page size worked out to zero', Address);
+      Exit;
+    end;
 
     FillByte(DataChunk, PageSize, $FF);
 
-    BytesWrite := BytesWrite + UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
-
-    if not MainForm.MenuIgnoreBusyBit.Checked then  //ข้ามการตรวจสถานะ
-      if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
-
-    if MainForm.MenuAutoCheck.Checked then
+    Wrote := UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
+    if Wrote <> PageSize then
     begin
-      UsbAsp95_Read(ChipSize, Address, datachunk2, PageSize);
+      OpFail(Format('SPI EEPROM short write while erasing: sent %d of %d bytes',
+                    [Wrote, PageSize]), Address);
+      Exit;
+    end;
+
+    if not OpUI.IgnoreBusy then  //ข้ามการตรวจสถานะ
+      if not WaitNotBusy95(BUSY_TIMEOUT_SECTOR) then Exit;
+
+    if OpUI.AutoCheck then
+    begin
+      Got := UsbAsp95_Read(ChipSize, Address, datachunk2, PageSize);
+      if Got <> PageSize then
+      begin
+        OpFail(Format('SPI EEPROM short read after erase: received %d of %d bytes',
+                      [Got, PageSize]), Address);
+        Exit;
+      end;
       for i:=0 to PageSize-1 do
         if DataChunk2[i] <> DataChunk[i] then
         begin
           LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
-          MainForm.ProgressBar.Position := 0;
+          OpFail('the SPI EEPROM erase did not read back as blank',
+                 Address + cardinal(i));
+          SetProgressPos(0);
           Exit;
         end;
     end;
 
+    Inc(BytesWrite, PageSize);
     Inc(Address, PageSize);
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
 
     if UserCancel then Break;
   end;
 
   if BytesWrite <> WriteSize then
-    LogPrint(STR_WRONG_BYTES_WRITE)
+    begin
+      LogPrint(STR_WRONG_BYTES_WRITE);
+      OpFail('the number of bytes written does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 function EraseFlashKB(chipsize: longword; pagesize: word): integer;
@@ -2941,7 +4739,7 @@ var
   i: integer;
   busy: boolean;
 begin
-  MainForm.ProgressBar.Max := chipsize div pagesize;
+  ProgressReset(chipsize div pagesize);
 
   UsbAspMulti_EnableEDI();
   UsbAspMulti_WriteReg($FEA7, $A4); //เปิดสิทธิ์เขียน
@@ -2955,10 +4753,10 @@ begin
       busy := UsbAspMulti_Busy();
     until busy = false;
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
+    ProgressStep(1);
   end;
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
 end;
 
 procedure WriteFlashKB(var RomStream: TMemoryStream; StartAddress, WriteSize: cardinal; PageSize: word);
@@ -2966,28 +4764,42 @@ var
   DataChunk: array[0..2047] of byte;
   DataChunk2: array[0..2047] of byte;
   Address, BytesWrite: cardinal;
-  i: integer;
   busy: boolean;
   SkipPage: boolean;
-begin
-  if (StartAddress >= WriteSize) or (WriteSize = 0) {or (PageSize > WriteSize)} then
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  //ตัวนับลูปต้องเป็นตัวแปรของตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
+  //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
+  procedure DoWork;
+  var
+    i: integer;
+    BusyStarted: QWord;
+  begin
+  if (WriteSize = 0) or (PageSize = 0) or
+     (PageSize > SizeOf(DataChunk)) or
+     ((StartAddress mod PageSize) <> 0) or
+     ((WriteSize mod PageSize) <> 0) or
+     (QWord(StartAddress) + QWord(WriteSize) > QWord(High(cardinal))) or
+     (RomStream = nil) or
+     (RomStream.Size - RomStream.Position < WriteSize) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('KB writes require a bounded, aligned complete-page buffer');
     exit;
   end;
 
-  if MainForm.MenuAutoCheck.Checked then
+  if OpUI.AutoCheck then
     LogPrint(STR_WRITING_FLASH_WCHK) else
       LogPrint(STR_WRITING_FLASH);
 
   BytesWrite := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := WriteSize div PageSize;
+  ProgressReset(WriteSize div PageSize);
 
   UsbAspMulti_EnableEDI();
   UsbAspMulti_WriteReg($FEA7, $A4); //เปิดสิทธิ์เขียน
 
-  while Address < WriteSize do
+  while BytesWrite < WriteSize do
   begin
 
     //ต้องรีเซ็ตทุกเพจ ตัวแปรมีค่าค้างจากรอบก่อนได้
@@ -2997,7 +4809,7 @@ begin
 
 
     //ถ้าทั้งเพจเป็น 00 ก็ไม่ต้องเขียน
-    if MainForm.MenuSkipFF.Checked then
+    if OpUI.SkipFF then
     begin
       SkipPage := True;
       for i:=0 to PageSize-1 do
@@ -3011,15 +4823,23 @@ begin
     if not SkipPage then
       UsbAspMulti_WritePage(Address, datachunk);
 
-    //busy
+    //A missing chip used to spin forever here.  A per-page deadline keeps the
+    //programmer session and cancellation responsive.
+    BusyStarted := GetTickCount64;
     repeat
       if UserCancel then Exit;
       busy := UsbAspMulti_Busy();
+      if busy and (GetTickCount64 - BusyStarted >= 30000) then
+      begin
+        OpFail('KB flash stayed busy for more than 30 seconds', Address);
+        Exit;
+      end;
+      if busy then Sleep(1);
     until busy = false;
 
     BytesWrite := BytesWrite + PageSize;
 
-     if (MainForm.MenuAutoCheck.Checked) then
+     if (OpUI.AutoCheck) then
       begin
         for i:=0 to PageSize-1 do
         begin
@@ -3027,24 +4847,33 @@ begin
           if DataChunk2[0] <> DataChunk[i] then
           begin
             LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
-            MainForm.ProgressBar.Position := 0;
+            OpFail('the KB flash byte did not read back as written',
+                   Address + cardinal(i));
+            SetProgressPos(0);
             Exit;
           end;
         end;
       end;
 
     Inc(Address, PageSize);
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
     if UserCancel then Exit;
   end;
 
   if BytesWrite <> WriteSize then
-    LogPrint(STR_WRONG_BYTES_WRITE)
+    begin
+      LogPrint(STR_WRONG_BYTES_WRITE);
+      OpFail('the number of bytes written does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure WriteFlash45(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal; PageSize: word; WriteType: integer);
@@ -3052,59 +4881,103 @@ var
   DataChunk: array[0..2047] of byte;
   DataChunk2: array[0..2047] of byte;
   PageAddress, BytesWrite: cardinal;
-  i: integer;
-begin
-  if (StartAddress >= ChipSize) or (ChipSize = 0) or (PageSize > ChipSize) then
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  //ตัวนับลูปต้องเป็นตัวแปรของตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
+  //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
+  procedure DoWork;
+  var
+    i, Wrote, Got: integer;
+  begin
+  if (StartAddress >= ChipSize) or (ChipSize = 0) or
+     (PageSize = 0) or (PageSize > ChipSize) or
+     (PageSize > SizeOf(DataChunk)) or
+     (WriteType <> WT_PAGE) or (RomStream = nil) or
+     (RomStream.Size - RomStream.Position < ChipSize) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
-  if MainForm.MenuAutoCheck.Checked then
+  if OpUI.AutoCheck then
     LogPrint(STR_WRITING_FLASH_WCHK) else
       LogPrint(STR_WRITING_FLASH);
 
   BytesWrite := 0;
-  PageAddress := StartAddress;
-  MainForm.ProgressBar.Max := ChipSize div PageSize;
+  if ((StartAddress mod PageSize) <> 0) or
+     ((ChipSize mod PageSize) <> 0) then
+  begin
+    OpFail('DataFlash writes must be aligned to complete physical pages',
+           StartAddress);
+    Exit;
+  end;
 
-  while PageAddress < ChipSize div PageSize do
+  PageAddress := StartAddress div PageSize;
+  ProgressReset(ChipSize div PageSize);
+
+  while BytesWrite < ChipSize do
   begin
     //UsbAsp45_WREN(hUSBDev);
     RomStream.ReadBuffer(DataChunk, PageSize);
 
     if WriteType = WT_PAGE then
-      BytesWrite := BytesWrite + UsbAsp45_Write(PageAddress, datachunk, PageSize);
-
-    while UsbAsp45_Busy() do
     begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
+      Wrote := UsbAsp45_Write(PageAddress, datachunk, PageSize);
+      if Wrote <> PageSize then
+      begin
+        OpFail(Format('DataFlash short write: sent %d of %d bytes',
+                      [Wrote, PageSize]), int64(PageAddress) * PageSize);
+        Exit;
+      end;
+    end
+    else
+    begin
+      OpFail('unsupported DataFlash write mode');
+      Exit;
     end;
 
-    if MainForm.MenuAutoCheck.Checked then
+    if not WaitNotBusy45(BUSY_TIMEOUT_PAGE) then Exit;
+
+    if OpUI.AutoCheck then
     begin
-      UsbAsp45_Read(PageAddress, datachunk2, PageSize);
+      Got := UsbAsp45_Read(PageAddress, datachunk2, PageSize);
+      if Got <> PageSize then
+      begin
+        OpFail(Format('DataFlash short read after program: received %d of %d bytes',
+                      [Got, PageSize]), int64(PageAddress) * PageSize);
+        Exit;
+      end;
       for i:=0 to PageSize-1 do
         if DataChunk2[i] <> DataChunk[i] then
         begin
           LogPrint(STR_VERIFY_ERROR+IntToHex((PageAddress*PageSize )+i, 8));
+          OpFail('the DataFlash page did not read back as written',
+                 int64(PageAddress) * PageSize + i);
           Exit;
         end;
     end;
 
+    Inc(BytesWrite, PageSize);
     Inc(PageAddress, 1);
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
     if UserCancel then Break;
   end;
 
   if BytesWrite <> ChipSize then
-    LogPrint(STR_WRONG_BYTES_WRITE)
+    begin
+      LogPrint(STR_WRONG_BYTES_WRITE);
+      OpFail('the number of bytes written does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure ReadFlash25(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal);
@@ -3112,12 +4985,12 @@ const
   FLASH_SIZE_128MBIT = 16777216;
 var
   ChunkSize: Word;
-  BytesRead: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..65534] of byte;
   Address: cardinal;
   ProgressPos: integer;
   OpStarted: TDateTime;
-  Use4B: boolean;
+  Use4B, Native4B, FastRead: boolean;
   ReadOp: byte;
 
   //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
@@ -3126,6 +4999,7 @@ var
   if (StartAddress >= ChipSize) or (ChipSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -3151,30 +5025,34 @@ var
   RomStream.Clear;
 
   //ชิปที่มีคำสั่งอ่านชุด 4 ไบต์ของตัวเอง (13h) ไม่ต้องสลับโหมดเลย
-  Use4B := ChipSize > FLASH_SIZE_128MBIT;
-  if Use4B and Native4BRead then
-  begin
-    ReadOp := Chip25Read4BOpcode;
-    LogPrint(STR_4B_NATIVE);
-  end
+  //ใช้กฎเดียวกับทางเขียน ทางลบ และทางตรวจ ทั้งสี่ทางต้องอยู่ในโหมดเดียวกัน
+  Use4B := Needs4ByteAddress(StartAddress, ChipSize - StartAddress, ChipSize);
+  Native4B := Use4B and Native4BRead;
+  if Native4B then
+    LogPrint(STR_4B_NATIVE)
   else
-  begin
-    ReadOp := $03;
-    if Use4B then Enter4B;
-  end;
+    //EN4B ที่ส่งไม่ผ่าน = ชิปยังอยู่โหมด 3 ไบต์ อ่านต่อได้แอดเดรสวนกลับ
+    if Use4B then
+      if not Enter4B then Exit;
+
+  PickReadOpcode(Native4B, ReadOp, FastRead);
+  if FastRead then LogPrint(Format(STR_FAST_READ, [ReadOp]));
 
   try
   while Address < ChipSize do
   begin
     if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
 
-    if Use4B then
-      BytesRead := BytesRead + UsbAsp25_Read32bitAddr(ReadOp, Address, datachunk, ChunkSize)
-    else
-      BytesRead := BytesRead + UsbAsp25_Read($03, Address, datachunk, ChunkSize);
-
-    RomStream.WriteBuffer(datachunk, chunksize);
-    Inc(Address, ChunkSize);
+    Got := ReadData25(ReadOp, FastRead, Use4B, Address, datachunk, ChunkSize);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('SPI flash short read: received %d of %d bytes',
+                    [Got, ChunkSize]), Address);
+      Break;
+    end;
+    Inc(BytesRead, Got);
+    RomStream.WriteBuffer(datachunk, Got);
+    Inc(Address, Got);
 
     Inc(ProgressPos);
     SetProgressPos(ProgressPos);
@@ -3212,13 +5090,17 @@ end;
 procedure ReadFlash95(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal);
 var
   ChunkSize: Word;
-  BytesRead: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..2047] of byte;
   Address: cardinal;
-begin
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  procedure DoWork;
+  begin
   if (StartAddress >= ChipSize) or (ChipSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -3228,7 +5110,7 @@ begin
   LogPrint(STR_READING_FLASH);
   BytesRead := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+  ProgressReset(ChipSize div ChunkSize);
 
   RomStream.Clear;
 
@@ -3236,34 +5118,52 @@ begin
   begin
     if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
 
-    BytesRead := BytesRead + UsbAsp95_Read(ChipSize, Address, datachunk, ChunkSize);
-    RomStream.WriteBuffer(datachunk, chunksize);
-    Inc(Address, ChunkSize);
+    Got := UsbAsp95_Read(ChipSize, Address, datachunk, ChunkSize);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('SPI EEPROM short read: received %d of %d bytes',
+                    [Got, ChunkSize]), Address);
+      Break;
+    end;
+    Inc(BytesRead, Got);
+    RomStream.WriteBuffer(datachunk, Got);
+    Inc(Address, Got);
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
 
     if UserCancel then Break;
   end;
 
   if BytesRead <> ChipSize then
-    LogPrint(STR_WRONG_BYTES_READ)
+    begin
+      LogPrint(STR_WRONG_BYTES_READ);
+      OpFail('the number of bytes read does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure ReadFlash45(var RomStream: TMemoryStream; StartAddress, PageSize, ChipSize: cardinal);
 var
   ChunkSize: Word;
-  BytesRead: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..2047] of byte;
   Address: cardinal;
-begin
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  procedure DoWork;
+  begin
   if (StartAddress >= ChipSize) or (ChipSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -3273,7 +5173,7 @@ begin
   LogPrint(STR_READING_FLASH);
   BytesRead := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+  ProgressReset(ChipSize div ChunkSize);
 
   RomStream.Clear;
 
@@ -3281,34 +5181,52 @@ begin
   begin
     if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
 
-    BytesRead := BytesRead + UsbAsp45_Read(Address, datachunk, ChunkSize);
-    RomStream.WriteBuffer(datachunk, chunksize);
+    Got := UsbAsp45_Read(Address, datachunk, ChunkSize);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('DataFlash short read: received %d of %d bytes',
+                    [Got, ChunkSize]), int64(Address) * ChunkSize);
+      Break;
+    end;
+    Inc(BytesRead, Got);
+    RomStream.WriteBuffer(datachunk, Got);
     Inc(Address, 1);
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
 
     if UserCancel then Break;
   end;
 
   if BytesRead <> ChipSize then
-    LogPrint(STR_WRONG_BYTES_READ)
+    begin
+      LogPrint(STR_WRONG_BYTES_READ);
+      OpFail('the number of bytes read does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure ReadFlashKB(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal);
 var
   ChunkSize: byte;
-  BytesRead: integer;
+  BytesRead, Got: integer;
   DataChunk: byte;
   Address: cardinal;
-begin
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  procedure DoWork;
+  begin
   if (StartAddress >= ChipSize) or (ChipSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -3318,7 +5236,7 @@ begin
   LogPrint(STR_READING_FLASH);
   BytesRead := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+  ProgressReset(ChipSize div ChunkSize);
 
   UsbAspMulti_EnableEDI();
 
@@ -3328,22 +5246,36 @@ begin
   begin
     if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
 
-    BytesRead := BytesRead + UsbAspMulti_Read(Address, datachunk);
-    RomStream.WriteBuffer(datachunk, chunksize);
+    Got := UsbAspMulti_Read(Address, datachunk);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('KB flash short read: received %d of %d bytes',
+                    [Got, ChunkSize]), Address);
+      Break;
+    end;
+    Inc(BytesRead, Got);
+    RomStream.WriteBuffer(datachunk, Got);
     Inc(Address, ChunkSize);
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
 
     if UserCancel then Break;
   end;
 
   if BytesRead <> ChipSize then
-    LogPrint(STR_WRONG_BYTES_READ)
+    begin
+      LogPrint(STR_WRONG_BYTES_READ);
+      OpFail('the number of bytes read does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 
@@ -3352,13 +5284,13 @@ const
   FLASH_SIZE_128MBIT = 16777216;
 var
   ChunkSize: Word;
-  BytesRead: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..16786] of byte;
   DataChunkFile: array[0..16786] of byte;
   Address: cardinal;
   ProgressPos: integer;
   OpStarted: TDateTime;
-  Use4B: boolean;
+  Use4B, Native4B, FastRead: boolean;
   ReadOp: byte;
 
   //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
@@ -3371,6 +5303,7 @@ var
   if (DataSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -3390,24 +5323,32 @@ var
   OpStarted := Now;
 
   //ชิปที่มีคำสั่งอ่านชุด 4 ไบต์ของตัวเอง (13h) ไม่ต้องสลับโหมดเลย
-  Use4B := DataSize > FLASH_SIZE_128MBIT;
-  if Use4B and Native4BRead then
-    ReadOp := Chip25Read4BOpcode
-  else
-  begin
-    ReadOp := $03;
-    if Use4B then Enter4B;
-  end;
+  //
+  //ตัดสินจากขนาดชิปกับแอดเดรสที่จะแตะ ไม่ใช่ขนาดของบัฟเฟอร์ที่เอามาเทียบ
+  //เดิมใช้ DataSize ซึ่งพลาดแบบเดียวกับทางเขียนเป๊ะ ๆ ผลคือรอบตรวจไปอ่าน
+  //แอดเดรสที่วนกลับมาแล้วเทียบผ่าน ซึ่งแย่กว่าไม่ตรวจเลย เพราะมันยืนยัน
+  //ความเสียหายว่าถูกต้อง
+  Use4B := Needs4ByteAddress(StartAddress, DataSize, OpUI.ChipSize);
+  Native4B := Use4B and Native4BRead;
+  //EN4B ที่ส่งไม่ผ่าน = อ่านกลับมาเทียบคนละแอดเดรส ผลตรวจเชื่อไม่ได้เลย
+  if (not Native4B) and Use4B then
+    if not Enter4B then Exit;
+
+  PickReadOpcode(Native4B, ReadOp, FastRead);
 
   try
   while (Address-StartAddress) < DataSize do
   begin
     if ChunkSize > (DataSize - (Address-StartAddress)) then ChunkSize := DataSize - (Address-StartAddress);
 
-    if Use4B then
-        BytesRead := BytesRead + UsbAsp25_Read32bitAddr(ReadOp, Address, datachunk, ChunkSize)
-      else
-        BytesRead := BytesRead + UsbAsp25_Read($03, Address, datachunk, ChunkSize);
+    Got := ReadData25(ReadOp, FastRead, Use4B, Address, datachunk, ChunkSize);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('SPI flash short read during verify: received %d of %d bytes',
+                    [Got, ChunkSize]), Address);
+      Exit;
+    end;
+    Inc(BytesRead, Got);
 
     RomStream.ReadBuffer(DataChunkFile, ChunkSize);
 
@@ -3455,14 +5396,22 @@ end;
 procedure VerifyFlash95(var RomStream: TMemoryStream; StartAddress, DataSize, ChipSize: cardinal);
 var
   ChunkSize: Word;
-  BytesRead, i: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..2047] of byte;
   DataChunkFile: array[0..2047] of byte;
   Address: cardinal;
-begin
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  //ตัวนับลูปต้องเป็นตัวแปรของตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
+  //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
+  procedure DoWork;
+  var
+    i: integer;
+  begin
   if (DataSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -3472,50 +5421,74 @@ begin
   LogPrint(STR_VERIFY);
   BytesRead := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := DataSize div ChunkSize;
+  ProgressReset(DataSize div ChunkSize);
 
   while (Address-StartAddress) < DataSize do
   begin
     if ChunkSize > (DataSize - (Address-StartAddress)) then ChunkSize := DataSize - (Address-StartAddress);
 
-    BytesRead := BytesRead + UsbAsp95_Read(ChipSize, Address, datachunk, ChunkSize);
+    Got := UsbAsp95_Read(ChipSize, Address, datachunk, ChunkSize);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('SPI EEPROM short read during verify: received %d of %d bytes',
+                    [Got, ChunkSize]), Address);
+      Exit;
+    end;
+    Inc(BytesRead, Got);
     RomStream.ReadBuffer(DataChunkFile, ChunkSize);
 
     for i := 0 to ChunkSize -1 do
     if DataChunk[i] <> DataChunkFile[i] then
     begin
       LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
-      MainForm.ProgressBar.Position := 0;
+      OpFail('the SPI EEPROM does not match the buffer',
+             Address + cardinal(i));
+      SetProgressPos(0);
       Exit;
     end;
 
     Inc(Address, ChunkSize);
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
 
     if UserCancel then Break;
   end;
 
   if (BytesRead <> DataSize) then
-    LogPrint(STR_WRONG_BYTES_READ)
+    begin
+      LogPrint(STR_WRONG_BYTES_READ);
+      OpFail('the number of bytes read does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure VerifyFlash45(var RomStream: TMemoryStream; StartAddress, PageSize, ChipSize: cardinal);
 var
   ChunkSize: Word;
-  BytesRead, i: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..2047] of byte;
   DataChunkFile: array[0..2047] of byte;
   PageAddress: cardinal;
-begin
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  //ตัวนับลูปต้องเป็นตัวแปรของตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
+  //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
+  procedure DoWork;
+  var
+    i: integer;
+  begin
   if (StartAddress >= ChipSize) or (ChipSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -3525,50 +5498,74 @@ begin
   LogPrint(STR_VERIFY);
   BytesRead := 0;
   PageAddress := StartAddress;
-  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+  ProgressReset(ChipSize div ChunkSize);
 
   while PageAddress < ChipSize div ChunkSize do
   begin
     //if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
 
-    BytesRead := BytesRead + UsbAsp45_Read(PageAddress, datachunk, ChunkSize);
+    Got := UsbAsp45_Read(PageAddress, datachunk, ChunkSize);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('DataFlash short read during verify: received %d of %d bytes',
+                    [Got, ChunkSize]), int64(PageAddress) * ChunkSize);
+      Exit;
+    end;
+    Inc(BytesRead, Got);
     RomStream.ReadBuffer(DataChunkFile, ChunkSize);
 
     for i := 0 to ChunkSize -1 do
     if DataChunk[i] <> DataChunkFile[i] then
     begin
       LogPrint(STR_VERIFY_ERROR+IntToHex((PageAddress*ChunkSize)+i, 8));
-      MainForm.ProgressBar.Position := 0;
+      OpFail('the DataFlash does not match the buffer',
+             int64(PageAddress) * ChunkSize + i);
+      SetProgressPos(0);
       Exit;
     end;
 
     Inc(PageAddress, 1);
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
 
     if UserCancel then Break;
   end;
 
   if (BytesRead <> ChipSize) then
-    LogPrint(STR_WRONG_BYTES_READ)
+    begin
+      LogPrint(STR_WRONG_BYTES_READ);
+      OpFail('the number of bytes read does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure VerifyFlashMW(var RomStream: TMemoryStream; AddrBitLen: byte; StartAddress, ChipSize: cardinal);
 var
   ChunkSize: Word;
-  BytesRead, i: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..2047] of byte;
   DataChunkFile: array[0..2047] of byte;
   Address: cardinal;
-begin
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  //ตัวนับลูปต้องเป็นตัวแปรของตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
+  //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
+  procedure DoWork;
+  var
+    i: integer;
+  begin
   if (StartAddress >= ChipSize) or (ChipSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -3578,47 +5575,67 @@ begin
   LogPrint(STR_VERIFY);
   BytesRead := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+  ProgressReset(ChipSize div ChunkSize);
 
   while Address < ChipSize div 2 do
   begin
-    BytesRead := BytesRead + UsbAspMW_Read(AddrBitLen, Address, datachunk, ChunkSize);
+    Got := UsbAspMW_Read(AddrBitLen, Address, datachunk, ChunkSize);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('MicroWire short read during verify: received %d of %d bytes',
+                    [Got, ChunkSize]), int64(Address) * 2);
+      Exit;
+    end;
+    Inc(BytesRead, Got);
     RomStream.ReadBuffer(DataChunkFile, ChunkSize);
 
     for i := 0 to ChunkSize -1 do
     if DataChunk[i] <> DataChunkFile[i] then
     begin
       LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
-      MainForm.ProgressBar.Position := 0;
+      OpFail('the MicroWire EEPROM does not match the buffer',
+             int64(Address) * 2 + i);
+      SetProgressPos(0);
       Exit;
     end;
 
     Inc(Address, ChunkSize div 2);
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 2;
-    Application.ProcessMessages;
+    ProgressStep(2);
+    OpProcessMessages;
     if UserCancel then Break;
   end;
 
   if (BytesRead <> ChipSize) then
-    LogPrint(STR_WRONG_BYTES_READ)
+    begin
+      LogPrint(STR_WRONG_BYTES_READ);
+      OpFail('the number of bytes read does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure VerifyFlashKB(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal);
 var
   ChunkSize: byte;
-  BytesRead: integer;
+  BytesRead, Got: integer;
   DataChunk: byte;
   DataChunkFile: byte;
   Address: cardinal;
-begin
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  procedure DoWork;
+  begin
   if (StartAddress >= ChipSize) or (ChipSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -3628,7 +5645,7 @@ begin
   LogPrint(STR_VERIFY);
   BytesRead := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+  ProgressReset(ChipSize div ChunkSize);
 
   UsbAspMulti_EnableEDI();
   UsbAspMulti_WriteReg($FEAD, $08); //เปิดใช้งานแฟลช
@@ -3639,41 +5656,60 @@ begin
   begin
     if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
 
-    BytesRead := BytesRead + UsbAspMulti_Read(Address, datachunk);
+    Got := UsbAspMulti_Read(Address, datachunk);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('KB flash short read during verify: received %d of %d bytes',
+                    [Got, ChunkSize]), Address);
+      Exit;
+    end;
+    Inc(BytesRead, Got);
     RomStream.ReadBuffer(DataChunkFile, ChunkSize);
 
     if DataChunk <> DataChunkFile then
     begin
       LogPrint(STR_VERIFY_ERROR+IntToHex(Address, 8));
-      MainForm.ProgressBar.Position := 0;
+      OpFail('the KB flash does not match the buffer', Address);
+      SetProgressPos(0);
       Exit;
     end;
 
     Inc(Address, ChunkSize);
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
 
     if UserCancel then Break;
   end;
 
   if BytesRead <> ChipSize then
-    LogPrint(STR_WRONG_BYTES_READ)
+    begin
+      LogPrint(STR_WRONG_BYTES_READ);
+      OpFail('the number of bytes read does not match the size asked for');
+    end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure ReadFlashI2C(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal; ChunkSize: Word; DevAddr: byte);
 var
-  BytesRead: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..255] of byte;
   Address: cardinal;
-begin
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  procedure DoWork;
+  begin
   if ChipSize = 0 then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -3684,7 +5720,7 @@ begin
   LogPrint(STR_READING_FLASH);
   BytesRead := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := ChipSize div ChunkSize;
+  ProgressReset(ChipSize div ChunkSize);
 
   RomStream.Clear;
 
@@ -3692,21 +5728,37 @@ begin
   begin
     if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
 
-    BytesRead := BytesRead + UsbAspI2C_Read(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, ChunkSize);
-    RomStream.WriteBuffer(DataChunk, ChunkSize);
-    Inc(Address, ChunkSize);
+    Got := UsbAspI2C_Read(DevAddr, OpUI.I2CAddrType, Address,
+                         datachunk, ChunkSize);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('I2C EEPROM short read: received %d of %d bytes',
+                    [Got, ChunkSize]), Address);
+      Break;
+    end;
+    Inc(BytesRead, Got);
+    RomStream.WriteBuffer(DataChunk, Got);
+    Inc(Address, Got);
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
     if UserCancel then Break;
   end;
 
-  if BytesRead <> ChipSize then
-    LogPrint(STR_WRONG_BYTES_READ)
+  if BytesRead <> integer(ChipSize - StartAddress) then
+  begin
+    LogPrint(STR_WRONG_BYTES_READ);
+    OpFail(Format('read %d bytes but expected %d',
+                  [BytesRead, ChipSize - StartAddress]));
+  end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure WriteFlashI2C(var RomStream: TMemoryStream; StartAddress, WriteSize: cardinal; PageSize: word; DevAddr: byte);
@@ -3714,10 +5766,23 @@ var
   DataChunk: array[0..2047] of byte;
   Address, BytesWrite: cardinal;
   PageSizeTemp: word;
-begin
-  if {(StartAddress >= WriteSize) or} (WriteSize = 0) {or (PageSize > WriteSize)} then
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  procedure DoWork;
+  var
+    Wrote: integer;
+    BusAddr: TI2CAddr;
+  begin
+  if (WriteSize = 0) or (PageSize = 0) or
+     (PageSize > SizeOf(DataChunk)) or
+     (WriteSize > High(integer)) or
+     (not I2CAddressRangeValid(OpUI.I2CAddrType, StartAddress,
+                               integer(WriteSize))) or
+     (RomStream = nil) or
+     (RomStream.Size - RomStream.Position < WriteSize) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the I2C write buffer, page size, or address range is invalid');
     exit;
   end;
 
@@ -3725,92 +5790,186 @@ begin
   LogPrint(STR_WRITING_FLASH);
   BytesWrite := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := WriteSize div PageSize;
+  ProgressReset(WriteSize div PageSize);
 
   while (Address-StartAddress) < WriteSize do
   begin
     //คำนวณขนาดบัฟเฟอร์เพจแรก กันไม่ให้บัฟเฟอร์วนกลับเมื่อชนขอบแอดเดรส
-    if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 1) then
-       PageSize := (StrToInt(MainForm.ComboChipSize.Text) - StartAddress) mod PageSize else
-           PageSize := PageSizeTemp;
+    //
+    //สูตรเดิมคือ (ขนาดชิป - แอดเดรสเริ่ม) mod PageSize ซึ่งคืน 0 ทุกครั้งที่
+    //แอดเดรสเริ่มตรงขอบเพจพอดี เช่นเริ่มที่ 0x1000 บนชิป 32KB เพจ 64 ไบต์
+    //ได้ 28672 mod 64 = 0 แล้ว PageSize เป็นศูนย์ Address ไม่ขยับ
+    //ลูปวนไม่รู้จบจนกว่าผู้ใช้จะกดยกเลิก
+    //
+    //เป็นบั๊กตัวเดียวกับที่แก้ไปแล้วในทางของ SPI เมื่อรุ่น 4.3.1 แต่ทาง I2C
+    //ยังคัดลอกสูตรเดิมไว้ FirstChunkSize เขียนและมีเทสต์อยู่แล้วตั้งแต่ตอนนั้น
+    if (StartAddress > 0) and (Address = StartAddress) and (PageSizeTemp > 1) then
+      PageSize := FirstChunkSize(StartAddress, PageSizeTemp)
+    else
+      PageSize := PageSizeTemp;
 
     if (WriteSize - (Address-StartAddress)) < PageSize then PageSize := (WriteSize - (Address-StartAddress));
 
+    //กันไว้อีกชั้น แอดเดรสที่ไม่ขยับคือลูปที่ไม่มีวันจบ
+    if PageSize = 0 then
+    begin
+      LogPrint(STR_CHECK_SETTINGS);
+      OpFail('the page size worked out to zero, refusing to loop forever',
+             Address);
+      Break;
+    end;
+
     RomStream.ReadBuffer(DataChunk, PageSize);
-    BytesWrite := BytesWrite + UsbAspI2C_Write(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, PageSize);
+    if not BuildI2CAddr(DevAddr, OpUI.I2CAddrType, Address, BusAddr) then
+    begin
+      OpFail('the I2C address mode is invalid', Address);
+      Break;
+    end;
+    Wrote := UsbAspI2C_Write(DevAddr, OpUI.I2CAddrType, Address,
+                             datachunk, PageSize);
+    if Wrote <> PageSize then
+    begin
+      OpFail(Format('I2C EEPROM short write: sent %d of %d bytes',
+                    [Wrote, PageSize]), Address);
+      Break;
+    end;
+    Inc(BytesWrite, Wrote);
     Inc(Address, PageSize);
 
-    while UsbAspI2C_BUSY(DevAddr) do
+    if not UsbAspI2C_WaitReady(BusAddr.DevByte, I2C_WRITE_CYCLE_MS) then
     begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
-    end; 
+      LogPrint(STR_I2C_NO_ANSWER);
+      OpFail('the chip stopped acknowledging during the write cycle', Address);
+      Break;
+    end;
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
     if UserCancel then Break;
   end;
 
   if BytesWrite <> WriteSize then
-    LogPrint(STR_WRONG_BYTES_WRITE)
+  begin
+    LogPrint(STR_WRONG_BYTES_WRITE);
+    OpFail(Format('wrote %d bytes but the buffer holds %d',
+                  [BytesWrite, WriteSize]));
+  end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
-procedure EraseFlashI2C(StartAddress, WriteSize: cardinal; PageSize: word; DevAddr: byte);
+//EndAddr คือแอดเดรสถัดจากไบต์สุดท้ายที่จะถูกลบ
+//
+//เดิมพารามิเตอร์ตัวนี้ชื่อ WriteSize เหมือนของ WriteFlashI2C แต่ถูกใช้เป็น
+//แอดเดรสสิ้นสุด ไม่ใช่ความยาว สองตัวนี้ต่างกันทันทีที่จุดเริ่มไม่ใช่ศูนย์
+//ชื่อที่โกหกแบบนี้คือรอให้ผู้เรียกรายถัดไปส่งค่าผิดชนิดเข้ามา
+procedure EraseFlashI2C(StartAddress, EndAddr: cardinal; PageSize: word; DevAddr: byte);
 var
   DataChunk: array[0..2047] of byte;
-  Address, BytesWrite: cardinal;
-begin
-  if (StartAddress >= WriteSize) or (WriteSize = 0) then
+  Address, BytesWrite, Expected: cardinal;
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  procedure DoWork;
+  var
+    Wrote: integer;
+    Chunk: cardinal;
+    BusAddr: TI2CAddr;
+  begin
+  if (StartAddress >= EndAddr) or (EndAddr = 0) or (PageSize = 0) or
+     (PageSize > SizeOf(DataChunk)) or
+     (EndAddr - StartAddress > High(integer)) or
+     (not I2CAddressRangeValid(OpUI.I2CAddrType, StartAddress,
+                               integer(EndAddr - StartAddress))) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the erase range or the page size is empty');
     exit;
   end;
 
   LogPrint(STR_ERASING_FLASH);
   BytesWrite := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := WriteSize div PageSize;
+  Expected := EndAddr - StartAddress;
+  ProgressReset(Expected div PageSize);
 
-  while Address < WriteSize do
+  while Address < EndAddr do
   begin
-    if (WriteSize - Address) < PageSize then PageSize := (WriteSize - Address);
-    FillByte(DataChunk, PageSize, $FF);
-    BytesWrite := BytesWrite + UsbAspI2C_Write(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, PageSize);
-    Inc(Address, PageSize);
+    //ก้อนแรกต้องจบที่ขอบเพจของตัวชิป: จุดเริ่มที่ไม่ตรงเพจ ถ้ายิงเต็มเพจ
+    //ปลายก้อนจะวนกลับในบัฟเฟอร์เพจ แล้วไบต์ที่อยู่ต่ำกว่าช่วงที่ขอจะถูกลบ
+    //ไปด้วยโดยไม่มีใครขอ (WriteFlashI2C แก้เรื่องเดียวกันด้วย FirstChunkSize)
+    Chunk := PageSize - (Address mod PageSize);
+    if (EndAddr - Address) < Chunk then Chunk := EndAddr - Address;
+    if Chunk = 0 then Break;
 
-    while UsbAspI2C_BUSY(DevAddr) do
+    FillByte(DataChunk, Chunk, $FF);
+    if not BuildI2CAddr(DevAddr, OpUI.I2CAddrType, Address, BusAddr) then
     begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
-    end; 
+      OpFail('the I2C address mode is invalid', Address);
+      Break;
+    end;
+    Wrote := UsbAspI2C_Write(DevAddr, OpUI.I2CAddrType, Address,
+                             datachunk, Chunk);
+    if Wrote <> integer(Chunk) then
+    begin
+      OpFail(Format('I2C EEPROM short write while erasing: sent %d of %d bytes',
+                    [Wrote, Chunk]), Address);
+      Break;
+    end;
+    Inc(BytesWrite, Wrote);
+    Inc(Address, Chunk);
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    if not UsbAspI2C_WaitReady(BusAddr.DevByte, I2C_WRITE_CYCLE_MS) then
+    begin
+      LogPrint(STR_I2C_NO_ANSWER);
+      OpFail('the chip stopped acknowledging during the write cycle', Address);
+      Break;
+    end;
+
+    ProgressStep(1);
+    OpProcessMessages;
     if UserCancel then Break;
   end;
 
-  if BytesWrite <> WriteSize then
-    LogPrint(STR_WRONG_BYTES_WRITE)
+  if BytesWrite <> Expected then
+  begin
+    LogPrint(STR_WRONG_BYTES_WRITE);
+    OpFail(Format('erased %d bytes but the range covers %d',
+                  [BytesWrite, Expected]));
+  end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure VerifyFlashI2C(var RomStream: TMemoryStream; StartAddress, DataSize: cardinal; ChunkSize: Word; DevAddr: byte);
 var
-  BytesRead, i: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..2047] of byte;
   DataChunkFile: array[0..2047] of byte;
   Address: cardinal;
-begin
+
+  //ตัวงานจริง จะรันบน thread เบื้องหลังถ้าเปิดโหมดนั้นไว้
+  //ตัวนับลูปต้องเป็นตัวแปรของตัวเอง เพราะ FPC ไม่ยอมให้ใช้ตัวแปร
+  //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
+  procedure DoWork;
+  var
+    i: integer;
+  begin
   if (DataSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
+    OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
 
@@ -3821,36 +5980,52 @@ begin
   LogPrint(STR_VERIFY);
   BytesRead := 0;
   Address := StartAddress;
-  MainForm.ProgressBar.Max := DataSize div ChunkSize;
+  ProgressReset(DataSize div ChunkSize);
 
   while (Address-StartAddress) < DataSize do
   begin
     if ChunkSize > (DataSize - (Address - StartAddress)) then ChunkSize := DataSize -(Address - StartAddress) ;
 
-    BytesRead := BytesRead + UsbAspI2C_Read(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, ChunkSize);
+    Got := UsbAspI2C_Read(DevAddr, OpUI.I2CAddrType, Address,
+                         datachunk, ChunkSize);
+    if Got <> ChunkSize then
+    begin
+      OpFail(Format('I2C EEPROM short read during verify: received %d of %d bytes',
+                    [Got, ChunkSize]), Address);
+      Exit;
+    end;
+    Inc(BytesRead, Got);
     RomStream.ReadBuffer(DataChunkFile, ChunkSize);
 
     for i := 0 to ChunkSize -1 do
     if DataChunk[i] <> DataChunkFile[i] then
     begin
       LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
-      MainForm.ProgressBar.Position := 0;
+      OpFail('the chip does not match the buffer', Address + cardinal(i));
+      SetProgressPos(0);
       Exit;
     end;
 
     Inc(Address, ChunkSize);
 
-    MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
-    Application.ProcessMessages;
+    ProgressStep(1);
+    OpProcessMessages;
     if UserCancel then Break;
   end;
 
   if (BytesRead <> DataSize) then
-    LogPrint(STR_WRONG_BYTES_READ)
+  begin
+    LogPrint(STR_WRONG_BYTES_READ);
+    OpFail(Format('read %d bytes but expected %d', [BytesRead, DataSize]));
+  end
   else
     LogPrint(STR_DONE);
 
-  MainForm.ProgressBar.Position := 0;
+  SetProgressPos(0);
+  end;
+
+begin
+  RunOperation(@DoWork);
 end;
 
 procedure SelectHW(programmer: THardwareList);
@@ -3995,6 +6170,7 @@ begin
   begin
     ProgrammerPresent := True;
     MainForm.ChipView.Invalidate;
+    MainForm.UpdateWorkflowState;
     Exit;
   end;
 
@@ -4032,6 +6208,7 @@ begin
   end;
 
   MainForm.ChipView.Invalidate;
+  MainForm.UpdateWorkflowState;
 
   //เพิ่งเสียบเครื่องโปรแกรมเข้ามา ก็ถามชิปในซ็อกเก็ตให้เลย ไม่ต้องรอให้กด Read ID
   //ทำเฉพาะจังหวะที่สถานะเปลี่ยนจากไม่มีเป็นมี ไม่งั้นจะยิงคำสั่งใส่ชิปทุกสามวินาที
@@ -4046,6 +6223,8 @@ begin
   //อ่านสถานะหน้าจอเก็บไว้ก่อนเริ่มงาน thread เบื้องหลังจะอ่านค่า
   //จาก OpUI ไม่ใช่จาก control โดยตรง
   CaptureUIState;
+  ResetOperationCancellation;
+  MainForm.ButtonCancel.Tag := 0; //legacy scripts still inspect this flag
   OperationRunning := True;
 
   MainForm.ButtonRead.Enabled := False;
@@ -4059,6 +6238,7 @@ begin
 
   MainForm.GroupChipSettings.Enabled := false;
   MainForm.MPHexEditorEx.Enabled := false;
+  MainForm.UpdateWorkflowState;
 end;
 
 procedure UnlockControl;
@@ -4082,6 +6262,7 @@ begin
     else
       MainForm.ButtonBlock.Enabled := True;
   end;
+  MainForm.UpdateWorkflowState;
 end;
 
 //เลือกชิปตามชื่อ โดยหาในไฟล์หลักก่อน แล้วค่อยหาในไฟล์เสริม
@@ -4121,6 +6302,7 @@ begin
     StatusBar.Panels.Items[1].Text := STR_CHANGED
   else
     StatusBar.Panels.Items[1].Text := '';
+  UpdateWorkflowState;
 end;
 
 procedure TMainForm.ComboItem1Click(Sender: TObject);
@@ -4130,11 +6312,25 @@ begin
   if MessageDlg('AsProgrammer', STR_COMBO_WARN, mtConfirmation, [mbYes, mbNo], 0)
     <> mrYes then Exit;
 
+  //SPI NOR uses the preservation-aware single-owner service.  Other legacy
+  //protocols retain their protocol-specific sequence below.
+  if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) then
+  begin
+    MenuSmartWriteClick(ComboItem1);
+    Exit;
+  end;
+
   if ButtonBlock.Enabled then
+  begin
     ButtonBlockClick(Sender);
+    if not OpOK then Exit;
+  end;
   if ButtonErase.Enabled then
     if ComboSPICMD.ItemIndex <> SPI_CMD_45 then  //ชิปพวกนี้ลบเพจให้เองอยู่แล้ว
+    begin
       ButtonEraseClick(Sender);
+      if not OpOK then Exit;
+    end;
 
   CheckTemp := MenuAutoCheck.Checked;
   MenuAutoCheck.Checked := True;
@@ -4254,7 +6450,7 @@ begin
   for i:=1 to cycles do
   begin
     UsbAsp25_Read(0, 0, buffer, sizeof(buffer));
-    Application.ProcessMessages;
+    OpProcessMessages;
 
     if UserCancel then Break;
   end;
@@ -4275,7 +6471,7 @@ begin
   for i:=1 to cycles do
   begin
     UsbAsp25_Write(0, 0, buffer, sizeof(buffer));
-    Application.ProcessMessages;
+    OpProcessMessages;
 
     if UserCancel then Break;
   end;
@@ -4412,6 +6608,7 @@ begin
   ComboPageSize.Text:= 'Page size';
   ComboChipSize.Text:= 'Chip size';
   ChipView.Invalidate;
+  UpdateWorkflowState;
 end;
 
 procedure TMainForm.RadioMwChange(Sender: TObject);
@@ -4436,6 +6633,7 @@ begin
   ComboPageSize.Text:= 'Page size';
   ComboChipSize.Text:= 'Chip size';
   ChipView.Invalidate;
+  UpdateWorkflowState;
 end;
 
 procedure TMainForm.RadioSPIChange(Sender: TObject);
@@ -4480,6 +6678,7 @@ begin
   ComboPageSize.Text:= 'Page size';
   ComboChipSize.Text:= 'Chip size';
   ChipView.Invalidate;
+  UpdateWorkflowState;
 end;
 
 procedure TMainForm.ButtonWriteClick(Sender: TObject);
@@ -4488,9 +6687,25 @@ var
   WriteType: byte;
   I2C_DevAddr: byte;
   I2C_ChunkSize: Word;
+  ParsedPage: integer;
 begin
+  //All normal SPI NOR writes share the transactional planner/executor.  This
+  //removes the legacy raw page-program path from GUI, batch, and CLI entry
+  //points while leaving protocol-specific EEPROM/DataFlash writers intact.
+  if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) then
+  begin
+    MenuSmartWriteClick(Sender);
+    Exit;
+  end;
+
   I2C_ChunkSize := 65535;
   OpBegin(opkWrite);
+  //TSerialAllocation มีสตริงที่จัดการโดยคอมไพเลอร์อยู่ข้างใน FillChar จะทับ
+  //พอยน์เตอร์ทิ้งโดยไม่ลด refcount แล้วสตริงของงานก่อนจะรั่วทุกครั้งที่กดเขียน
+  CurrentSerial := Default(TSerialAllocation);
+  CurrentSerialValid := False;
+  CurrentSerialReserved := False;
+  LastProgramCRC := BufferCRC32;
 try
   ButtonCancel.Tag := 0;
   if not OpenDevice() then
@@ -4507,7 +6722,11 @@ try
     end;
   LockControl();
 
-  if RunScriptFromFile(CurrentICParam.Script, 'write') then Exit;
+  //SPI scripts can issue destructive commands of their own, so they run only
+  //after the same electrical, identity, protection and backup gates as the
+  //built-in writer.  Legacy non-SPI scripts retain their old entry point.
+  if (not RadioSPI.Checked) and
+     RunScriptFromFile(CurrentICParam.Script, 'write') then Exit;
 
   LogPrint(TimeToStr(Time()));
 
@@ -4528,13 +6747,22 @@ try
   //SPI
   if RadioSPI.Checked then
   begin
-    EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
-
     if not VoltageWarningOK then
     begin
       OpFail('aborted because of the supply voltage');
       Exit;
     end;
+    EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+    if MenuResetChip.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) then
+    begin
+      LogPrint(STR_RESETTING);
+      UsbAsp25_SoftReset;
+    end;
+
+    //ตรวจว่าการเชื่อมต่อนิ่งก่อนจะไปแตะข้อมูล
+    //เขียนหรือลบผ่านคลิปที่หลวมคือทางที่ตรงที่สุดไปสู่ชิปที่พัง
+    if not ContactIsStable then Exit;
+
     if not VerifyChipID then
     begin
       OpFail('the chip in the socket does not match the selected one');
@@ -4555,6 +6783,7 @@ try
       OpFail('the backup could not be made');
       Exit;
     end;
+    if RunScriptFromFile(CurrentICParam.Script, 'write') then Exit;
     if not BlankCheckBeforeWrite(Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize) then
     begin
       OpFail('the target area is not erased');
@@ -4566,6 +6795,49 @@ try
     if (not IsNumber(ComboPageSize.Text)) and (UpperCase(ComboPageSize.Text)<>'SSTB') and (UpperCase(ComboPageSize.Text)<>'SSTW') then
     begin
       LogPrint(STR_CHECK_SETTINGS);
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
+    end;
+
+    if UpperCase(ComboPageSize.Text) = 'SSTB' then
+    begin
+      PageSize := 1;
+      WriteType := WT_SSTB;
+    end
+    else if UpperCase(ComboPageSize.Text) = 'SSTW' then
+    begin
+      PageSize := 2;
+      WriteType := WT_SSTW;
+    end
+    else
+    begin
+      ParsedPage := StrToInt(ComboPageSize.Text);
+      if (ParsedPage < 1) or (ParsedPage > 2048) then
+      begin
+        OpFail('this protocol requires a numeric page size from 1 to 2048 bytes');
+        Exit;
+      end;
+      PageSize := ParsedPage;
+      WriteType := WT_PAGE;
+    end;
+
+    if (WriteType <> WT_PAGE) then
+    begin
+      OpFail('this protocol requires a numeric page size from 1 to 2048 bytes');
+      Exit;
+    end;
+    if (ComboSPICMD.ItemIndex in [SPI_CMD_45, SPI_CMD_KB]) and
+       ((MPHexEditorEx.DataSize mod PageSize) <> 0) then
+    begin
+      OpFail('the image must contain complete physical pages');
+      Exit;
+    end;
+    if (ComboSPICMD.ItemIndex = SPI_CMD_95) and
+       (not SPI95AddressRangeValid(StrToInt(ComboChipSize.Text),
+                                  Hex2Dec('$' + StartAddressEdit.Text),
+                                  MPHexEditorEx.DataSize)) then
+    begin
+      OpFail('the SPI EEPROM write range is outside the selected chip');
       Exit;
     end;
     TimeCounter := Time();
@@ -4574,30 +6846,8 @@ try
     MPHexEditorEx.SaveToStream(RomF);
     RomF.Position := 0;
 
-    ApplySerialToStream(RomF);
-
-    if UpperCase(ComboPageSize.Text)='SSTB' then
-    begin
-      PageSize := 1;
-      WriteType := WT_SSTB;
-    end;
-
-    if UpperCase(ComboPageSize.Text)='SSTW' then
-    begin
-      PageSize := 2;
-      WriteType := WT_SSTW;
-    end;
-
-    if IsNumber(ComboPageSize.Text) then
-    begin
-      PageSize := StrToInt(ComboPageSize.Text);
-      if PageSize < 1 then
-      begin
-        PageSize := 1;
-        ComboPageSize.Text := '1';
-      end;
-      WriteType := WT_PAGE;
-    end;
+    if not ApplySerialToStream(RomF) then Exit;
+    if not ReserveCurrentSerial then Exit;
 
     if ComboSPICMD.ItemIndex = SPI_CMD_25 then
       WriteFlash25(RomF, Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize, PageSize, WriteType);
@@ -4628,8 +6878,20 @@ try
     if ( (ComboAddrType.ItemIndex < 0) or (not IsNumber(ComboPageSize.Text)) ) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
+    end;
+    ParsedPage := StrToInt(ComboPageSize.Text);
+    if (ParsedPage < 1) or (ParsedPage > 2048) or
+       (MPHexEditorEx.DataSize > High(integer)) or
+       (not I2CAddressRangeValid(ComboAddrType.ItemIndex,
+          Hex2Dec('$' + StartAddressEdit.Text),
+          integer(MPHexEditorEx.DataSize))) then
+    begin
+      OpFail('the I2C page size or complete address range is not usable');
       Exit;
     end;
+    PageSize := ParsedPage;
 
     EnterProgModeI2C();
 
@@ -4641,6 +6903,7 @@ try
     if UsbAspI2C_BUSY(I2C_DevAddr) then
     begin
       LogPrint(STR_I2C_NO_ANSWER);
+      OpFail('the I2C EEPROM did not acknowledge its address');
       exit;
     end;
     TimeCounter := Time();
@@ -4648,25 +6911,25 @@ try
     RomF.Position := 0;
     MPHexEditorEx.SaveToStream(RomF);
     RomF.Position := 0;
+    if not ApplySerialToStream(RomF) then Exit;
+    if not ReserveCurrentSerial then Exit;
 
-    if StrToInt(ComboPageSize.Text) < 1 then ComboPageSize.Text := '1';
-
-    WriteFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize, StrToInt(ComboPageSize.Text), I2C_DevAddr);
+    WriteFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text),
+                  MPHexEditorEx.DataSize, PageSize, I2C_DevAddr);
 
     if MenuAutoCheck.Checked then
     begin
       if UsbAspI2C_BUSY(I2C_DevAddr) then
       begin
         LogPrint(STR_I2C_NO_ANSWER);
+        OpFail('the I2C EEPROM stopped acknowledging before verification');
         exit;
       end;
       LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 
       TimeCounter := Time();
 
-      RomF.Position :=0;
-      MPHexEditorEx.SaveToStream(RomF);
-      RomF.Position :=0;
+      RomF.Position := 0;
       VerifyFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), RomF.Size, I2C_ChunkSize, I2C_DevAddr);
     end;
 
@@ -4677,40 +6940,40 @@ try
     if (not IsNumber(ComboMWBitLen.Text)) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
-      Exit;
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
     end;
 
-    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then
+    begin
+      OpFail('the programmer could not initialize the MicroWire bus');
+      Exit;
+    end;
     TimeCounter := Time();
 
     RomF.Position := 0;
     MPHexEditorEx.SaveToStream(RomF);
     RomF.Position := 0;
+    if not ApplySerialToStream(RomF) then Exit;
+    if not ReserveCurrentSerial then Exit;
 
     WriteFlashMW(RomF, StrToInt(ComboMWBitLen.Text), 0, MPHexEditorEx.DataSize);
 
     if MenuAutoCheck.Checked then
     begin
       TimeCounter := Time();
-      RomF.Position :=0;
-      MPHexEditorEx.SaveToStream(RomF);
-      RomF.Position :=0;
+      RomF.Position := 0;
       VerifyFlashMW(RomF, StrToInt(ComboMWBitLen.Text), 0, StrToInt(ComboChipSize.Text));
     end;
 
   end;
-
-  //เลื่อนตัวนับต่อเมื่อการเขียนทำจนจบจริง
-  //เดิมดูแค่ว่าผู้ใช้ไม่ได้กดยกเลิก งานที่ล้มเหลวจึงกินเลขไปฟรี ๆ หนึ่งเลข
-  if ProdSettings.SNEnabled and (ButtonCancel.Tag = 0) and OpOK then
-    ProdSettings.SNValue := ProdSettings.SNValue + ProdSettings.SNStep;
 
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 
 finally
   //บันทึกการผลิตต้องเขียนทั้งตอนผ่านและตอนไม่ผ่าน ของที่ตกก็ต้องตามรอยได้
   if MPHexEditorEx.DataSize > 0 then
-    WriteProdLogEntry(MPHexEditorEx.DataSize, BufferCRC32, LastChipUID);
+    WriteProdLogEntry(MPHexEditorEx.DataSize, LastProgramCRC, LastChipUID);
 
   LogPrint(STR_OP_RESULT + OpSummary);
 
@@ -4764,7 +7027,19 @@ try
   //SPI
   if RadioSPI.Checked then
   begin
+    if not VoltageWarningOK then
+    begin
+      OpFail('aborted because of the supply voltage');
+      Exit;
+    end;
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+    if not ContactIsStable then Exit;
+    if not VerifyChipID then
+    begin
+      OpFail('the chip in the socket does not match the selected one');
+      Exit;
+    end;
+    EnsureChipHints;
     TimeCounter := Time();
 
     RomF.Clear;
@@ -4796,7 +7071,8 @@ try
       if (not IsNumber(ComboPageSize.Text)) then
       begin
         LogPrint(STR_CHECK_SETTINGS);
-        Exit;
+        OpFail('the chip size, the page size or the range is not usable');
+        exit;
       end;
       VerifyFlash45(RomF, 0, StrToInt(ComboPageSize.Text), RomF.Size);
     end;
@@ -4809,7 +7085,8 @@ try
     if ComboAddrType.ItemIndex < 0 then
     begin
       LogPrint(STR_CHECK_SETTINGS);
-      Exit;
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
     end;
 
     EnterProgModeI2C();
@@ -4822,6 +7099,7 @@ try
     if UsbAspI2C_BUSY(I2C_DevAddr) then
     begin
       LogPrint(STR_I2C_NO_ANSWER);
+      OpFail('the I2C EEPROM did not acknowledge its address');
       exit;
     end;
     TimeCounter := Time();
@@ -4845,10 +7123,15 @@ try
     if (not IsNumber(ComboMWBitLen.Text)) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
-      Exit;
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
     end;
 
-    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then
+    begin
+      OpFail('the programmer could not initialize the MicroWire bus');
+      Exit;
+    end;
     TimeCounter := Time();
 
     RomF.Clear;
@@ -4874,63 +7157,281 @@ finally
 end;
 end;
 
+//Safely clear SPI NOR protection without disturbing unrelated configuration
+//bits such as QE.  The caller owns an already-open, initialized SPI session.
+function UnlockCurrentSPI25: boolean;
+var
+  SR1, SR2, CR, NewSR1, NewSR2: byte;
+  HaveCR: boolean;
+  P: TProtInfo;
+begin
+  Result := False;
+  EnsureChipHints;
+  SR1 := 0;
+  SR2 := 0;
+
+  if UsbAsp25_ReadSR(SR1, $05) <> 1 then
+  begin
+    OpFail('the primary SPI NOR status register could not be read');
+    Exit;
+  end;
+  if UsbAsp25_ReadSR(SR2, $35) <> 1 then SR2 := 0;
+  //CR ต้องมาจากรีจิสเตอร์ที่ถูกตัวตามยี่ห้อ: Spansion ใช้ค่า 35h ไม่ใช่ 15h
+  //ที่ชิปตระกูลนั้นไม่มี (ได้ FF จากบัสลอยแล้วทิศทางล็อกกลับหัว)
+  HaveCR := ReadVendorCR(Chip25ManufID, SR2, CR);
+  if SR2 = $FF then SR2 := 0;
+
+  P := DecodeProtVendor(Chip25ManufID, SR1, SR2, CR, HaveCR);
+  if not StillProtected(P) then Exit(True);
+  if not CanUnlockBySoftware(P) then
+  begin
+    OpFail('the status register cannot be unlocked by software: ' +
+           SRLockText(SRLockState(P)));
+    Exit;
+  end;
+
+  ClearProtection(P, SR1, SR2, NewSR1, NewSR2);
+  if not WrenOK then Exit;
+  if P.Layout in [plWinbond, plUnknown] then
+  begin
+    if UsbAsp25_WriteSR_2byte(NewSR1, NewSR2) <> 3 then
+    begin
+      OpFail('the two-byte status-register write was not transferred exactly');
+      Exit;
+    end;
+  end
+  else if UsbAsp25_WriteSR(NewSR1) <> 2 then
+  begin
+    OpFail('the status-register write was not transferred exactly');
+    Exit;
+  end;
+  if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
+
+  if P.WPS then
+  begin
+    if not WrenOK then Exit;
+    if UsbAsp25_GlobalUnlock <> 1 then
+    begin
+      OpFail('the global-unlock command was not transferred exactly');
+      Exit;
+    end;
+    if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
+  end;
+
+  if UsbAsp25_ReadSR(SR1, $05) <> 1 then
+  begin
+    OpFail('the primary status register could not be read after unlock');
+    Exit;
+  end;
+  if UsbAsp25_ReadSR(SR2, $35) <> 1 then SR2 := 0;
+  HaveCR := ReadVendorCR(Chip25ManufID, SR2, CR);
+  if SR2 = $FF then SR2 := 0;
+  P := DecodeProtVendor(Chip25ManufID, SR1, SR2, CR, HaveCR);
+  if StillProtected(P) then
+  begin
+    OpFail('the chip accepted the unlock command and stayed protected');
+    Exit;
+  end;
+  Result := True;
+end;
+
 procedure TMainForm.ButtonBlockClick(Sender: TObject);
 var
   sreg: byte;
+  SR1, SR2, CR, NewSR1, NewSR2: byte;
+  HaveCR: boolean;
+  WEL: boolean;
+  Prot: TProtInfo;
+  Lock: TSRLock;
   i: integer;
   s: string;
   SLreg: array[0..31] of byte;
 begin
 try
+  OpBegin(opkNone);
   ButtonCancel.Tag := 0;
-  if not OpenDevice() then exit;
+  if not OpenDevice() then
+  begin
+    OpFail('the programmer could not be opened');
+    Exit;
+  end;
   sreg := 0;
+  SR1 := 0; SR2 := 0; CR := 0;
   LockControl();
+
+  if not VoltageWarningOK then
+  begin
+    OpFail('aborted because of the supply voltage');
+    Exit;
+  end;
+
+  if not EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked) then
+  begin
+    OpFail('the programmer could not initialize the SPI bus');
+    Exit;
+  end;
+  if not ContactIsStable then Exit;
+  if not VerifyChipID then
+  begin
+    OpFail('the chip in the socket does not match the selected one');
+    Exit;
+  end;
 
   if RunScriptFromFile(CurrentICParam.Script, 'unlock') then Exit;
 
-  EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
-
   if ComboSPICMD.ItemIndex = SPI_CMD_25 then
   begin
-    UsbAsp25_ReadSR(sreg); //อ่าน register
-    LogPrint(STR_OLD_SREG+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+')'));
+    //ต้องรู้จักยี่ห้อก่อน เพราะบิตแต่ละตัวใน status register แปลว่าคนละอย่าง
+    //ในแต่ละแผนผัง การเขียน 00h ทับทั้งไบต์โดยไม่ดูว่าบิตไหนคืออะไร จะล้าง
+    //QE ไปด้วยบนชิปที่บอร์ดใช้โหมด quad แล้วบอร์ดนั้นจะบูตไม่ขึ้นอีกเลย
+    EnsureChipHints;
 
-    sreg := 0;
+    if UsbAsp25_ReadSR(SR1) <> 1 then
+    begin
+      OpFail('the SPI NOR status register could not be read');
+      Exit;
+    end;
+    UsbAsp25_ReadSR(SR2, $35);
+    //CR มาจากรีจิสเตอร์ที่ถูกตัวตามยี่ห้อ ไม่ใช่ยิง 15h ใส่ทุกชิป
+    HaveCR := ReadVendorCR(Chip25ManufID, SR2, CR);
+    if SR2 = $FF then SR2 := 0;
+    LogPrint(STR_OLD_SREG + IntToBin(SR1, 8) + '(0x' + IntToHex(SR1, 2) + ')' +
+             '  SR2=0x' + IntToHex(SR2, 2));
 
-    UsbAsp25_WREN(); //เปิดสิทธิ์เขียน
-    UsbAsp25_WriteSR(sreg); //ล้างค่า register
+    Prot := DecodeProtVendor(Chip25ManufID, SR1, SR2, CR, HaveCR);
+    LogPrint(Format(STR_PROT_LAYOUT, [LayoutName(Prot.Layout)]));
 
-    //รอจนกว่าชิปจะพร้อม
+    //ชิปที่ล็อก status register ไว้ด้วยฮาร์ดแวร์หรือล็อกถาวร จะรับคำสั่ง
+    //เขียนไปแล้วไม่ทำอะไร เดิมเราเขียนแล้วอ่านกลับมาแสดงค่าเดิม โดยไม่บอก
+    //ว่าไม่สำเร็จ ผู้ใช้จึงไปเจอความจริงตอนเขียนไม่ผ่านในอีกหลายนาทีถัดมา
+    Lock := SRLockState(Prot);
+    LogPrint(Format(STR_SR_LOCK, [SRLockText(Lock)]));
+    if not CanUnlockBySoftware(Prot) then
+    begin
+      OpFail('the status register cannot be unlocked by software: ' +
+             SRLockText(Lock));
+      Exit;
+    end;
+
+    ClearProtection(Prot, SR1, SR2, NewSR1, NewSR2);
+
+    if not WrenOK then Exit;
+
+    //เขียนสองไบต์เมื่อแผนผังนี้มี SR2 จริง ๆ ไม่งั้นเขียนไบต์เดียว
+    //การยิงไบต์ที่สองใส่ชิปที่ไม่มี SR2 คือการส่งข้อมูลเกินให้คำสั่งที่
+    //ไม่ได้รอรับมัน ซึ่งชิปแต่ละตัวตอบสนองต่างกันและไม่มีตัวไหนตอบสนองดี
+    if Prot.Layout in [plWinbond, plUnknown] then
+    begin
+      if UsbAsp25_WriteSR_2byte(NewSR1, NewSR2) <> 3 then
+      begin
+        OpFail('the two-byte status-register write was not transferred exactly');
+        Exit;
+      end;
+    end
+    else if UsbAsp25_WriteSR(NewSR1) <> 2 then
+    begin
+      OpFail('the status-register write was not transferred exactly');
+      Exit;
+    end;
+
     if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
 
-    UsbAsp25_ReadSR(sreg); //อ่าน register
-    LogPrint(STR_NEW_SREG+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+')'));
+    //WPS = 1 แปลว่าบิต BP ไม่ใช่ตัวตัดสิน การล้าง BP จึงไม่ปลดอะไรเลย
+    //ต้องปลดบิตล็อกรายบล็อกด้วยคำสั่งของมันเอง
+    if Prot.WPS then
+    begin
+      LogPrint(STR_GLOBAL_UNLOCK);
+      if WrenOK then
+      begin
+        if UsbAsp25_GlobalUnlock <> 1 then
+        begin
+          OpFail('the global-unlock command was not transferred exactly');
+          Exit;
+        end;
+        if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
+      end;
+    end;
+
+    //อ่านกลับมาดูว่าได้ผลจริงหรือไม่ ไม่ใช่แค่แสดงค่าแล้วปล่อยให้คนอ่านสรุปเอง
+    if UsbAsp25_ReadSR(SR1) <> 1 then
+    begin
+      OpFail('the SPI NOR status register could not be read back');
+      Exit;
+    end;
+    UsbAsp25_ReadSR(SR2, $35);
+    HaveCR := ReadVendorCR(Chip25ManufID, SR2, CR);
+    if SR2 = $FF then SR2 := 0;
+    LogPrint(STR_NEW_SREG + IntToBin(SR1, 8) + '(0x' + IntToHex(SR1, 2) + ')' +
+             '  SR2=0x' + IntToHex(SR2, 2));
+
+    Prot := DecodeProtVendor(Chip25ManufID, SR1, SR2, CR, HaveCR);
+    if StillProtected(Prot) then
+    begin
+      LogPrint(STR_UNLOCK_FAILED);
+      OpFail('the chip accepted the unlock and stayed protected');
+      Exit;
+    end;
+
+    if Prot.QE then LogPrint(STR_QE_KEPT);
+    LogPrint(STR_UNLOCK_OK);
   end;
 
   if ComboSPICMD.ItemIndex = SPI_CMD_95 then
   begin
-    UsbAsp95_ReadSR(sreg); //อ่าน register
+    if UsbAsp95_ReadSR(sreg) <> 1 then
+    begin
+      OpFail('the SPI EEPROM status register could not be read');
+      Exit;
+    end;
     LogPrint(STR_OLD_SREG+IntToBin(sreg, 8));
 
     sreg := 0; //
-    UsbAsp95_WREN(); //เปิดสิทธิ์เขียน
-    UsbAsp95_WriteSR(sreg); //ล้างค่า register
+    if not UsbAsp95_WrenChecked(WEL) then
+    begin
+      OpFail('the SPI EEPROM did not latch write enable');
+      Exit;
+    end;
+    if UsbAsp95_WriteSR(sreg) <> 2 then
+    begin
+      OpFail('the SPI EEPROM status-register write was not transferred exactly');
+      Exit;
+    end;
 
     //รอจนกว่าชิปจะพร้อม
-    if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
+    if not WaitNotBusy95(BUSY_TIMEOUT_SECTOR) then Exit;
 
-    UsbAsp95_ReadSR(sreg); //อ่าน register
+    if UsbAsp95_ReadSR(sreg) <> 1 then
+    begin
+      OpFail('the SPI EEPROM status register could not be read back');
+      Exit;
+    end;
+    if (sreg and $0C) <> 0 then
+    begin
+      OpFail('the SPI EEPROM stayed write protected after unlock');
+      Exit;
+    end;
     LogPrint(STR_NEW_SREG+IntToBin(sreg, 8));
   end;
 
   if ComboSPICMD.ItemIndex = SPI_CMD_45 then
   begin
-    UsbAsp45_DisableSP();
-    UsbAsp45_ReadSR(sreg); //อ่าน register
+    if UsbAsp45_DisableSP <> 4 then
+    begin
+      OpFail('the DataFlash protection-disable command was not transferred exactly');
+      Exit;
+    end;
+    if UsbAsp45_ReadSR(sreg) <> 1 then
+    begin
+      OpFail('the DataFlash status register could not be read');
+      Exit;
+    end;
     LogPrint('Sreg: '+IntToBin(sreg, 8));
 
-    UsbAsp45_ReadSectorLockdown(SLreg); //อ่าน Lockdown register
+    if UsbAsp45_ReadSectorLockdown(SLreg) <> SizeOf(SLreg) then
+    begin
+      OpFail('the DataFlash lockdown register was not read exactly');
+      Exit;
+    end;
 
     s := '';
     for i:=0 to 31 do
@@ -5247,7 +7748,8 @@ begin
   if Size = 0 then
   begin
     LogPrint(STR_CHECK_SETTINGS);
-    Exit;
+    OpFail('the chip size, the page size or the range is not usable');
+    exit;
   end;
 
   s := Trim(InputBox(STR_FILL_BUFFER, STR_FILL_VALUE_HEX, 'FF'));
@@ -5399,7 +7901,8 @@ try
   if OpUI.ChipSize = 0 then
   begin
     LogPrint(STR_CHECK_SETTINGS);
-    Exit;
+    OpFail('the chip size, the page size or the range is not usable');
+    exit;
   end;
   Size := OpUI.ChipSize;
 
@@ -5489,6 +7992,7 @@ const
 var
   F: TextFile;
   IsNew: boolean;
+  SerialText: string;
 begin
   try
     IsNew := not FileExists(FileName);
@@ -5498,18 +8002,24 @@ begin
       if IsNew then
         WriteLn(F, 'timestamp,unit,chip,id,serial,result');
 
+      SerialText := '';
+      if CurrentSerialValid then SerialText := CurrentSerial.Text;
       WriteLn(F, Format('%s,%d,%s,%s,%s,%s', [
         FormatDateTime('yyyy-mm-dd hh:nn:ss', Now),
         UnitNo,
         CurrentICParam.Name,
         CurrentICParam.ID,
-        BoolToStr(ProdSettings.SNEnabled, SerialToStr(ProdSettings), ''),
+        SerialText,
         BoolToStr(Passed, 'PASS', 'FAIL')]));
     finally
       CloseFile(F);
     end;
   except
-    LogPrint('Cannot write production.csv');
+    on E: Exception do
+    begin
+      LogPrint('Cannot write production.csv');
+      OpFail('batch evidence could not be written: ' + E.Message);
+    end;
   end;
 end;
 //การผลิตเป็นชุด: เขียนชิปทีละตัวแล้วนับผลลัพธ์
@@ -5518,6 +8028,7 @@ procedure TMainForm.MenuRunBatchClick(Sender: TObject);
 var
   Done, Passed, Failed: integer;
   Reply: integer;
+  CheckTemp: boolean;
 begin
   if OperationRunning then Exit;
 
@@ -5549,14 +8060,39 @@ begin
 
     ButtonCancel.Tag := 0;
 
-    if ButtonBlock.Enabled then ButtonBlockClick(ComboItem1);
-    if ButtonCancel.Tag = 0 then ButtonEraseClick(ComboItem1);
-    if ButtonCancel.Tag = 0 then ButtonWriteClick(ComboItem1);
+    if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) then
+      MenuSmartWriteClick(ComboItem1)
+    else
+    begin
+      //Batch output may never be counted as PASS without an exact readback.
+      CheckTemp := MenuAutoCheck.Checked;
+      MenuAutoCheck.Checked := True;
+      try
+        if ButtonBlock.Enabled then
+        begin
+          ButtonBlockClick(ComboItem1);
+          if not OpOK then
+          begin
+            Inc(Done);
+            Inc(Failed);
+            LogPrint(Format(STR_BATCH_UNIT_FAIL, [Done]));
+            LogProduction(Done, False);
+            Continue;
+          end;
+        end;
+
+        ButtonEraseClick(ComboItem1);
+        if OpOK then ButtonWriteClick(ComboItem1);
+      finally
+        MenuAutoCheck.Checked := CheckTemp;
+      end;
+    end;
 
     Inc(Done);
 
-    //การยกเลิกหรือข้อผิดพลาดจะตั้งค่า Tag ไว้ ไม่มีรหัสผลลัพธ์แยกต่างหาก
-    if ButtonCancel.Tag <> 0 then
+    //ตัดสินจากผลลัพธ์แบบ typed เท่านั้น Tag เป็นเพียง compatibility flag
+    //ของสคริปต์เก่า และไม่สามารถบอก verify mismatch หรือ short transfer ได้
+    if not OpOK then
     begin
       Inc(Failed);
       LogPrint(Format(STR_BATCH_UNIT_FAIL, [Done]));
@@ -5564,9 +8100,17 @@ begin
     end
     else
     begin
-      Inc(Passed);
-      LogPrint(Format(STR_BATCH_UNIT_OK, [Done]));
       LogProduction(Done, True);
+      if OpOK then
+      begin
+        Inc(Passed);
+        LogPrint(Format(STR_BATCH_UNIT_OK, [Done]));
+      end
+      else
+      begin
+        Inc(Failed);
+        LogPrint(Format(STR_BATCH_UNIT_FAIL, [Done]));
+      end;
     end;
   end;
 
@@ -5723,7 +8267,8 @@ end;
 //ของเดิมมีแต่ให้ดู SREG เป็นเลขฐานสอง ซึ่งต้องเปิดดาต้าชีตแปลเอง
 procedure TMainForm.MenuProtInfoClick(Sender: TObject);
 var
-  SR1, SR2: byte;
+  SR1, SR2, CR: byte;
+  HaveCR: boolean;
   P: TProtInfo;
   FromA, ToA: cardinal;
 begin
@@ -5747,10 +8292,15 @@ try
   UsbAsp25_ReadSR(SR1, $05);
   UsbAsp25_ReadSR(SR2, $35);
 
-  LogPrint(Format(STR_PROT_HEADER, [SR1, SR2]));
-  LogPrint(ProtToText(DecodeProt(SR1, SR2)));
+  //หน้าจอสรุปนี้ต้องตีความด้วยแผนผังของยี่ห้อจริง ไม่ใช่สมมุติเป็น Winbond
+  //ไม่งั้นชิป Macronix ที่ล็อกครึ่งบนจะถูกสรุปว่าล็อกนิดเดียว
+  EnsureChipHints;
+  HaveCR := ReadVendorCR(Chip25ManufID, SR2, CR);
+  if SR2 = $FF then SR2 := 0;
 
-  P := DecodeProt(SR1, SR2);
+  LogPrint(Format(STR_PROT_HEADER, [SR1, SR2]));
+  P := DecodeProtVendor(Chip25ManufID, SR1, SR2, CR, HaveCR);
+  LogPrint(ProtToText(P));
   if ProtectedRange(P, OpUI.ChipSize, FromA, ToA) then
     LogPrint(Format(STR_PROT_RANGE, [FromA, ToA, (ToA - FromA + 1) div 1024]))
   else
@@ -6096,7 +8646,8 @@ begin
     if MainForm.ComboAddrType.ItemIndex < 0 then
     begin
       LogPrint(STR_CHECK_SETTINGS);
-      Exit;
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
     end;
 
     EnterProgModeI2C();
@@ -6105,6 +8656,7 @@ begin
     if UsbAspI2C_BUSY(I2C_DevAddr) then
     begin
       LogPrint(STR_I2C_NO_ANSWER);
+      OpFail('the I2C EEPROM did not acknowledge its address');
       Exit;
     end;
 
@@ -6116,7 +8668,8 @@ begin
     if not IsNumber(MainForm.ComboMWBitLen.Text) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
-      Exit;
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
     end;
 
     AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
@@ -6133,7 +8686,8 @@ begin
           if not IsNumber(MainForm.ComboPageSize.Text) then
           begin
             LogPrint(STR_CHECK_SETTINGS);
-            Exit;
+            OpFail('the chip size, the page size or the range is not usable');
+            exit;
           end;
           ReadFlash45(Stream, 0, StrToInt(MainForm.ComboPageSize.Text), Size);
         end;
@@ -6172,7 +8726,8 @@ try
   if OpUI.ChipSize = 0 then
   begin
     LogPrint(STR_CHECK_SETTINGS);
-    Exit;
+    OpFail('the chip size, the page size or the range is not usable');
+    exit;
   end;
 
   Size := MPHexEditorEx.DataSize;
@@ -6214,6 +8769,9 @@ end;
 procedure TMainForm.ButtonCancelClick(Sender: TObject);
 begin
   ButtonCancel.Tag:= 1;
+  RequestOperationCancellation;
+  if ActiveNORCancellation <> nil then
+    ActiveNORCancellation.RequestCancellation;
   ScriptEngine.Stop:= true;
 end;
 
@@ -6580,6 +9138,7 @@ begin
     Log.Lines[0] := 'AsProgrammer ProX ' + PROX_VERSION;
 
   LoadModernIcons;
+  CreateWorkflowBar;
   LayoutLeftPanel;
   ApplyTheme(MenuDarkTheme.Checked);
   UpdateChipInfo;
@@ -6699,8 +9258,9 @@ begin
   end;
 end;
 
-//ESC ยกเลิกงานที่ทำอยู่ F1 เปิดคอนโซลดีบัก
-//เดิมแถบชื่อหน้าต่างโฆษณาสองปุ่มนี้ไว้ แต่ในโค้ดไม่เคยมีตัวรับปุ่มเลย
+//ปุ่มลัดของเส้นทางหลักมีอยู่ทั้งในคำใบ้บนปุ่มและตรงนี้ ผู้ใช้จึงทำงานซ้ำ ๆ
+//ได้โดยไม่ต้องเล็งไอคอนเล็ก ๆ ส่วน ESC ยังคงเป็นการขอยกเลิกแบบปลอดภัย:
+//คำสั่ง erase/program ที่ส่งไปแล้วจะรอจนชิปกลับมาว่างก่อนหยุด
 procedure TMainForm.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
 begin
   if Key = VK_ESCAPE then
@@ -6708,12 +9268,50 @@ begin
     if OperationRunning then
     begin
       ButtonCancel.Tag := 1;
+      RequestOperationCancellation;
+      if ActiveNORCancellation <> nil then
+        ActiveNORCancellation.RequestCancellation;
       Key := 0;
     end;
   end
   else if Key = VK_F1 then
   begin
     DebugconsoleMenuItemClick(Sender);
+    Key := 0;
+  end
+  else if (Key = VK_F5) and FWorkflowDetect.Enabled then
+  begin
+    ButtonReadIDClick(Sender);
+    Key := 0;
+  end
+  else if (ssCtrl in Shift) and not (ssShift in Shift) and
+          (Key = Ord('O')) and FWorkflowOpen.Enabled then
+  begin
+    ButtonOpenHexClick(Sender);
+    Key := 0;
+  end
+  else if (ssCtrl in Shift) and not (ssShift in Shift) and
+          (Key = Ord('S')) and ButtonSaveHex.Enabled then
+  begin
+    ButtonSaveHexClick(Sender);
+    Key := 0;
+  end
+  else if (ssCtrl in Shift) and not (ssShift in Shift) and
+          (Key = Ord('R')) and FWorkflowRead.Enabled then
+  begin
+    ButtonReadClick(Sender);
+    Key := 0;
+  end
+  else if (ssCtrl in Shift) and (ssShift in Shift) and
+          (Key = Ord('P')) and FWorkflowSmart.Enabled then
+  begin
+    MenuSmartWriteClick(Sender);
+    Key := 0;
+  end
+  else if (ssCtrl in Shift) and (ssShift in Shift) and
+          (Key = Ord('V')) and FWorkflowVerify.Enabled then
+  begin
+    ButtonVerifyClick(Sender);
     Key := 0;
   end;
 end;
@@ -6762,7 +9360,23 @@ try
   //SPI
   if RadioSPI.Checked then
   begin
+    if not VoltageWarningOK then
+    begin
+      OpFail('aborted because of the supply voltage');
+      Exit;
+    end;
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+    if MenuResetChip.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) then
+    begin
+      LogPrint(STR_RESETTING);
+      UsbAsp25_SoftReset;
+    end;
+    if not ContactIsStable then Exit;
+    if not VerifyChipID then
+    begin
+      OpFail('the chip in the socket does not match the selected one');
+      Exit;
+    end;
     EnsureChipHints;
     TimeCounter := Time();
 
@@ -6772,13 +9386,23 @@ try
     end;
 
     if  ComboSPICMD.ItemIndex = SPI_CMD_25 then
+    begin
       ReadFlash25(RomF, Hex2Dec('$'+StartAddressEdit.Text), StrToInt(ComboChipSize.Text));
+
+      //อ่านซ้ำแล้วเทียบ ก่อนจะเอาผลไปโชว์หรือไปเซฟ
+      if OpOK and (OpUI.ReadPasses > 1) then
+        ReadPassesAgree(RomF, Hex2Dec('$'+StartAddressEdit.Text),
+                        StrToInt(ComboChipSize.Text), OpUI.ReadPasses);
+
+      if OpOK then ScanDumpAndReport(RomF);
+    end;
     if  ComboSPICMD.ItemIndex = SPI_CMD_45 then
     begin
       if (not IsNumber(ComboPageSize.Text)) then
       begin
         LogPrint(STR_CHECK_SETTINGS);
-        Exit;
+        OpFail('the chip size, the page size or the range is not usable');
+        exit;
       end;
       ReadFlash45(RomF, 0, StrToInt(ComboPageSize.Text), StrToInt(ComboChipSize.Text));
     end;
@@ -6786,9 +9410,12 @@ try
     if  ComboSPICMD.ItemIndex = SPI_CMD_95 then
       ReadFlash95(RomF, Hex2Dec('$'+StartAddressEdit.Text), StrToInt(ComboChipSize.Text));
 
-    RomF.Position := 0;
-    MPHexEditorEx.LoadFromStream(RomF);
-    StatusBar.Panels.Items[2].Text := LabelChipName.Caption;
+    if OpOK then
+    begin
+      RomF.Position := 0;
+      MPHexEditorEx.LoadFromStream(RomF);
+      StatusBar.Panels.Items[2].Text := LabelChipName.Caption;
+    end;
   end;
   //I2C
   if RadioI2C.Checked then
@@ -6796,7 +9423,8 @@ try
     if ComboAddrType.ItemIndex < 0 then
     begin
       LogPrint(STR_CHECK_SETTINGS);
-      Exit;
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
     end;
 
     EnterProgModeI2c();
@@ -6809,14 +9437,18 @@ try
     if UsbAspI2C_BUSY(I2C_DevAddr) then
     begin
       LogPrint(STR_I2C_NO_ANSWER);
+      OpFail('the I2C EEPROM did not acknowledge its address');
       exit;
     end;
     TimeCounter := Time();
     ReadFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), StrToInt(ComboChipSize.Text), I2C_ChunkSize, I2C_DevAddr);
 
-    RomF.Position := 0;
-    MPHexEditorEx.LoadFromStream(RomF);
-    StatusBar.Panels.Items[2].Text := LabelChipName.Caption;
+    if OpOK then
+    begin
+      RomF.Position := 0;
+      MPHexEditorEx.LoadFromStream(RomF);
+      StatusBar.Panels.Items[2].Text := LabelChipName.Caption;
+    end;
   end;
   //Microwire
   if RadioMw.Checked then
@@ -6824,18 +9456,27 @@ try
     if (not IsNumber(ComboMWBitLen.Text)) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
-      Exit;
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
     end;
 
-    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then Exit;
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then
+    begin
+      OpFail('the programmer could not initialize the MicroWire bus');
+      Exit;
+    end;
     TimeCounter := Time();
     ReadFlashMW(RomF, StrToInt(ComboMWBitLen.Text), 0, StrToInt(ComboChipSize.Text));
 
-    RomF.Position := 0;
-    MPHexEditorEx.LoadFromStream(RomF);
-    StatusBar.Panels.Items[2].Text := LabelChipName.Caption;
+    if OpOK then
+    begin
+      RomF.Position := 0;
+      MPHexEditorEx.LoadFromStream(RomF);
+      StatusBar.Panels.Items[2].Text := LabelChipName.Caption;
+    end;
   end;
 
+  if not OpOK then Exit;
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 
   CRC32 := UpdateCRC32($FFFFFFFF, Romf.Memory, Romf.Size);
@@ -6873,6 +9514,9 @@ end;
 procedure TMainForm.FormCloseQuery(Sender: TObject; var CanClose: boolean);
 begin
   ButtonCancel.Tag := 1;
+  RequestOperationCancellation;
+  if ActiveNORCancellation <> nil then
+    ActiveNORCancellation.RequestCancellation;
 
   //ในโหมดเบื้องหลังหน้าต่างยังใช้งานได้ จึงปิดได้ทั้งที่ยังคุยกับชิปอยู่
   //ต้องรอให้งานที่ทำอยู่จบก่อน
@@ -6906,20 +9550,31 @@ try
     end;
   LockControl();
 
-  if RunScriptFromFile(CurrentICParam.Script, 'erase') then Exit;
+  //Destructive SPI scripts are deferred until the built-in preflight below.
+  if (not RadioSPI.Checked) and
+     RunScriptFromFile(CurrentICParam.Script, 'erase') then Exit;
 
   LogPrint(TimeToStr(Time()));
 
   //SPI
   if RadioSPI.Checked then
   begin
-    EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
-
     if not VoltageWarningOK then
     begin
       OpFail('aborted because of the supply voltage');
       Exit;
     end;
+    EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+    if MenuResetChip.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) then
+    begin
+      LogPrint(STR_RESETTING);
+      UsbAsp25_SoftReset;
+    end;
+
+    //ตรวจว่าการเชื่อมต่อนิ่งก่อนจะไปแตะข้อมูล
+    //เขียนหรือลบผ่านคลิปที่หลวมคือทางที่ตรงที่สุดไปสู่ชิปที่พัง
+    if not ContactIsStable then Exit;
+
     if not VerifyChipID then
     begin
       OpFail('the chip in the socket does not match the selected one');
@@ -6937,6 +9592,7 @@ try
       OpFail('the backup could not be made');
       Exit;
     end;
+    if RunScriptFromFile(CurrentICParam.Script, 'erase') then Exit;
 
     if ComboSPICMD.ItemIndex <> SPI_CMD_KB then
       IsLockBitsEnabled;
@@ -6950,13 +9606,15 @@ try
       if (not IsNumber(ComboChipSize.Text)) then
       begin
         LogPrint(STR_CHECK_SETTINGS);
-        Exit;
+        OpFail('the chip size, the page size or the range is not usable');
+        exit;
       end;
 
       if (not IsNumber(ComboPageSize.Text)) then
       begin
         LogPrint(STR_CHECK_SETTINGS);
-        Exit;
+        OpFail('the chip size, the page size or the range is not usable');
+        exit;
       end;
 
       EraseFlashKB(StrToInt(ComboChipSize.Text), StrToInt(ComboPageSize.Text));
@@ -6979,7 +9637,8 @@ try
         if ( (not IsNumber(ComboChipSize.Text)) or (not IsNumber(ComboPageSize.Text))) then
         begin
           LogPrint(STR_CHECK_SETTINGS);
-          Exit;
+          OpFail('the chip size, the page size or the range is not usable');
+          exit;
         end;
 
       EraseEEPROM25(0, StrToInt(ComboChipSize.Text), StrToInt(ComboPageSize.Text), StrToInt(ComboChipSize.Text));
@@ -6987,13 +9646,13 @@ try
 
     if ComboSPICMD.ItemIndex = SPI_CMD_45 then
     begin
-      UsbAsp45_ChipErase();
-
-      while UsbAsp45_Busy() do
+      if UsbAsp45_ChipErase() <> 4 then
       begin
-        Application.ProcessMessages;
-        if UserCancel then Exit;
+        OpFail('the DataFlash chip-erase command was not transferred exactly');
+        Exit;
       end;
+
+      if not WaitNotBusy45(ChipEraseTimeout) then Exit;
     end;
 
   end;
@@ -7004,7 +9663,8 @@ try
   if ( (ComboAddrType.ItemIndex < 0) or (not IsNumber(ComboPageSize.Text)) ) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
-      Exit;
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
     end;
 
     EnterProgModeI2C();
@@ -7015,6 +9675,7 @@ try
     if UsbAspI2C_BUSY(I2C_DevAddr) then
     begin
       LogPrint(STR_I2C_NO_ANSWER);
+      OpFail('the I2C EEPROM did not acknowledge its address');
       exit;
     end;
 
@@ -7031,21 +9692,37 @@ try
     if (not IsNumber(ComboMWBitLen.Text)) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
-      Exit;
+      OpFail('the chip size, the page size or the range is not usable');
+      exit;
     end;
 
-    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then
+    begin
+      OpFail('the programmer could not initialize the MicroWire bus');
+      Exit;
+    end;
     TimeCounter := Time();
     LogPrint(STR_ERASING_FLASH);
-    UsbAspMW_Ewen(StrToInt(ComboMWBitLen.Text));
-    UsbAspMW_ChipErase(StrToInt(ComboMWBitLen.Text));
+    if UsbAspMW_Ewen(StrToInt(ComboMWBitLen.Text)) <>
+       StrToInt(ComboMWBitLen.Text) + 3 then
+    begin
+      OpFail('the MicroWire EEPROM did not accept EWEN');
+      Exit;
+    end;
+    try
+      if UsbAspMW_ChipErase(StrToInt(ComboMWBitLen.Text)) <>
+         StrToInt(ComboMWBitLen.Text) + 3 then
+      begin
+        OpFail('the MicroWire chip-erase command was not transferred exactly');
+        Exit;
+      end;
 
-     while UsbAspMW_Busy do
-     begin
-       Application.ProcessMessages;
-       if UserCancel then Exit;
-     end;
-
+      if not WaitNotBusyMW(BUSY_TIMEOUT_CHIP) then Exit;
+    finally
+      if UsbAspMW_Ewds(StrToInt(ComboMWBitLen.Text)) <>
+         StrToInt(ComboMWBitLen.Text) + 3 then
+        OpFail('the MicroWire EEPROM could not be returned to EWDS');
+    end;
   end;
 
 
@@ -7075,11 +9752,13 @@ var
 begin
   if OperationRunning then Exit;
 try
+  OpBegin(opkErase);
   ButtonCancel.Tag := 0;
 
   if (not RadioSPI.Checked) or (ComboSPICMD.ItemIndex <> SPI_CMD_25) then
   begin
     LogPrint(STR_SECTOR_SPI25_ONLY);
+    OpFail('range erase is only supported for SPI 25-series NOR flash');
     Exit;
   end;
 
@@ -7101,17 +9780,39 @@ try
   if Sender <> MenuSmartWrite then
     if MessageDlg('AsProgrammer', STR_ERASE_RANGE_Q + LineEnding +
        '0x' + IntToHex(StartAddr, 8) + ' + ' + IntToStr(RangeLen) + ' bytes',
-       mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
+       mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
+    begin
+      OpCancel;
+      Exit;
+    end;
 
-  if not OpenDevice() then Exit;
+  if not OpenDevice() then
+  begin
+    OpFail('the programmer could not be opened');
+    Exit;
+  end;
   LockControl();
 
   LogPrint(TimeToStr(Time()));
+  if not VoltageWarningOK then
+  begin
+    OpFail('aborted because of the supply voltage');
+    Exit;
+  end;
   EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked);
-
-  if not VoltageWarningOK then Exit;
-  if not VerifyChipID then Exit;
-  if not AutoBackupChip then Exit;
+  if not ContactIsStable then Exit;
+  if not VerifyChipID then
+  begin
+    OpFail('the chip in the socket does not match the selected one');
+    Exit;
+  end;
+  EnsureChipHints;
+  if not ProtectionGuardOK(StartAddr, RangeLen) then Exit;
+  if not AutoBackupChip then
+  begin
+    OpFail('the backup could not be made');
+    Exit;
+  end;
 
   IsLockBitsEnabled;
   TimeCounter := Time();
@@ -7122,47 +9823,744 @@ try
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 
 finally
+  LogPrint(STR_OP_RESULT + OpSummary);
   ExitProgMode25;
   AsProgrammer.Programmer.DevClose;
   UnlockControl();
 end;
 end;
 
-//ปลดล็อก -> ลบเฉพาะเซกเตอร์ที่ต้องใช้ -> เขียน -> ตรวจสอบ
+//Preservation-aware transactional SPI NOR programming.
+//
+//A trusted two-pass snapshot is overlaid with the requested patch.  The pure
+//planner decides which bytes can be programmed 1->0 and which complete erase
+//blocks must be read/modify/erased/restored.  One headless executor then owns
+//the second hardware session, WREN/WEL checks, WIP draining, full-block
+//verification, cancellation, 4-byte-mode cleanup, and evidence commit.
+//สรุปแผน Smart Write เป็นภาษาคน สำหรับโหมดดูแผนอย่างเดียว
+//เพดานเวลามาจากตัวเลขที่ชิปประกาศเอง (ทาง SFDP DWORD-10/11 ถ้ามี)
+procedure LogSmartPlanPreview(const Plan: TNORPlan);
+var
+  i: SizeInt;
+  Op: integer;
+  ByOpcode: array[0..255] of integer;
+  ByOpcodeBytes: array[0..255] of QWord;
+  WorstMs: QWord;
+begin
+  FillChar(ByOpcode, SizeOf(ByOpcode), 0);
+  FillChar(ByOpcodeBytes, SizeOf(ByOpcodeBytes), 0);
+  WorstMs := 0;
+  for i := 0 to High(Plan.Steps) do
+    case Plan.Steps[i].Kind of
+      npsErase:
+        begin
+          Inc(ByOpcode[Plan.Steps[i].Opcode]);
+          Inc(ByOpcodeBytes[Plan.Steps[i].Opcode], Plan.Steps[i].Length);
+          Inc(WorstMs, QWord(EraseTimeoutFor(Plan.Steps[i].Length)));
+        end;
+      npsProgram:
+        Inc(WorstMs, QWord(PageProgTimeout));
+      npsVerify: ;
+    end;
+
+  LogPrint('--- Smart Write plan preview: nothing has been written ---');
+  if Plan.AffectedLength = 0 then
+    LogPrint('The chip already matches the image inside the requested range; ' +
+             'no block would be touched')
+  else
+    LogPrint(Format('Affected range: 0x%.6x .. 0x%.6x (%d bytes)',
+      [Plan.AffectedAddress,
+       Plan.AffectedAddress + Plan.AffectedLength - 1,
+       Plan.AffectedLength]));
+  for Op := 0 to 255 do
+    if ByOpcode[Op] > 0 then
+      LogPrint(Format('  erase %.2xh: %d blocks, %d bytes',
+        [Op, ByOpcode[Op], ByOpcodeBytes[Op]]));
+  LogPrint(Format('  program: %d page commands, %d bytes ' +
+    '(%d preserved neighbour bytes restored)',
+    [NORPlanCountKind(Plan, npsProgram), Plan.ProgramBytes,
+     Plan.PreservedBytesRewritten]));
+  LogPrint(Format('  verify: %d block reads, %d bytes',
+    [NORPlanCountKind(Plan, npsVerify), Plan.VerifyBytes]));
+  if WorstMs > 0 then
+    LogPrint(Format(
+      '  chip-declared worst-case erase+program time: about %d s, ' +
+      'plus verify readback', [(WorstMs + 999) div 1000]));
+  LogPrint('Run Smart write without --plan-only to execute this plan.');
+end;
+
 procedure TMainForm.MenuSmartWriteClick(Sender: TObject);
 var
-  CheckTemp: boolean;
+  ChipSize, PageSize, PatchSize, PatchStart: cardinal;
+  Parsed: QWord;
+  Speed: integer;
+  PreflightOpen, PreflightBus, ControlsLocked: boolean;
+  Need4B, Native4B, PlanBuilt, OldWorker: boolean;
+  Geometry: TNORGeometry;
+  Plan: TNORPlan;
+  Config: TSPI25NORConfig;
+  PreflightID: MEMORY_ID;
+  Trusted, PatchStream: TMemoryStream;
+  CurrentBytes, PatchBytes: TBytes;
+  Request: TOperationRequest;
+  Token: TCancellationToken;
+  Adapter: TSPI25NORAdapter;
+  Executor: TNORPlanExecutor;
+  Outcome: TOperationOutcome;
+  Bridge: TNORUIBridge;
+  Digest: TSHA256Digest;
+  Err, NativeErr, FailureEvidenceError: string;
+  ReadOpcode: byte;
+  FastRead: boolean;
+  GeometryIndex: SizeInt;
+  ExecutorOptions: TNORExecutorOptions;
+  ThisTimeout: cardinal;
+
+  procedure ReleasePreflightSession;
+  begin
+    try
+      Leave4B;
+    except
+      on E: Exception do
+        if not LastOp.Failed then
+          OpFail('4-byte-address cleanup raised ' + E.ClassName + ': ' +
+                 E.Message);
+    end;
+    if PreflightBus then
+    begin
+      PreflightBus := False;
+      try
+        ExitProgMode25;
+      except
+        on E: Exception do
+          if not LastOp.Failed then
+            OpFail('SPI cleanup raised ' + E.ClassName + ': ' + E.Message);
+      end;
+    end;
+    if PreflightOpen then
+    begin
+      PreflightOpen := False;
+      try
+        AsProgrammer.Programmer.DevClose;
+      except
+        on E: Exception do
+          if not LastOp.Failed then
+            OpFail('programmer close raised ' + E.ClassName + ': ' +
+                   E.Message);
+      end;
+    end;
+  end;
+
+  function StreamBytes(Stream: TMemoryStream; out Data: TBytes): boolean;
+  begin
+    Data := nil;
+    Result := False;
+    if (Stream = nil) or (Stream.Size < 0) or
+       (QWord(Stream.Size) > QWord(High(SizeInt))) then Exit;
+    SetLength(Data, SizeInt(Stream.Size));
+    Stream.Position := 0;
+    if Length(Data) > 0 then Stream.ReadBuffer(Data[0], Length(Data));
+    Result := True;
+  end;
+
+  function IsCanonicalUpperHex(const Value: string;
+    RequiredChars: integer): boolean;
+  var
+    i: integer;
+  begin
+    Result := Length(Value) = RequiredChars;
+    if not Result then Exit;
+    for i := 1 to Length(Value) do
+      if not (Value[i] in ['0'..'9', 'A'..'F']) then Exit(False);
+  end;
+
+  procedure ExecutePlan;
+  begin
+    Outcome := Executor.Execute(Request, Plan, Geometry, Token);
+  end;
+
 begin
   if OperationRunning then Exit;
+  OpBegin(opkWrite);
+  //FillChar ห้ามใช้กับเรคคอร์ดที่มีสตริง (ดูคำอธิบายที่จุดเดียวกันใน
+  //ButtonWriteClick)
+  CurrentSerial := Default(TSerialAllocation);
+  CurrentSerialValid := False;
+  CurrentSerialReserved := False;
+  LastChipUID := '';
+  LastProgramCRC := BufferCRC32;
 
-  if MPHexEditorEx.DataSize = 0 then
-  begin
-    LogPrint(STR_ERASE_RANGE_EMPTY);
-    Exit;
+  PreflightOpen := False;
+  PreflightBus := False;
+  ControlsLocked := False;
+  PlanBuilt := False;
+  Trusted := nil;
+  PatchStream := nil;
+  Token := nil;
+  Adapter := nil;
+  Executor := nil;
+  Bridge := TNORUIBridge.Create;
+  CurrentBytes := nil;
+  PatchBytes := nil;
+  FillChar(Outcome, SizeOf(Outcome), 0);
+  InitOperationRequest(Request);
+  Request.OperationID :=
+    FormatDateTime('yyyymmddhhnnsszzz', Now) + '-' +
+    IntToHex(GetTickCount64 and $FFFFFFFF, 8);
+  LastStrictRunID := Request.OperationID;
+  Request.Kind := okProgram;
+  Request.Chip.Name := CurrentICParam.Name;
+  Request.Chip.ProfileHash := StrictProductionProfileHash;
+  Request.ImageHash := StrictProductionImageHash;
+  Bridge.EvidenceSize := MPHexEditorEx.DataSize;
+  Bridge.EvidenceCRC := LastProgramCRC;
+  Bridge.EvidenceUID := '';
+  Bridge.EvidenceCommitted := False;
+  Bridge.StrictMode := StrictProductionMode;
+  Bridge.StrictJobID := StrictProductionJobID;
+  Bridge.StrictJobRevision := StrictProductionJobRevision;
+  Bridge.EvidenceDirectory := StrictEvidenceDirectory;
+  Bridge.EvidenceKeyID := StrictEvidenceKeyID;
+  Bridge.EvidenceKey := StrictEvidenceKey;
+  Bridge.OperatorName := ProdSettings.Operator_;
+  Bridge.ProgrammerID := '';
+  Bridge.ReadPasses := 2;
+  if StrictProductionMode then
+    Bridge.ReadPasses := StrictProductionReadPasses;
+  Bridge.SerialText := '';
+  Bridge.PhysicalVerifyCompleted := False;
+
+  try
+  try
+    if StrictProductionMode and ProdSettings.SNEnabled then
+    begin
+      OpFail('strict production refuses unsigned serial-number personalization');
+      Exit;
+    end;
+    if StrictProductionMode then
+    begin
+      if (StrictProductionJobID = '') or
+         (StrictProductionJobRevision = 0) or
+         (StrictAdmittedProgrammerID = '') or
+         (not DirectoryExists(StrictEvidenceDirectory)) or
+         (not IsCanonicalUpperHex(StrictProductionProfileHash, 64)) or
+         (not IsCanonicalUpperHex(StrictProductionImageHash, 64)) or
+         (not IsCanonicalUpperHex(StrictProductionExpectedID, 6)) or
+         (StrictProductionPageSize = 0) or
+         (StrictProductionEraseSize = 0) or
+         (StrictProductionEraseOpcode = 0) or
+         (StrictProductionReadPasses < 2) or
+         (StrictProductionReadPasses > 16) then
+      begin
+        OpFail('strict production context is incomplete or non-canonical');
+        Exit;
+      end;
+    end;
+    if MPHexEditorEx.DataSize = 0 then
+    begin
+      LogPrint(STR_ERASE_RANGE_EMPTY);
+      OpFail('the write buffer is empty');
+      Exit;
+    end;
+    if (not RadioSPI.Checked) or
+       (ComboSPICMD.ItemIndex <> SPI_CMD_25) then
+    begin
+      LogPrint(STR_SECTOR_SPI25_ONLY);
+      OpFail('transactional Smart Write supports SPI 25-series NOR only');
+      Exit;
+    end;
+
+    if (Sender <> ComboItem1) and (not CLIMode) then
+      if MessageDlg('AsProgrammer', STR_COMBO_WARN, mtConfirmation,
+                    [mbYes, mbNo], 0) <> mrYes then
+      begin
+        OpCancel;
+        Exit;
+      end;
+
+    if (not TryStrToQWord(Trim(ComboChipSize.Text), Parsed)) or
+       (Parsed = 0) or (Parsed > High(cardinal)) then
+    begin
+      OpFail('the chip size is not a usable positive integer');
+      Exit;
+    end;
+    ChipSize := cardinal(Parsed);
+
+    if (not TryStrToQWord('$' + Trim(StartAddressEdit.Text), Parsed)) or
+       (Parsed > High(cardinal)) then
+    begin
+      OpFail('the start address is not a usable hexadecimal address');
+      Exit;
+    end;
+    PatchStart := cardinal(Parsed);
+    PatchSize := MPHexEditorEx.DataSize;
+    Request.Target.Address := PatchStart;
+    Request.Target.Length := PatchSize;
+    Request.Chip.Capacity := ChipSize;
+    if (PatchStart >= ChipSize) or (PatchSize > ChipSize - PatchStart) then
+    begin
+      OpFail('the requested patch does not fit the selected chip');
+      Exit;
+    end;
+
+    if (not TryStrToQWord(Trim(ComboPageSize.Text), Parsed)) or
+       (Parsed = 0) or (Parsed > 2048) then
+    begin
+      OpFail('Smart Write requires a numeric page size from 1 to 2048 bytes');
+      Exit;
+    end;
+    PageSize := cardinal(Parsed);
+
+    LockControl;
+    ControlsLocked := True;
+    if not OpenDevice then
+    begin
+      OpFail('the programmer could not be opened');
+      Exit;
+    end;
+    PreflightOpen := True;
+    if StrictProductionMode then
+      Bridge.ProgrammerID := StrictAdmittedProgrammerID
+    else
+      Bridge.ProgrammerID := AsProgrammer.Programmer.HardwareName;
+
+    if not VoltageWarningOK then
+    begin
+      OpFail('aborted because of the supply voltage');
+      Exit;
+    end;
+    Speed := SetSPISpeed(0);
+    if not EnterProgMode25(Speed, MenuSendAB.Checked) then
+    begin
+      OpFail('the programmer could not initialize the SPI bus');
+      Exit;
+    end;
+    PreflightBus := True;
+
+    if MenuResetChip.Checked then
+    begin
+      LogPrint(STR_RESETTING);
+      if UsbAsp25_SoftReset <> 1 then
+      begin
+        OpFail('the SPI NOR reset sequence was not transferred exactly');
+        Exit;
+      end;
+    end;
+    if not ContactIsStable then Exit;
+    if not VerifyChipID then
+    begin
+      OpFail('the chip in the socket does not match the selected one');
+      Exit;
+    end;
+    EnsureChipHints;
+
+    FillChar(PreflightID, SizeOf(PreflightID), 0);
+    UsbAsp25_ReadID(PreflightID);
+    if not PreflightID.Got9F then
+    begin
+      OpFail('the chip did not return an exact JEDEC 9Fh identity');
+      Exit;
+    end;
+
+    LastChipUID := ReadChipUID;
+    if LastChipUID <> '' then LogPrint(STR_UNIQUE_ID + LastChipUID);
+    Request.Chip.UniqueID := LastChipUID;
+    Bridge.EvidenceUID := LastChipUID;
+    if StrictProductionMode and (not StrictProductionUIDRequired) then
+    begin
+      OpFail('strict two-session programming requires a UID-bound production job');
+      Exit;
+    end;
+    if StrictProductionMode and
+       (StrictProductionUIDRequired and
+        ((not LastChipUIDTransferExact) or (LastChipUID = ''))) then
+    begin
+      OpFail('the authenticated production job requires an exact usable chip UID');
+      Exit;
+    end;
+    if not DuplicateChipGuardOK(LastChipUID) then Exit;
+    if not JobFileGuardOK(PatchSize) then Exit;
+
+    if StrictProductionMode then
+    begin
+      if ChipSize > 16777216 then
+      begin
+        OpFail('strict SPI NOR profile v1 does not bind 4-byte opcodes; ' +
+               'chips above 16 MiB are rejected');
+        Exit;
+      end;
+      if (StrictProductionPageSize = 0) or
+         (PageSize <> StrictProductionPageSize) then
+      begin
+        OpFail('configured page size does not match the authenticated chip profile');
+        Exit;
+      end;
+      if CurrentSFDPValid then
+      begin
+        if CurrentSFDP.Density <> ChipSize then
+        begin
+          OpFail('live SFDP density does not match the authenticated chip profile');
+          Exit;
+        end;
+        if (CurrentSFDP.PageSize <> 0) and
+           (CurrentSFDP.PageSize <> StrictProductionPageSize) then
+        begin
+          OpFail('live SFDP page size does not match the authenticated chip profile');
+          Exit;
+        end;
+        if CurrentSFDP.SectorMapDeclared and
+           ((not CurrentSFDP.HasSectorMap) or (not CurrentSFDP.Uniform)) then
+        begin
+          OpFail('strict chip profile v1 cannot authenticate an ambiguous or hybrid sector map');
+          Exit;
+        end;
+      end;
+    end;
+
+    if CurrentSFDPValid and (CurrentSFDP.PageSize > 0) then
+    begin
+      if PageSize <> CurrentSFDP.PageSize then
+        LogPrint(Format(
+          'Using SFDP page size %d instead of configured value %d',
+          [CurrentSFDP.PageSize, PageSize]));
+      PageSize := CurrentSFDP.PageSize;
+    end;
+
+    Trusted := TMemoryStream.Create;
+    if not AutoBackupChip(Trusted) then
+    begin
+      OpFail('a trusted two-pass full-chip snapshot could not be made');
+      Exit;
+    end;
+
+    PatchStream := TMemoryStream.Create;
+    MPHexEditorEx.SaveToStream(PatchStream);
+    PatchStream.Position := 0;
+    if not ApplySerialToStream(PatchStream) then Exit;
+    if not ReserveCurrentSerial then Exit;
+    PatchSize := PatchStream.Size;
+    Request.Target.Length := PatchSize;
+    Bridge.EvidenceSize := PatchSize;
+    Bridge.EvidenceCRC := LastProgramCRC;
+    if CurrentSerialValid then Bridge.SerialText := CurrentSerial.Text;
+
+    if (not StreamBytes(Trusted, CurrentBytes)) or
+       (Length(CurrentBytes) <> ChipSize) or
+       (not StreamBytes(PatchStream, PatchBytes)) or
+       (Length(PatchBytes) <> PatchSize) then
+    begin
+      OpFail('the immutable snapshot or personalized patch could not be captured');
+      Exit;
+    end;
+
+    if not SHA256Bytes(PatchBytes, Digest, Err) then
+    begin
+      OpFail('cannot hash the immutable personalized image: ' + Err);
+      Exit;
+    end;
+    Request.ImageHash := DigestToHex(Digest);
+    Request.Chip.ProfileHash := StrictProductionProfileHash;
+    if StrictProductionMode and
+       (Request.ImageHash <> StrictProductionImageHash) then
+    begin
+      OpFail('the immutable operation image no longer matches the authenticated job');
+      Exit;
+    end;
+
+    Need4B := Needs4ByteAddress(PatchStart, PatchSize, ChipSize);
+    Native4B := Need4B and Native4BRead and Native4BWrite;
+    if Native4B then
+    begin
+      NativeErr := '';
+      if not BuildCurrentNORGeometry(ChipSize, PageSize, True,
+                                     Geometry, NativeErr) then
+        Native4B := False;
+    end;
+    if not Native4B then
+      if not BuildCurrentNORGeometry(ChipSize, PageSize, False,
+                                     Geometry, Err) then
+      begin
+        if (NativeErr <> '') and Need4B then
+          Err := Err + '; native 4-byte plan was also unavailable: ' +
+                 NativeErr;
+        OpFail('cannot construct a safe NOR geometry: ' + Err);
+        Exit;
+      end;
+
+    if StrictProductionMode then
+    begin
+      if (Geometry.PageSize <> StrictProductionPageSize) or
+         (StrictProductionEraseSize = 0) or
+         (StrictProductionEraseOpcode = 0) then
+      begin
+        OpFail('runtime NOR geometry does not match the authenticated chip profile');
+        Exit;
+      end;
+      for GeometryIndex := 0 to High(Geometry.Blocks) do
+        if (Geometry.Blocks[GeometryIndex].Size <>
+            StrictProductionEraseSize) or
+           (Geometry.Blocks[GeometryIndex].Opcode <>
+            StrictProductionEraseOpcode) then
+        begin
+          OpFail('runtime hybrid/alternate erase geometry is not bound by ' +
+                 'the authenticated chip profile v1',
+                 Geometry.Blocks[GeometryIndex].Address);
+          Exit;
+        end;
+    end;
+
+    if not BuildNORDifferentialPlan(CurrentBytes, PatchBytes, PatchStart,
+                                    Geometry, Plan, Err) then
+    begin
+      OpFail('cannot construct the preservation-aware write plan: ' + Err);
+      Exit;
+    end;
+    PlanBuilt := True;
+    LogPrint(Format(
+      'Smart plan: %d changed bytes, %d erase bytes, %d program bytes, ' +
+      '%d verified bytes, %d preserved neighbour bytes restored',
+      [Plan.ChangedBytes, Plan.EraseBytes, Plan.ProgramBytes,
+       Plan.VerifyBytes, Plan.PreservedBytesRewritten]));
+
+    //โหมดดูแผนอย่างเดียวจบตรงนี้ ก่อนด่านป้องกันและก่อน UnlockCurrentSPI25
+    //ซึ่งเขียน status register จริง แผนถูกพิมพ์ครบแล้ว และชิปยังไม่ถูกแตะ
+    if SmartWritePlanOnly then
+    begin
+      LogSmartPlanPreview(Plan);
+      Exit;
+    end;
+
+    //The protection guard covers the planner's complete affected blocks, not
+    //only the requested patch.  Erase commands can touch preserved neighbours.
+    if NORPlanHasDestructiveSteps(Plan) then
+    begin
+      if (Plan.AffectedAddress > High(cardinal)) or
+         (Plan.AffectedLength > High(cardinal)) then
+      begin
+        OpFail('the affected protection-check range does not fit this build');
+        Exit;
+      end;
+      if not ProtectionGuardOK(cardinal(Plan.AffectedAddress),
+                               cardinal(Plan.AffectedLength)) then Exit;
+      if not UnlockCurrentSPI25 then Exit;
+    end;
+
+    if OperationCancellationRequested then
+    begin
+      OpCancel;
+      Exit;
+    end;
+
+    InitSPI25NORConfig(Config);
+    Config.SPISpeed := Speed;
+    Config.SendAB := MenuSendAB.Checked;
+    if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
+      Config.ReadTransport := srtCombinedWriteRead
+    else
+      Config.ReadTransport := srtSplitWriteRead;
+
+    if Need4B then
+    begin
+      Config.AddressMode := sam4Byte;
+      if Native4B then
+      begin
+        Config.FourByteStrategy := fbsNativeDedicatedOpcodes;
+        PickReadOpcode(True, ReadOpcode, FastRead);
+        Config.ReadOpcode := ReadOpcode;
+        Config.ProgramOpcode := Chip25PageProg4BOpcode;
+      end
+      else
+      begin
+        case Chip25Entry4B of
+          E4B_B7:
+            Config.FourByteStrategy := fbsEnterB7;
+          E4B_WREN_B7:
+            Config.FourByteStrategy := fbsWriteEnableThenB7;
+        else
+          OpFail(
+            'this large chip has no safely supported B7 or dedicated 4-byte strategy');
+          Exit;
+        end;
+        PickReadOpcode(False, ReadOpcode, FastRead);
+        Config.ReadOpcode := ReadOpcode;
+        Config.ProgramOpcode := $02;
+      end;
+    end
+    else
+    begin
+      Config.AddressMode := sam3Byte;
+      Config.FourByteStrategy := fbsNotApplicable;
+      PickReadOpcode(False, ReadOpcode, FastRead);
+      Config.ReadOpcode := ReadOpcode;
+      Config.ProgramOpcode := $02;
+    end;
+    Config.FastRead := FastRead;
+    if not RequireSPI25MemoryIdentity(Config, PreflightID, 8, Err) then
+    begin
+      OpFail('cannot enforce the preflight chip identity: ' + Err);
+      Exit;
+    end;
+    if LastChipUID <> '' then
+      if not RequireSPI25UniqueIdentity(Config, LastChipUID, 2, Err) then
+      begin
+        OpFail('cannot bind the execution session to the preflight UID: ' + Err);
+        Exit;
+      end;
+    if not ValidateSPI25NORConfig(Config, Err) then
+    begin
+      OpFail('invalid real-hardware NOR adapter configuration: ' + Err);
+      Exit;
+    end;
+
+    Request.Chip.Name := CurrentICParam.Name;
+    Request.Chip.JedecID :=
+      IntToHex(PreflightID.ID9FH[0], 2) +
+      IntToHex(PreflightID.ID9FH[1], 2) +
+      IntToHex(PreflightID.ID9FH[2], 2);
+    Request.Chip.UniqueID := LastChipUID;
+    Request.Chip.Capacity := ChipSize;
+    Request.Policy.RequireTrustedBackup := True;
+    Request.Policy.RequireStableIdentity := True;
+    Request.Policy.RequireFullVerify := True;
+    Request.Policy.RequireEvidenceCommit :=
+      StrictProductionMode or (ProdSettings.ProdLogFile <> '');
+    Request.Policy.PreserveOutsideRange := True;
+
+    //Free full-chip duplicate buffers before execution.  Every byte needed by
+    //the physical transaction is now owned by the immutable plan.
+    CurrentBytes := nil;
+    PatchBytes := nil;
+    FreeAndNil(Trusted);
+    FreeAndNil(PatchStream);
+
+    ReleasePreflightSession;
+    //A cleanup failure means the first session did not return the chip and
+    //programmer to a proven-safe state.  Never reopen the device or let the
+    //executor commit PASS evidence after that failure.
+    if not OpOK then Exit;
+
+    Bridge.EvidenceSize := PatchSize;
+    Bridge.EvidenceCRC := LastProgramCRC;
+    Bridge.EvidenceUID := LastChipUID;
+    Token := TCancellationToken.Create;
+    ActiveNORCancellation := Token;
+    try
+      Adapter := TSPI25NORAdapter.Create(AsProgrammer.Programmer, Config);
+      Executor := TNORPlanExecutor.Create(Adapter, @Bridge.Receive, nil,
+                                          @Bridge.CommitEvidence);
+      ExecutorOptions := Executor.Options;
+      ExecutorOptions.ProgramTimeoutMs := PageProgTimeout;
+      ExecutorOptions.EraseTimeoutMs := 1;
+      for GeometryIndex := 0 to High(Geometry.Blocks) do
+      begin
+        ThisTimeout := EraseTimeoutFor(Geometry.Blocks[GeometryIndex].Size);
+        if ThisTimeout > ExecutorOptions.EraseTimeoutMs then
+          ExecutorOptions.EraseTimeoutMs := ThisTimeout;
+      end;
+      ExecutorOptions.StatusPollDelayMs := 1;
+      Executor.Options := ExecutorOptions;
+
+      //The transactional executor always runs on the device worker so the GUI
+      //can deliver cancellation while a long erase/program is being drained.
+      OldWorker := UseWorkerThread;
+      UseWorkerThread := True;
+      try
+        RunOperation(@ExecutePlan);
+        Bridge.PhysicalVerifyCompleted :=
+          Outcome.PhysicalVerifyCompleted;
+      finally
+        UseWorkerThread := OldWorker;
+      end;
+    except
+      on E: Exception do
+        OpFail('transactional NOR executor setup failed: ' +
+               E.ClassName + ': ' + E.Message);
+    end;
+
+    if not LastOp.Failed then
+      case Outcome.Status of
+        osSucceeded:
+          begin
+            OpProgress(PatchSize, PatchSize);
+            LogPrint(STR_DONE);
+          end;
+        osCancelled:
+          OpCancel;
+        osFailed:
+          if Outcome.HasFailureAddress then
+            OpFail(OperationErrorName(Outcome.ErrorCode) + ': ' +
+                   Outcome.ErrorText, Outcome.FailureAddress)
+          else
+            OpFail(OperationErrorName(Outcome.ErrorCode) + ': ' +
+                   Outcome.ErrorText);
+      else
+        OpFail('the transactional NOR executor returned no terminal outcome');
+      end;
+  except
+    on E: Exception do
+      OpFail('transactional Smart Write raised ' + E.ClassName + ': ' +
+             E.Message);
   end;
+  finally
+    ActiveNORCancellation := nil;
+    try
+      Executor.Free;
+    except
+      on E: Exception do
+        if not LastOp.Failed then
+          OpFail('executor cleanup raised ' + E.ClassName + ': ' + E.Message);
+    end;
+    Executor := nil;
+    try
+      Adapter.Free;
+    except
+      on E: Exception do
+        if not LastOp.Failed then
+          OpFail('adapter cleanup raised ' + E.ClassName + ': ' + E.Message);
+    end;
+    Adapter := nil;
+    Token.Free;
+    Token := nil;
+    ReleasePreflightSession;
 
-  if (not RadioSPI.Checked) or (ComboSPICMD.ItemIndex <> SPI_CMD_25) then
-  begin
-    LogPrint(STR_SECTOR_SPI25_ONLY);
-    Exit;
+    if StrictProductionMode and (Bridge <> nil) and
+       (not Bridge.EvidenceCommitted) and (not OpOK) then
+    begin
+      FailureEvidenceError := '';
+      Err := LastOp.ErrorText;
+      if Err = '' then
+        if LastOp.Cancelled then Err := 'operation cancelled'
+        else Err := 'operation failed without a diagnostic';
+      if not Bridge.CommitFailureEvidence(Request, Err,
+                                          FailureEvidenceError) then
+        LogPrint('Strict failure evidence could not be written: ' +
+                 FailureEvidenceError);
+    end;
+
+    //Failures before the engine's evidence phase are logged here.  A success
+    //already committed by the engine must never be appended a second time.
+    if (ProdSettings.ProdLogFile <> '') and
+       ((Bridge = nil) or (not Bridge.EvidenceCommitted)) then
+      WriteProdLogEntry(MPHexEditorEx.DataSize, LastProgramCRC, LastChipUID);
+
+    try
+      Bridge.Free;
+    except
+      on E: Exception do
+        if not LastOp.Failed then
+          OpFail('evidence bridge cleanup raised ' + E.ClassName + ': ' +
+                 E.Message);
+    end;
+    Bridge := nil;
+    Trusted.Free;
+    PatchStream.Free;
+    CurrentBytes := nil;
+    PatchBytes := nil;
+    if PlanBuilt then ClearNORPlan(Plan);
+    SetProgressPos(0);
+    LogPrint(STR_OP_RESULT + OpSummary);
+    if ControlsLocked then UnlockControl;
   end;
-
-  if MessageDlg('AsProgrammer', STR_COMBO_WARN, mtConfirmation, [mbYes, mbNo], 0)
-    <> mrYes then Exit;
-
-  if ButtonBlock.Enabled then
-    ButtonBlockClick(ComboItem1);
-
-  MenuEraseRangeClick(MenuSmartWrite);
-
-  if ButtonCancel.Tag <> 0 then Exit;
-
-  CheckTemp := MenuAutoCheck.Checked;
-  MenuAutoCheck.Checked := True;
-
-  ButtonWriteClick(ComboItem1);
-
-  MenuAutoCheck.Checked := CheckTemp;
 end;
 
 //สลับโหมดรันงานบน thread เบื้องหลัง
@@ -7342,6 +10740,30 @@ begin
       TDOMElement(ParentNode).SetAttribute('auto_backup', '1') else
         TDOMElement(ParentNode).SetAttribute('auto_backup', '0');
 
+    if MainForm.MenuFastRead.Checked then
+      TDOMElement(ParentNode).SetAttribute('fast_read', '1') else
+        TDOMElement(ParentNode).SetAttribute('fast_read', '0');
+
+    if MainForm.MenuResetChip.Checked then
+      TDOMElement(ParentNode).SetAttribute('reset_chip', '1') else
+        TDOMElement(ParentNode).SetAttribute('reset_chip', '0');
+
+    if MainForm.MenuVerifyErase.Checked then
+      TDOMElement(ParentNode).SetAttribute('verify_erase', '1') else
+        TDOMElement(ParentNode).SetAttribute('verify_erase', '0');
+
+    if MainForm.MenuDoubleRead.Checked then
+      TDOMElement(ParentNode).SetAttribute('double_read', '1') else
+        TDOMElement(ParentNode).SetAttribute('double_read', '0');
+
+    if MainForm.MenuCheckContact.Checked then
+      TDOMElement(ParentNode).SetAttribute('check_contact', '1') else
+        TDOMElement(ParentNode).SetAttribute('check_contact', '0');
+
+    if MainForm.MenuScanImage.Checked then
+      TDOMElement(ParentNode).SetAttribute('scan_image', '1') else
+        TDOMElement(ParentNode).SetAttribute('scan_image', '0');
+
     if MainForm.Menu3Mhz.Checked then
       TDOMElement(ParentNode).SetAttribute('spi_speed', '3Mhz');
     if MainForm.Menu1_5Mhz.Checked then
@@ -7494,6 +10916,30 @@ begin
       if  Node.Attributes.GetNamedItem('auto_backup') <> nil then
         MainForm.MenuAutoBackup.Checked :=
           Node.Attributes.GetNamedItem('auto_backup').NodeValue = '1';
+
+      if  Node.Attributes.GetNamedItem('fast_read') <> nil then
+        MainForm.MenuFastRead.Checked :=
+          Node.Attributes.GetNamedItem('fast_read').NodeValue = '1';
+
+      if  Node.Attributes.GetNamedItem('reset_chip') <> nil then
+        MainForm.MenuResetChip.Checked :=
+          Node.Attributes.GetNamedItem('reset_chip').NodeValue = '1';
+
+      if  Node.Attributes.GetNamedItem('verify_erase') <> nil then
+        MainForm.MenuVerifyErase.Checked :=
+          Node.Attributes.GetNamedItem('verify_erase').NodeValue = '1';
+
+      if  Node.Attributes.GetNamedItem('double_read') <> nil then
+        MainForm.MenuDoubleRead.Checked :=
+          Node.Attributes.GetNamedItem('double_read').NodeValue = '1';
+
+      if  Node.Attributes.GetNamedItem('check_contact') <> nil then
+        MainForm.MenuCheckContact.Checked :=
+          Node.Attributes.GetNamedItem('check_contact').NodeValue = '1';
+
+      if  Node.Attributes.GetNamedItem('scan_image') <> nil then
+        MainForm.MenuScanImage.Checked :=
+          Node.Attributes.GetNamedItem('scan_image').NodeValue = '1';
 
       //เลขรันนิ่งและการผลิตเป็นชุด
       if Node.Attributes.GetNamedItem('sn_enabled') <> nil then

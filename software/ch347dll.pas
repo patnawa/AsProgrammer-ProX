@@ -1,5 +1,19 @@
 unit CH347DLL;
 
+// CH347 vendor-driver binding, resolved at run time.
+//
+// These used to be static `external 'CH347DLL.DLL'` imports.  Static imports
+// are resolved by Windows at process start, so a missing CH347DLL.DLL kept
+// the whole program from launching -- even for someone who only owns a CH341
+// or an FT232H.  Now the DLL is loaded on first use; if it is absent, every
+// call fails the same way an unplugged programmer does, and the UI reports
+// "no programmer", not a system error dialog before the window exists.
+//
+// The wrapper functions keep the exact vendor names and signatures, so call
+// sites did not change.
+
+{$mode objfpc}{$H+}
+
 interface
 
 uses
@@ -38,91 +52,332 @@ const
   mCH341A_CMD_I2C_STM_DLY =	$0F;		// Maximum value of single command delay of command flow of I2C interface
   mCH341A_CMD_I2C_STM_END =	$00;		// Command flow of I2C interface: Command package ends in advance
 
+//True when CH347DLL.DLL is present and every entry point resolved.
+//False plus a reason otherwise; callers may show the reason once.
+function CH347DriverAvailable(out Error: string): boolean;
 
-//CH347 Mode Common Function,support open,close,USB read,USB written and HID of all modes.
-//Open USB device
-function CH347OpenDevice(DevI: cardinal): integer; stdcall; external 'CH347DLL.DLL';
-
-//Close USB device
-function CH347CloseDevice(iIndex: cardinal): boolean; stdcall; external 'CH347DLL.DLL';
-
-// Read USB data block
-function CH347ReadData(iIndex: cardinal;      // Specifies the device number
-		       oBuffer: pointer;         // Points to a buffer large enough to save the read data
-		       ioLength: pcardinal): boolean; stdcall; external 'CH347DLL.DLL';  // Points to the length unit, the length to be read when input is the length to be read, and the actual read length after return
-
-// Write USB data block
-function CH347WriteData(iIndex: cardinal;      // Specifies the device number
-			iBuffer: pointer;     // Points to a buffer large enough to save the written data
-			ioLength: pcardinal): boolean; stdcall; external 'CH347DLL.DLL';  // Points to the length unit,the input length is the intended length, and the return length is the actual length
-
-
-//***************SPI********************
-// SPI Controller Initialization
-function CH347SPI_Init(iIndex: cardinal; SpiCfg: mpSpiCfgS): boolean; stdcall; external 'CH347DLL.DLL';
-
-// Get SPI controller configuration information
-//BOOL    WINAPI  CH347SPI_GetCfg(ULONG iIndex,mSpiCfgS *SpiCfg);
-
-// Before setting the chip selection status, call CH347SPI_Init to set CS
-function CH347SPI_ChangeCS(iIndex: cardinal;         // Specify device number
-			   iStatus: byte): boolean; stdcall; external 'CH347DLL.DLL';       // 0=Cancel the piece to choose,1=Set piece selected
-
-// Set SPI slice selection
-function CH347SPI_SetChipSelect(iIndex: cardinal;            // Specify device number
-				iEnableSelect: word;     // The lower octet is CS1 and the higher octet is CS2. A byte value of 1= sets CS, 0= ignores this CS setting
-				iChipSelect: word;       // The lower octet is CS1 and the higher octet is CS2. A byte value of 1= sets CS, 0= ignores this CS setting
-				iIsAutoDeativeCS: cardinal;  // The lower 16 bits are CS1 and the higher 16 bits are CS2. Whether to undo slice selection automatically after the operation is complete
-				iActiveDelay: cardinal;      // The lower 16 bits are CS1 and the higher 16 bits are CS2. Set the latency of read/write operations after chip selection, the unit is us
-				iDelayDeactive: cardinal): boolean; stdcall; external 'CH347DLL.DLL';  // The lower 16 bits are CS1 and the higher 16 bits are CS2. Delay time for read and write operations after slice selection the unit is us
-
-//SPI4 write data
-function CH347SPI_Write(iIndex: cardinal;          // Specify device number
-			iChipSelect: cardinal;     // Slice selection control, when bit 7 is 0, slice selection control is ignored, and when bit 7 is 1, slice selection operation is performed
-			iLength: cardinal;         // Number of bytes of data to be transferred
-			iWriteStep: cardinal;      // The length of a single block to be read
-			ioBuffer: pointer): boolean; stdcall; external 'CH347DLL.DLL';       // Point to a buffer to place the data to be written out from MOSI
-
-//SPI4 read data. No need to write data first, the efficiency is higher than that of the CH347SPI_WriteRead
-function CH347SPI_Read(iIndex: cardinal;           // Specify device number
-		       iChipSelect: cardinal;      // Slice selection control, when bit 7 is 0, slice selection control is ignored, and when bit 7 is 1, slice selection operation is performed
-		       oLength: cardinal;          // Number of bytes to send
-		       iLength: pcardinal;          // Number of bytes of data to be read in
-		       ioBuffer: pointer): boolean; stdcall; external 'CH347DLL.DLL';        // Points to a buffer that place the data to be written out from DOUT, return the data read in from DIN
-
-// Handle SPI data stream 4-wire interface
-function CH347SPI_WriteRead(iIndex: cardinal;       // Specify the device number
-			    iChipSelect: cardinal;  // Selection control, if the film selection control bit 7 is 0, ignore the film selection control bit 7 is 1 and operate the film selection
-			    iLength: cardinal;      // Number of bytes of data to be transferred
-			    ioBuffer: pointer): boolean; stdcall; external 'CH347DLL.DLL';   // Points to a buffer that place the data to be written out from DOUT, return the data read in from DIN
-
-//place the data to be written from MOSI, return the data read in from MISO
-function CH347StreamSPI4(iIndex: cardinal;       // Specify the device number
-			 iChipSelect: cardinal;  // Film selection control, if bit 7 is 0, slice selection control is ignored.If bit 7 is 1, the parameter is valid:Bit 1 bit 0 is 00/01/10. Select D0/D1/D2 pins as low level active chip options respectively
-			 iLength: cardinal;      // Number of bytes of data to be transferred
-			 ioBuffer: pointer): boolean; stdcall; external 'CH347DLL.DLL';   // Points to a buffer, places data to be written out from DOUT, and returns data to be read in from DIN
-
-
-//********IIC***********/
-//Set the serial port flow mode
-function CH347I2C_Set(iIndex: cardinal;   // Specify the device number
-		      iMode: cardinal): boolean; stdcall; external 'CH347DLL.DLL'; // See downlink for the specified mode
-//bit 1-bit 0: I2C interface speed /SCL frequency, 00= low speed /20KHz,01= standard /100KHz(default),10= fast /400KHz,11= high speed /750KHz
-//Other reservations, must be 0
-
-//Set the hardware asynchronous delay to a specified number of milliseconds before the next stream operation
-function CH347I2C_SetDelaymS(iIndex: cardinal;        // Specify the device number
-                             iDelay: cardinal): boolean; stdcall; external 'CH347DLL.DLL';    // Specifies the delay duration (mS)
-
-//Process I2C data stream, 2-wire interface, clock line for SCL pin, data line for SDA pin
-function CH347StreamI2C(iIndex: cardinal;        // Specify the device number
-                        iWriteLength: cardinal;  // The number of bytes of data to write
-			iWriteBuffer: pointer;  // Points to a buffer to place data ready to be written out, the first byte is usually the I2C device address and read/write direction bit
-			iReadLength: cardinal;   // Number of bytes of data to be read
-			oReadBuffer: pointer): boolean; stdcall; external 'CH347DLL.DLL'; // Points to a buffer to place data ready to be read in
-
+function CH347OpenDevice(DevI: cardinal): integer; stdcall;
+function CH347CloseDevice(iIndex: cardinal): boolean; stdcall;
+function CH347ReadData(iIndex: cardinal; oBuffer: pointer;
+  ioLength: pcardinal): boolean; stdcall;
+function CH347WriteData(iIndex: cardinal; iBuffer: pointer;
+  ioLength: pcardinal): boolean; stdcall;
+function CH347SPI_Init(iIndex: cardinal; SpiCfg: mpSpiCfgS): boolean; stdcall;
+function CH347SPI_ChangeCS(iIndex: cardinal; iStatus: byte): boolean; stdcall;
+function CH347SPI_SetChipSelect(iIndex: cardinal; iEnableSelect: word;
+  iChipSelect: word; iIsAutoDeativeCS: cardinal; iActiveDelay: cardinal;
+  iDelayDeactive: cardinal): boolean; stdcall;
+function CH347SPI_Write(iIndex: cardinal; iChipSelect: cardinal;
+  iLength: cardinal; iWriteStep: cardinal; ioBuffer: pointer): boolean; stdcall;
+function CH347SPI_Read(iIndex: cardinal; iChipSelect: cardinal;
+  oLength: cardinal; iLength: pcardinal; ioBuffer: pointer): boolean; stdcall;
+function CH347SPI_WriteRead(iIndex: cardinal; iChipSelect: cardinal;
+  iLength: cardinal; ioBuffer: pointer): boolean; stdcall;
+function CH347StreamSPI4(iIndex: cardinal; iChipSelect: cardinal;
+  iLength: cardinal; ioBuffer: pointer): boolean; stdcall;
+function CH347I2C_Set(iIndex: cardinal; iMode: cardinal): boolean; stdcall;
+function CH347I2C_SetDelaymS(iIndex: cardinal;
+  iDelay: cardinal): boolean; stdcall;
+function CH347StreamI2C(iIndex: cardinal; iWriteLength: cardinal;
+  iWriteBuffer: pointer; iReadLength: cardinal;
+  oReadBuffer: pointer): boolean; stdcall;
 
 implementation
 
-end.
+{$IFDEF WINDOWS}
+uses
+  Windows;
 
+type
+  T_CH347OpenDevice = function(DevI: cardinal): integer; stdcall;
+  T_CH347CloseDevice = function(iIndex: cardinal): boolean; stdcall;
+  T_CH347ReadData = function(iIndex: cardinal; oBuffer: pointer;
+    ioLength: pcardinal): boolean; stdcall;
+  T_CH347WriteData = function(iIndex: cardinal; iBuffer: pointer;
+    ioLength: pcardinal): boolean; stdcall;
+  T_CH347SPI_Init = function(iIndex: cardinal;
+    SpiCfg: mpSpiCfgS): boolean; stdcall;
+  T_CH347SPI_ChangeCS = function(iIndex: cardinal;
+    iStatus: byte): boolean; stdcall;
+  T_CH347SPI_SetChipSelect = function(iIndex: cardinal; iEnableSelect: word;
+    iChipSelect: word; iIsAutoDeativeCS: cardinal; iActiveDelay: cardinal;
+    iDelayDeactive: cardinal): boolean; stdcall;
+  T_CH347SPI_Write = function(iIndex: cardinal; iChipSelect: cardinal;
+    iLength: cardinal; iWriteStep: cardinal;
+    ioBuffer: pointer): boolean; stdcall;
+  T_CH347SPI_Read = function(iIndex: cardinal; iChipSelect: cardinal;
+    oLength: cardinal; iLength: pcardinal;
+    ioBuffer: pointer): boolean; stdcall;
+  T_CH347SPI_WriteRead = function(iIndex: cardinal; iChipSelect: cardinal;
+    iLength: cardinal; ioBuffer: pointer): boolean; stdcall;
+  T_CH347StreamSPI4 = function(iIndex: cardinal; iChipSelect: cardinal;
+    iLength: cardinal; ioBuffer: pointer): boolean; stdcall;
+  T_CH347I2C_Set = function(iIndex: cardinal;
+    iMode: cardinal): boolean; stdcall;
+  T_CH347I2C_SetDelaymS = function(iIndex: cardinal;
+    iDelay: cardinal): boolean; stdcall;
+  T_CH347StreamI2C = function(iIndex: cardinal; iWriteLength: cardinal;
+    iWriteBuffer: pointer; iReadLength: cardinal;
+    oReadBuffer: pointer): boolean; stdcall;
+
+var
+  Lib: HMODULE = 0;
+  LoadTried: boolean = False;
+  LoadError: string = '';
+
+  p_CH347OpenDevice: T_CH347OpenDevice = nil;
+  p_CH347CloseDevice: T_CH347CloseDevice = nil;
+  p_CH347ReadData: T_CH347ReadData = nil;
+  p_CH347WriteData: T_CH347WriteData = nil;
+  p_CH347SPI_Init: T_CH347SPI_Init = nil;
+  p_CH347SPI_ChangeCS: T_CH347SPI_ChangeCS = nil;
+  p_CH347SPI_SetChipSelect: T_CH347SPI_SetChipSelect = nil;
+  p_CH347SPI_Write: T_CH347SPI_Write = nil;
+  p_CH347SPI_Read: T_CH347SPI_Read = nil;
+  p_CH347SPI_WriteRead: T_CH347SPI_WriteRead = nil;
+  p_CH347StreamSPI4: T_CH347StreamSPI4 = nil;
+  p_CH347I2C_Set: T_CH347I2C_Set = nil;
+  p_CH347I2C_SetDelaymS: T_CH347I2C_SetDelaymS = nil;
+  p_CH347StreamI2C: T_CH347StreamI2C = nil;
+
+function Resolve(const Name: string; out Proc: FARPROC): boolean;
+begin
+  Proc := GetProcAddress(Lib, PChar(Name));
+  Result := Proc <> nil;
+  if not Result then
+    LoadError := 'CH347DLL.DLL does not export ' + Name;
+end;
+
+function EnsureCH347: boolean;
+begin
+  if not LoadTried then
+  begin
+    LoadTried := True;
+    Lib := LoadLibrary('CH347DLL.DLL');
+    if Lib = 0 then
+      LoadError := 'CH347DLL.DLL was not found next to the program'
+    else if not (Resolve('CH347OpenDevice', FARPROC(p_CH347OpenDevice)) and
+                 Resolve('CH347CloseDevice', FARPROC(p_CH347CloseDevice)) and
+                 Resolve('CH347ReadData', FARPROC(p_CH347ReadData)) and
+                 Resolve('CH347WriteData', FARPROC(p_CH347WriteData)) and
+                 Resolve('CH347SPI_Init', FARPROC(p_CH347SPI_Init)) and
+                 Resolve('CH347SPI_ChangeCS',
+                         FARPROC(p_CH347SPI_ChangeCS)) and
+                 Resolve('CH347SPI_SetChipSelect',
+                         FARPROC(p_CH347SPI_SetChipSelect)) and
+                 Resolve('CH347SPI_Write', FARPROC(p_CH347SPI_Write)) and
+                 Resolve('CH347SPI_Read', FARPROC(p_CH347SPI_Read)) and
+                 Resolve('CH347SPI_WriteRead',
+                         FARPROC(p_CH347SPI_WriteRead)) and
+                 Resolve('CH347StreamSPI4', FARPROC(p_CH347StreamSPI4)) and
+                 Resolve('CH347I2C_Set', FARPROC(p_CH347I2C_Set)) and
+                 Resolve('CH347I2C_SetDelaymS',
+                         FARPROC(p_CH347I2C_SetDelaymS)) and
+                 Resolve('CH347StreamI2C', FARPROC(p_CH347StreamI2C))) then
+    begin
+      FreeLibrary(Lib);
+      Lib := 0;
+    end;
+  end;
+  Result := Lib <> 0;
+end;
+
+function CH347DriverAvailable(out Error: string): boolean;
+begin
+  Result := EnsureCH347;
+  if Result then Error := '' else Error := LoadError;
+end;
+
+function CH347OpenDevice(DevI: cardinal): integer; stdcall;
+begin
+  if not EnsureCH347 then Exit(-1);
+  Result := p_CH347OpenDevice(DevI);
+end;
+
+function CH347CloseDevice(iIndex: cardinal): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347CloseDevice(iIndex);
+end;
+
+function CH347ReadData(iIndex: cardinal; oBuffer: pointer;
+  ioLength: pcardinal): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347ReadData(iIndex, oBuffer, ioLength);
+end;
+
+function CH347WriteData(iIndex: cardinal; iBuffer: pointer;
+  ioLength: pcardinal): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347WriteData(iIndex, iBuffer, ioLength);
+end;
+
+function CH347SPI_Init(iIndex: cardinal; SpiCfg: mpSpiCfgS): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347SPI_Init(iIndex, SpiCfg);
+end;
+
+function CH347SPI_ChangeCS(iIndex: cardinal; iStatus: byte): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347SPI_ChangeCS(iIndex, iStatus);
+end;
+
+function CH347SPI_SetChipSelect(iIndex: cardinal; iEnableSelect: word;
+  iChipSelect: word; iIsAutoDeativeCS: cardinal; iActiveDelay: cardinal;
+  iDelayDeactive: cardinal): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347SPI_SetChipSelect(iIndex, iEnableSelect, iChipSelect,
+    iIsAutoDeativeCS, iActiveDelay, iDelayDeactive);
+end;
+
+function CH347SPI_Write(iIndex: cardinal; iChipSelect: cardinal;
+  iLength: cardinal; iWriteStep: cardinal; ioBuffer: pointer): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347SPI_Write(iIndex, iChipSelect, iLength, iWriteStep,
+                             ioBuffer);
+end;
+
+function CH347SPI_Read(iIndex: cardinal; iChipSelect: cardinal;
+  oLength: cardinal; iLength: pcardinal; ioBuffer: pointer): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347SPI_Read(iIndex, iChipSelect, oLength, iLength, ioBuffer);
+end;
+
+function CH347SPI_WriteRead(iIndex: cardinal; iChipSelect: cardinal;
+  iLength: cardinal; ioBuffer: pointer): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347SPI_WriteRead(iIndex, iChipSelect, iLength, ioBuffer);
+end;
+
+function CH347StreamSPI4(iIndex: cardinal; iChipSelect: cardinal;
+  iLength: cardinal; ioBuffer: pointer): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347StreamSPI4(iIndex, iChipSelect, iLength, ioBuffer);
+end;
+
+function CH347I2C_Set(iIndex: cardinal; iMode: cardinal): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347I2C_Set(iIndex, iMode);
+end;
+
+function CH347I2C_SetDelaymS(iIndex: cardinal;
+  iDelay: cardinal): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347I2C_SetDelaymS(iIndex, iDelay);
+end;
+
+function CH347StreamI2C(iIndex: cardinal; iWriteLength: cardinal;
+  iWriteBuffer: pointer; iReadLength: cardinal;
+  oReadBuffer: pointer): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  Result := p_CH347StreamI2C(iIndex, iWriteLength, iWriteBuffer,
+                             iReadLength, oReadBuffer);
+end;
+
+{$ELSE}
+
+// Non-Windows: the CH347 vendor DLL does not exist here.  Every call fails
+// like an absent device until the libusb backend (design doc phase 3) lands.
+
+function CH347DriverAvailable(out Error: string): boolean;
+begin
+  Error := 'the CH347 vendor driver is only available on Windows';
+  Result := False;
+end;
+
+function CH347OpenDevice(DevI: cardinal): integer; stdcall;
+begin
+  Result := -1;
+end;
+
+function CH347CloseDevice(iIndex: cardinal): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347ReadData(iIndex: cardinal; oBuffer: pointer;
+  ioLength: pcardinal): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347WriteData(iIndex: cardinal; iBuffer: pointer;
+  ioLength: pcardinal): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347SPI_Init(iIndex: cardinal; SpiCfg: mpSpiCfgS): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347SPI_ChangeCS(iIndex: cardinal; iStatus: byte): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347SPI_SetChipSelect(iIndex: cardinal; iEnableSelect: word;
+  iChipSelect: word; iIsAutoDeativeCS: cardinal; iActiveDelay: cardinal;
+  iDelayDeactive: cardinal): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347SPI_Write(iIndex: cardinal; iChipSelect: cardinal;
+  iLength: cardinal; iWriteStep: cardinal; ioBuffer: pointer): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347SPI_Read(iIndex: cardinal; iChipSelect: cardinal;
+  oLength: cardinal; iLength: pcardinal; ioBuffer: pointer): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347SPI_WriteRead(iIndex: cardinal; iChipSelect: cardinal;
+  iLength: cardinal; ioBuffer: pointer): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347StreamSPI4(iIndex: cardinal; iChipSelect: cardinal;
+  iLength: cardinal; ioBuffer: pointer): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347I2C_Set(iIndex: cardinal; iMode: cardinal): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347I2C_SetDelaymS(iIndex: cardinal;
+  iDelay: cardinal): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347StreamI2C(iIndex: cardinal; iWriteLength: cardinal;
+  iWriteBuffer: pointer; iReadLength: cardinal;
+  oReadBuffer: pointer): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+{$ENDIF}
+
+end.

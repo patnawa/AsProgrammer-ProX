@@ -71,13 +71,36 @@ type
     //--- ตาราง 4-Byte Address Instruction Table (FF84h) ---
     Has4BAIT: boolean;
     Read4BOpcode: byte;             //13h ถ้าชิปรองรับ ไม่งั้น 0
+    FastRead4BOpcode: byte;         //0Ch ถ้าชิปรองรับ ไม่งั้น 0
     PageProg4BOpcode: byte;         //12h ถ้าชิปรองรับ ไม่งั้น 0
 
     //--- ตาราง Sector Map (FF81h) ---
+    //True when an FF81h parameter header was present, even if its map could
+    //not be resolved or validated.  Destructive callers must distinguish
+    //"no sector map declared" from "a sector map exists but is ambiguous";
+    //falling back to a uniform 4K geometry in the latter case can erase the
+    //wrong physical block.
+    SectorMapDeclared: boolean;
+    //True เฉพาะเมื่อรู้ว่า map นี้คือ configuration ที่กำลังใช้อยู่จริง
+    //ตารางที่ต้องอ่าน configuration register แต่ยังไม่ได้อ่านจะ fail closed
     HasSectorMap: boolean;
     Uniform: boolean;               //True เมื่อทุกช่วงมีขนาดเซกเตอร์เท่ากัน
     RegionCount: integer;
     Regions: array[0..SFDP_MAX_REGIONS-1] of TSFDPRegion;
+
+    //--- DWORD-10 และ DWORD-11: เวลาที่ชิปบอกเองว่าใช้จริง ---
+    //
+    //เดิมเพดานรอเป็นค่าคงที่ 5 วินาทีต่อเพจ 30 วินาทีต่อเซกเตอร์ 600 วินาทีต่อชิป
+    //ซึ่งผิดทั้งสองทาง ชิป 256Mbit ที่ลบทั้งตัวจริง ๆ ใช้เวลาเกินสิบนาทีจะถูกตัดบท
+    //ว่าล้มเหลวทั้งที่กำลังทำงานอยู่ ส่วนเพจที่ควรเขียนเสร็จใน 3 มิลลิวินาที
+    //ต้องรอจนครบ 5 วินาทีก่อนจะยอมบอกว่าชิปไม่ตอบ
+    //
+    //ค่าที่เก็บไว้ตรงนี้คือเวลาสูงสุดตามที่ชิปแจ้ง ไม่ใช่เวลาปกติ
+    //ตัวคูณจากเวลาปกติไปเป็นเวลาสูงสุดอยู่ในตารางเดียวกัน
+    HasTiming: boolean;
+    EraseTimeMaxMs: array[1..4] of cardinal;  //ต่อหนึ่งคำสั่งลบของชนิดนั้น
+    PageProgTimeMaxMs: cardinal;
+    ChipEraseTimeMaxMs: cardinal;
   end;
 
   //ตัวอ่าน SFDP หนึ่งครั้ง ใช้แยกตัวแยกวิเคราะห์ออกจากฮาร์ดแวร์
@@ -90,6 +113,17 @@ function SFDPDetect(out Info: TSFDPInfo): boolean;
 
 //อ่านผ่านตัวอ่านที่กำหนดเอง
 function SFDPDetectVia(Reader: TSFDPReadProc; out Info: TSFDPInfo): boolean;
+
+//แยกวิเคราะห์ดัมป์ที่เก็บไว้แล้ว โดยไม่ต้องมีชิปหรือเครื่องโปรแกรม
+//
+//ตารางดิบมีค่ากว่าคำอธิบายที่เราแปลออกมา เพราะเอาไปแยกใหม่ได้เมื่อตัวแยก
+//ดีขึ้น และเอาไปแนบรายงานปัญหาได้โดยที่คนอ่านไม่ต้องมีชิปตัวนั้นอยู่ในมือ
+function SFDPDetectFromBuffer(Buf: PByte; Size: cardinal;
+  out Info: TSFDPInfo): boolean;
+
+//ตาราง SFDP ของชิปนี้ยาวถึงไบต์ไหน ใช้ตอนดัมป์ว่าจะอ่านมาเท่าไหร่จึงจะครบ
+//คืน 0 เมื่อไม่มีลายเซ็น SFDP
+function SFDPExtent(Reader: TSFDPReadProc): cardinal;
 
 //ขนาดลบที่เล็กที่สุดที่ชิปรองรับ ปกติคือ 4K
 function SFDPSmallestErase(const Info: TSFDPInfo; out Size: cardinal; out Opcode: byte): boolean;
@@ -107,6 +141,25 @@ function SFDP4BEntryStr(const Info: TSFDPInfo): string;
 function SFDPSectorAt(const Info: TSFDPInfo; Addr: cardinal;
   out Size: cardinal; out Opcode: byte): boolean;
 
+//หน่วยเวลาที่ SFDP ใช้เข้ารหัส แยกออกมาให้ทดสอบได้ตรง ๆ
+function SFDPEraseUnitMs(Units: byte): cardinal;
+function SFDPProgUnitUs(Units: byte): cardinal;
+function SFDPChipEraseUnitMs(Units: byte): cardinal;
+
+//เวลาสูงสุดที่ชิปแจ้งไว้สำหรับการลบชนิดนั้น คืน 0 เมื่อชิปไม่ได้บอก
+function SFDPEraseTimeoutMs(const Info: TSFDPInfo; EraseType: integer): cardinal;
+
+//เวลาสูงสุดที่ชิปแจ้งไว้สำหรับการลบตามขนาดเซกเตอร์ที่ระบุ
+//ใช้ตอนวางแผนลบ เพราะแผนบอกขนาดมา ไม่ได้บอกหมายเลขชนิด
+function SFDPEraseTimeoutForSize(const Info: TSFDPInfo; Size: cardinal): cardinal;
+
+//เพดานรอที่ควรใช้จริง
+//
+//เอาค่าที่ชิปแจ้งมาใช้ แต่ไม่ต่ำกว่าค่าพื้นและไม่สูงกว่าเพดานแข็ง
+//ตารางที่เสียหายหรืออ่านมาผิดไม่ควรทำให้โปรแกรมค้างเป็นชั่วโมง และก็ไม่ควร
+//ทำให้งานที่กำลังไปได้ดีถูกตัดบทกลางคัน DeclaredMs = 0 แปลว่าชิปไม่ได้บอก
+function BusyTimeoutMs(DeclaredMs, FloorMs, CeilingMs: cardinal): cardinal;
+
 implementation
 
 uses spi25;
@@ -118,6 +171,9 @@ const
   TBL_BASIC_LSB   = $00;  TBL_BASIC_MSB   = $FF;
   TBL_SECTORMAP_LSB = $81; TBL_SECTORMAP_MSB = $FF;
   TBL_4BAIT_LSB   = $84;  TBL_4BAIT_MSB   = $FF;
+
+  SMPT_DESC_END = $01;
+  SMPT_DESC_MAP = $02;
 
   MAX_TABLE_DWORDS = 24;
 
@@ -194,6 +250,136 @@ begin
   Info.Entry4B.Always4B     := (B and $40) <> 0;
 end;
 
+//------------------------------------------------------- DWORD-10 / DWORD-11
+
+//หน่วยของเวลาลบ สองบิต
+function SFDPEraseUnitMs(Units: byte): cardinal;
+begin
+  case Units and $03 of
+    0: Result := 1;
+    1: Result := 16;
+    2: Result := 128;
+  else
+    Result := 1000;
+  end;
+end;
+
+//หน่วยของเวลาเขียนหนึ่งเพจ หนึ่งบิต
+function SFDPProgUnitUs(Units: byte): cardinal;
+begin
+  if (Units and $01) <> 0 then Result := 64 else Result := 8;
+end;
+
+//หน่วยของเวลาลบทั้งชิป สองบิต
+function SFDPChipEraseUnitMs(Units: byte): cardinal;
+begin
+  case Units and $03 of
+    0: Result := 16;
+    1: Result := 256;
+    2: Result := 4000;
+  else
+    Result := 64000;
+  end;
+end;
+
+//DWORD-10 เก็บเวลาลบของทั้งสี่ชนิดไว้ในดเวิร์ดเดียว ชนิดละ 7 บิต
+//  บิต 3:0    ตัวคูณจากเวลาปกติไปเวลาสูงสุด  max = 2 * (N + 1) * typ
+//  บิต 10:4   ชนิดที่ 1   บิต 8:4 คือจำนวน บิต 10:9 คือหน่วย
+//  บิต 17:11  ชนิดที่ 2
+//  บิต 24:18  ชนิดที่ 3
+//  บิต 31:25  ชนิดที่ 4
+//เวลาปกติคือ (จำนวน + 1) คูณหน่วย
+procedure ParseEraseTiming(Dw: cardinal; var Info: TSFDPInfo);
+var
+  Mult, i, Shift: cardinal;
+  Count, Units: byte;
+  Typ: int64;
+begin
+  Mult := 2 * ((Dw and $0F) + 1);
+
+  for i := 1 to 4 do
+  begin
+    Shift := 4 + (i - 1) * 7;
+    Count := (Dw shr Shift) and $1F;
+    Units := (Dw shr (Shift + 5)) and $03;
+
+    Typ := int64(Count + 1) * int64(SFDPEraseUnitMs(Units));
+    Typ := Typ * int64(Mult);
+
+    //ค่าที่ล้นออกนอกความเป็นจริงแปลว่าอ่านตารางมาผิด อย่าเอาไปใช้
+    if (Typ <= 0) or (Typ > 3600000) then
+      Info.EraseTimeMaxMs[i] := 0
+    else
+      Info.EraseTimeMaxMs[i] := cardinal(Typ);
+  end;
+end;
+
+//DWORD-11 เก็บขนาดเพจกับเวลาเขียนและเวลาลบทั้งชิป
+//  บิต 3:0    ตัวคูณจากเวลาปกติไปเวลาสูงสุดของการเขียน
+//  บิต 7:4    ขนาดเพจ 2^N  (อ่านไว้แล้วที่อื่น)
+//  บิต 12:8   จำนวนของเวลาเขียนหนึ่งเพจ  บิต 13 คือหน่วย
+//  บิต 18:14  เวลาเขียนไบต์แรก           ไม่ได้ใช้
+//  บิต 23:19  เวลาเขียนไบต์ถัดไป         ไม่ได้ใช้
+//  บิต 28:24  จำนวนของเวลาลบทั้งชิป      บิต 30:29 คือหน่วย
+//
+//ตัวคูณของการลบทั้งชิปมาจาก DWORD-10 เพราะเป็นการลบ ไม่ใช่การเขียน
+procedure ParseProgTiming(Dw, EraseDw: cardinal; var Info: TSFDPInfo);
+var
+  ProgMult, EraseMult: cardinal;
+  Count, Units: byte;
+  Typ: int64;
+begin
+  ProgMult  := 2 * ((Dw and $0F) + 1);
+  EraseMult := 2 * ((EraseDw and $0F) + 1);
+
+  //เวลาเขียนหนึ่งเพจ เก็บเป็นไมโครวินาที คิดเป็นมิลลิวินาทีแบบปัดขึ้น
+  Count := (Dw shr 8) and $1F;
+  Units := (Dw shr 13) and $01;
+  Typ := int64(Count + 1) * int64(SFDPProgUnitUs(Units)) * int64(ProgMult);
+  Typ := (Typ + 999) div 1000;
+  if (Typ <= 0) or (Typ > 600000) then
+    Info.PageProgTimeMaxMs := 0
+  else
+    Info.PageProgTimeMaxMs := cardinal(Typ);
+
+  //เวลาลบทั้งชิป
+  Count := (Dw shr 24) and $1F;
+  Units := (Dw shr 29) and $03;
+  Typ := int64(Count + 1) * int64(SFDPChipEraseUnitMs(Units)) * int64(EraseMult);
+  if (Typ <= 0) or (Typ > 7200000) then
+    Info.ChipEraseTimeMaxMs := 0
+  else
+    Info.ChipEraseTimeMaxMs := cardinal(Typ);
+end;
+
+function SFDPEraseTimeoutMs(const Info: TSFDPInfo; EraseType: integer): cardinal;
+begin
+  if (not Info.HasTiming) or (EraseType < 1) or (EraseType > 4) then Exit(0);
+  Result := Info.EraseTimeMaxMs[EraseType];
+end;
+
+function SFDPEraseTimeoutForSize(const Info: TSFDPInfo; Size: cardinal): cardinal;
+var
+  i: integer;
+begin
+  Result := 0;
+  if (not Info.HasTiming) or (Size = 0) then Exit;
+
+  for i := 1 to 4 do
+    if Info.EraseTypes[i].Size = Size then
+      Exit(Info.EraseTimeMaxMs[i]);
+end;
+
+function BusyTimeoutMs(DeclaredMs, FloorMs, CeilingMs: cardinal): cardinal;
+begin
+  //ชิปไม่ได้บอกก็ใช้ค่าพื้น ซึ่งเป็นพฤติกรรมเดิมทั้งหมด
+  if DeclaredMs = 0 then Exit(FloorMs);
+
+  Result := DeclaredMs;
+  if Result < FloorMs then Result := FloorMs;
+  if (CeilingMs > 0) and (Result > CeilingMs) then Result := CeilingMs;
+end;
+
 //------------------------------------------------------------------ 4BAIT
 
 //ตาราง FF84h บอก opcode ชุดแอดเดรส 4 ไบต์ที่ชิปรองรับจริง
@@ -210,6 +396,7 @@ begin
   Info.Has4BAIT := True;
 
   if (Flags and $01) <> 0 then Info.Read4BOpcode := $13;
+  if (Flags and $02) <> 0 then Info.FastRead4BOpcode := $0C;
   if (Flags and $40) <> 0 then Info.PageProg4BOpcode := $12;
 
   if DwordCount < 2 then Exit;
@@ -223,61 +410,113 @@ end;
 
 //------------------------------------------------------------- Sector Map
 
-//ตาราง FF81h เป็นลำดับของตัวบรรยาย สองชนิดปนกัน
-//  บิต 0 = 0  ตัวบรรยายคำสั่งตรวจการตั้งค่า ยาวสองดเวิร์ด ข้ามไป
-//  บิต 0 = 1  ตัวบรรยายแผนผัง ตามด้วยดเวิร์ดของแต่ละช่วง
-//ชิปที่ตั้งค่าได้จะมีหลายแผนผัง เราใช้อันแรกซึ่งเป็นค่ามาจากโรงงาน
+//ตาราง FF81h เป็นลำดับของตัวบรรยายสองชนิด
+//  บิต 1 = 0  configuration detection command descriptor ยาวสอง DWORD
+//  บิต 1 = 1  configuration map descriptor ตามด้วย DWORD ของแต่ละช่วง
+//  บิต 0      end indicator ของ descriptor ชนิดนั้น
+//
+//Reader ของหน่วยนี้อ่านได้เฉพาะพื้นที่ SFDP จึงยังรัน detection command
+//เพื่อหาค่า configuration selector ปัจจุบันไม่ได้ ถ้าพบ command descriptor
+//หรือหลาย map จะไม่เดาว่า map แรกคือค่าโรงงาน เพราะผู้ใช้อาจเปลี่ยนค่ามาแล้ว
+//กรณีเดียวที่เลือกได้แน่นอนคือตารางไม่มี command และมี map ID 0 เพียง map เดียว
 procedure ParseSectorMap(const Buf: TDwordBuf; DwordCount: integer;
   var Info: TSFDPInfo);
 var
-  Idx, Regions, i: integer;
-  Dw: cardinal;
-  FirstMask: byte;
+  Idx, Regions, i, t: integer;
+  Dw, RegionDw: cardinal;
+  FirstMask, SupportedMask: byte;
+  RegionSizes: array[0..SFDP_MAX_REGIONS-1] of cardinal;
+  RegionMasks: array[0..SFDP_MAX_REGIONS-1] of byte;
+  EncodedSize, TotalSize: QWord;
+  HasCommands: boolean;
 begin
-  Idx := 0;
+  //อย่าทิ้ง map บางส่วนไว้ให้ erase planner ใช้เมื่อ validation ล้มกลางทาง
+  Info.HasSectorMap := False;
+  Info.Uniform := False;
+  Info.RegionCount := 0;
+  FillChar(Info.Regions, SizeOf(Info.Regions), 0);
 
+  if DwordCount < 2 then Exit; //header หนึ่ง DWORD + อย่างน้อยหนึ่ง region
+
+  Idx := 0;
+  HasCommands := False;
+
+  //Command descriptors มาก่อน map descriptors เสมอ และยาวคู่ละสอง DWORD
   while Idx < DwordCount do
   begin
     Dw := GetDword(Buf, Idx * 4);
+    if (Dw and SMPT_DESC_MAP) <> 0 then Break; //bit 1 เลือก map descriptor
 
-    if (Dw and $01) = 0 then
-    begin
-      //ตัวบรรยายคำสั่งตรวจการตั้งค่า ยาวสองดเวิร์ดเสมอ
-      Inc(Idx, 2);
-      //บิต 1 ติดแปลว่าเป็นตัวสุดท้ายของลำดับตรวจ ตัวถัดไปคือแผนผัง
-      Continue;
-    end;
+    HasCommands := True;
+    if Idx + 2 > DwordCount then Exit; //command ต้องมี address DWORD ตามหลัง
+    Inc(Idx, 2);
 
-    //ตัวบรรยายแผนผัง
-    Regions := ((Dw shr 16) and $FF) + 1;
-    if Regions > SFDP_MAX_REGIONS then Regions := SFDP_MAX_REGIONS;
-
-    //ดเวิร์ดของช่วงต้องอยู่ในตารางครบ ไม่งั้นตารางเสีย
-    if Idx + 1 + Regions > DwordCount then Exit;
-
-    Info.RegionCount := 0;
-    for i := 0 to Regions - 1 do
-    begin
-      Dw := GetDword(Buf, (Idx + 1 + i) * 4);
-      Info.Regions[i].EraseTypeMask := Dw and $0F;
-      //ขนาดเก็บเป็นจำนวนก้อนละ 256 ไบต์ ลบหนึ่ง
-      Info.Regions[i].Size := (((Dw shr 8) and $FFFFFF) + 1) * 256;
-      Inc(Info.RegionCount);
-    end;
-
-    Info.HasSectorMap := Info.RegionCount > 0;
-
-    //ทุกช่วงลบด้วยชนิดเดียวกันหรือไม่ ถ้าไม่ ชิปนี้มีบล็อกหัวหรือท้ายพิเศษ
-    Info.Uniform := True;
-    if Info.RegionCount > 0 then
-    begin
-      FirstMask := Info.Regions[0].EraseTypeMask;
-      for i := 1 to Info.RegionCount - 1 do
-        if Info.Regions[i].EraseTypeMask <> FirstMask then Info.Uniform := False;
-    end;
-
-    Exit;   //ใช้แผนผังแรกที่เจอ
+    //bit 0 = command descriptor ตัวสุดท้าย จากนี้ต้องเป็น map
+    if (Dw and SMPT_DESC_END) <> 0 then Break;
   end;
+
+  //เราไม่ได้ execute detection commands จึงยังไม่รู้ selector ที่ active อยู่
+  if HasCommands then Exit;
+  if Idx >= DwordCount then Exit;
+
+  Dw := GetDword(Buf, Idx * 4);
+  if (Dw and SMPT_DESC_MAP) = 0 then Exit;  //ต้องเป็น map descriptor จริง
+
+  //ไม่มี detection command หมายถึง selector เริ่มต้นเป็นศูนย์ตาม JESD216
+  if ((Dw shr 8) and $FF) <> 0 then Exit;
+
+  //map ที่ไม่ใช่ตัวสุดท้ายแปลว่ามีหลาย configuration แต่ไม่มีวิธี resolve
+  if (Dw and SMPT_DESC_END) = 0 then Exit;
+
+  Regions := ((Dw shr 16) and $FF) + 1;
+  //ห้าม truncate จำนวนช่วง เพราะจะทำให้ปลายชิปถูกตีความด้วย geometry ผิด
+  if Regions > SFDP_MAX_REGIONS then Exit;
+
+  //ตัวสุดท้ายต้องกินตารางครบพอดี ทั้งกัน truncation และ descriptor แอบต่อท้าย
+  if Idx + 1 + Regions <> DwordCount then Exit;
+
+  SupportedMask := 0;
+  for t := 1 to 4 do
+    if (Info.EraseTypes[t].Size > 0) and
+       (Info.EraseTypes[t].Opcode <> 0) then
+      SupportedMask := SupportedMask or (1 shl (t - 1));
+
+  TotalSize := 0;
+  for i := 0 to Regions - 1 do
+  begin
+    RegionDw := GetDword(Buf, (Idx + 1 + i) * 4);
+    RegionMasks[i] := RegionDw and $0F;
+
+    //ทุก region ต้องมี erase type ที่ BFPT ประกาศไว้จริง
+    if (RegionMasks[i] = 0) or
+       ((RegionMasks[i] and SupportedMask) <> RegionMasks[i]) then Exit;
+
+    //ขนาดเก็บเป็นจำนวนก้อนละ 256 ไบต์ ลบหนึ่ง คำนวณกว้างก่อน
+    //เพราะค่า FFFFFFh หมายถึง 4 GiB และจะวนเป็นศูนย์ใน cardinal
+    EncodedSize := (QWord((RegionDw shr 8) and $FFFFFF) + 1) * 256;
+    if EncodedSize > QWord(High(cardinal)) then Exit;
+
+    RegionSizes[i] := cardinal(EncodedSize);
+    Inc(TotalSize, EncodedSize);
+    if TotalSize > QWord(Info.Density) then Exit;
+  end;
+
+  //แผนผังต้องครอบคลุม data array ทั้งตัว ไม่ขาดและไม่ล้ำ
+  if TotalSize <> QWord(Info.Density) then Exit;
+
+  //Validation ครบแล้วจึง commit ทีเดียว
+  Info.RegionCount := Regions;
+  for i := 0 to Regions - 1 do
+  begin
+    Info.Regions[i].Size := RegionSizes[i];
+    Info.Regions[i].EraseTypeMask := RegionMasks[i];
+  end;
+
+  Info.HasSectorMap := True;
+  Info.Uniform := True;
+  FirstMask := Info.Regions[0].EraseTypeMask;
+  for i := 1 to Info.RegionCount - 1 do
+    if Info.Regions[i].EraseTypeMask <> FirstMask then Info.Uniform := False;
 end;
 
 //---------------------------------------------------------------- ตัวหลัก
@@ -299,11 +538,14 @@ var
 
   //อ่านตารางหนึ่งตารางเข้ามาใน Table คืนจำนวนดเวิร์ดที่อ่านได้จริง
   function LoadTable(Ptr: cardinal; Dwords: integer): integer;
+  var
+    Bytes: integer;
   begin
     if Dwords > MAX_TABLE_DWORDS then Dwords := MAX_TABLE_DWORDS;
     if Dwords < 1 then Exit(0);
     FillByte(Table, SizeOf(Table), 0);
-    Reader(Ptr, Table, Dwords * 4);
+    Bytes := Dwords * 4;
+    if Reader(Ptr, Table, Bytes) <> Bytes then Exit(0);
     Result := Dwords;
   end;
 
@@ -432,6 +674,15 @@ begin
     Info.PageSize := Pow2((Dw shr 4) and $0F);
   end;
 
+  //DWORD-10 กับ DWORD-11: เวลาที่ชิปแจ้งเอง ต้องมีครบทั้งคู่จึงจะเชื่อได้
+  //เพราะตัวคูณของการลบทั้งชิปอยู่ใน DWORD-10 แต่ตัวเลขอยู่ใน DWORD-11
+  if DwordCount >= 11 then
+  begin
+    Info.HasTiming := True;
+    ParseEraseTiming(GetDword(Table, 36), Info);
+    ParseProgTiming(GetDword(Table, 40), GetDword(Table, 36), Info);
+  end;
+
   //DWORD-16: วิธีเข้าโหมด 4 ไบต์ การรีเซ็ต และคำสั่งปลดล็อก status register
   if DwordCount >= 16 then
   begin
@@ -454,7 +705,10 @@ begin
     Parse4BAIT(Table, TableLen, Info);
   end;
 
-  if (LenMap > 0) and (PtrMap > 0) then
+  Info.SectorMapDeclared := LenMap > 0;
+
+  //อย่าวิเคราะห์ prefix ของตารางที่ยาวกว่าบัฟเฟอร์เหมือนเป็นตารางครบ
+  if (LenMap > 0) and (LenMap <= MAX_TABLE_DWORDS) and (PtrMap > 0) then
   begin
     TableLen := LoadTable(PtrMap, LenMap);
     ParseSectorMap(Table, TableLen, Info);
@@ -467,6 +721,85 @@ end;
 function SFDPDetect(out Info: TSFDPInfo): boolean;
 begin
   Result := SFDPDetectVia(@HardwareRead, Info);
+end;
+
+//--- การอ่านจากบัฟเฟอร์ ---
+//
+//TSFDPReadProc เป็นตัวชี้ฟังก์ชันธรรมดา ส่งพารามิเตอร์เพิ่มเข้าไปไม่ได้
+//บัฟเฟอร์จึงต้องฝากไว้ที่ตัวแปรระดับหน่วย เหมือนที่ตัวอ่านฮาร์ดแวร์ฝาก
+//สถานะไว้กับ AsProgrammer
+var
+  BufSource: PByte = nil;
+  BufSize: cardinal = 0;
+
+function BufferRead(Addr: longword; var buffer: array of byte;
+  bufflen: integer): integer;
+var
+  i: integer;
+begin
+  Result := 0;
+  if (BufSource = nil) or (bufflen <= 0) then Exit;
+
+  for i := 0 to bufflen - 1 do
+  begin
+    //นอกขอบดัมป์ให้เป็น FF ซึ่งเป็นสิ่งเดียวกับที่ชิปตอบเมื่อไม่มีตารางตรงนั้น
+    if (int64(Addr) + i) < int64(BufSize) then
+      buffer[i] := BufSource[Addr + cardinal(i)]
+    else
+      buffer[i] := $FF;
+  end;
+
+  Result := bufflen;
+end;
+
+function SFDPDetectFromBuffer(Buf: PByte; Size: cardinal;
+  out Info: TSFDPInfo): boolean;
+begin
+  FillChar(Info, SizeOf(Info), 0);
+  if (Buf = nil) or (Size < 16) then Exit(False);
+
+  BufSource := Buf;
+  BufSize := Size;
+  try
+    Result := SFDPDetectVia(@BufferRead, Info);
+  finally
+    BufSource := nil;
+    BufSize := 0;
+  end;
+end;
+
+function SFDPExtent(Reader: TSFDPReadProc): cardinal;
+var
+  Header: array[0..7] of byte;
+  ParamHeader: array[0..7] of byte;
+  NumHeaders, i: integer;
+  Ptr, EndOf: cardinal;
+begin
+  Result := 0;
+
+  FillByte(Header, SizeOf(Header), 0);
+  Reader(0, Header, SizeOf(Header));
+  if GetDword(Header, 0) <> SFDP_SIGNATURE then Exit;
+
+  NumHeaders := Header[6] + 1;
+  if NumHeaders > 16 then NumHeaders := 16;
+
+  //หัวตารางเองก็นับด้วย 8 ไบต์แรกบวกหัวละ 8 ไบต์
+  Result := 8 + cardinal(NumHeaders) * 8;
+
+  for i := 0 to NumHeaders - 1 do
+  begin
+    FillByte(ParamHeader, SizeOf(ParamHeader), 0);
+    Reader(8 + cardinal(i) * 8, ParamHeader, SizeOf(ParamHeader));
+
+    Ptr := cardinal(ParamHeader[4]) or (cardinal(ParamHeader[5]) shl 8) or
+           (cardinal(ParamHeader[6]) shl 16);
+    EndOf := Ptr + cardinal(ParamHeader[3]) * 4;
+    if EndOf > Result then Result := EndOf;
+  end;
+
+  //ตารางที่อ้างตำแหน่งไกลเกินจริงแปลว่าอ่านมาผิด อย่าไปดัมป์เป็นเมกะไบต์
+  if Result > 4096 then Result := 4096;
 end;
 
 function SFDPSmallestErase(const Info: TSFDPInfo; out Size: cardinal; out Opcode: byte): boolean;

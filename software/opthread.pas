@@ -14,7 +14,7 @@ unit opthread;
 interface
 
 uses
-  Classes, SysUtils, Forms;
+  Classes, SysUtils, Forms, SyncObjs;
 
 type
 
@@ -41,10 +41,23 @@ function RunOperation(AProc: TNestedOp): string;
 
 function InWorkerThread: boolean;
 
+//Cancellation is shared between the UI thread and the device worker.  It must
+//not be stored in an LCL control: reading Button.Tag from a worker is undefined
+//and occasionally races with destruction of the form.
+procedure ResetOperationCancellation;
+procedure RequestOperationCancellation;
+function OperationCancellationRequested: boolean;
+
 //Application.ProcessMessages เวอร์ชันที่เรียกจาก thread เบื้องหลังได้อย่างปลอดภัย
 procedure OpProcessMessages;
 
 implementation
+
+uses
+  opresult;
+
+var
+  CancelEvent: TEvent;
 
 constructor TOpThread.CreateOp(AProc: TNestedOp);
 begin
@@ -70,6 +83,21 @@ begin
   Result := GetCurrentThreadId <> MainThreadID;
 end;
 
+procedure ResetOperationCancellation;
+begin
+  CancelEvent.ResetEvent;
+end;
+
+procedure RequestOperationCancellation;
+begin
+  CancelEvent.SetEvent;
+end;
+
+function OperationCancellationRequested: boolean;
+begin
+  Result := CancelEvent.WaitFor(0) = wrSignaled;
+end;
+
 procedure OpProcessMessages;
 begin
   //ห้ามปั๊มคิว message จาก thread เบื้องหลัง งานนี้เป็นของ thread หลัก
@@ -85,7 +113,15 @@ begin
   //ห้ามเรียกซ้อน เพราะตอนนี้อยู่บน thread เบื้องหลังอยู่แล้ว
   if (not UseWorkerThread) or InWorkerThread then
   begin
-    AProc();
+    try
+      AProc();
+    except
+      on E: Exception do
+      begin
+        Result := E.ClassName + ': ' + E.Message;
+        OpFail('operation raised an exception: ' + Result);
+      end;
+    end;
     Exit;
   end;
 
@@ -100,10 +136,18 @@ begin
     //เก็บกวาดสิ่งที่ยังค้างอยู่ในคิว synchronize
     CheckSynchronize(0);
     Result := T.ErrorMsg;
+    if Result <> '' then
+      OpFail('background operation raised an exception: ' + Result);
   finally
     T.WaitFor;
     T.Free;
   end;
 end;
+
+initialization
+  CancelEvent := TEvent.Create(nil, True, False, '');
+
+finalization
+  CancelEvent.Free;
 
 end.

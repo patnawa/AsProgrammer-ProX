@@ -79,6 +79,7 @@ resourcestring
   STR_BACKUP_MAKING      = 'Backing up the chip first...';
   STR_BACKUP_DONE        = 'Backup saved: ';
   STR_BACKUP_FAILED      = 'Backup failed, operation aborted';
+  STR_BACKUP_SKIPPED     = 'Auto-backup covers SPI 25-series chips only; skipping the backup for this chip';
   STR_COMPARE_READING    = 'Reading the chip to compare...';
   STR_COMPARE_EQUAL      = 'Buffer and chip are identical';
   STR_COMPARE_DIFF       = 'Different bytes: ';
@@ -128,7 +129,19 @@ resourcestring
   STR_CMP_READ_FIRST     = 'Reading the first chip...';
   STR_CMP_READ_SECOND    = 'Reading the second chip...';
   STR_CMP_SWAP           = 'Now swap in the second chip, then press OK.';
-  STR_HINT_KEYS          = 'Esc = cancel   F1 = console';
+  STR_HINT_KEYS          = 'F5 detect   Ctrl+O open   Esc cancel   F1 console';
+  STR_WORKFLOW_TITLE     = 'Safe workflow';
+  STR_WORKFLOW_DETECT    = '1  Detect chip';
+  STR_WORKFLOW_OPEN      = '2  Open image';
+  STR_WORKFLOW_SMART     = '3  Smart write';
+  STR_WORKFLOW_READ      = 'Read chip';
+  STR_WORKFLOW_VERIFY    = 'Verify';
+  STR_WORKFLOW_CONNECT   = 'Next: connect a programmer';
+  STR_WORKFLOW_PICK_CHIP = 'Next: detect or select a chip';
+  STR_WORKFLOW_LOAD      = 'Next: open an image or read the chip';
+  STR_WORKFLOW_READY     = 'Ready for Smart write';
+  STR_WORKFLOW_LEGACY    = 'Ready for this memory type';
+  STR_WORKFLOW_RUNNING   = 'Operation in progress - Esc cancels safely';
   STR_COMPARE_SEE_LOG    = 'The differing ranges are listed in the log below,'#13#10
                          + 'and highlighted in the editor.';
   STR_DIFF_IN_EDITOR     = 'The editor shows the second side, with the differing bytes highlighted';
@@ -164,6 +177,47 @@ resourcestring
   STR_PROT_NONE          = 'Nothing is write protected';
   STR_PROT_CAVEAT        = 'Bit layout read as Winbond W25Q, which most makers follow. '
                          + 'Check the datasheet for anything unusual';
+  STR_PROT_LAYOUT        = 'Protection bit layout: %s';
+  STR_PROT_EXTENT_UNKNOWN= 'Something is protected on this chip, but the extent cannot be '
+                         + 'read from the status register alone on this vendor. Treating '
+                         + 'it as protected';
+
+  //--- 4.4 ---
+  STR_WREN_REFUSED       = 'The chip did not accept write enable: WEL stayed clear. '
+                         + 'That is what a WP# pin held low, a locked status register or '
+                         + 'a bad connection looks like. Nothing was written';
+  STR_CHIP_REPORTED_FAIL = 'The chip reported a failure: %s';
+  STR_SR_LOCK            = 'Status register protection: %s';
+  STR_FAST_READ          = 'Reading with the fast read opcode 0x%.2x';
+  STR_RESETTING          = 'Resetting the chip before starting';
+  STR_QPI_RECOVER        = 'The id read back as all %.2x. Trying a QPI exit and a reset in '
+                         + 'case another tool left the chip in a mode it cannot answer in';
+  STR_CONTACT_CHECKING   = 'Checking the connection is stable...';
+  STR_CONTACT_UNSTABLE   = 'The chip id changed between reads (%s then %s). The connection '
+                         + 'is not reliable: reseat the clip, shorten the cable or lower '
+                         + 'the clock. Nothing was done';
+  STR_CONTACT_OK         = 'Connection stable: the id read back the same %d times';
+  STR_BLANK_AFTER_ERASE  = 'Checking the erase actually took...';
+  STR_ERASE_DID_NOT_TAKE = 'The erase did not take: 0x%.8x still reads 0x%.2x. The chip '
+                         + 'accepted the command and ignored it, which means it is still '
+                         + 'protected';
+  STR_READ_PASS          = 'Read pass %d of %d';
+  STR_READ_UNSTABLE      = 'The two reads of this chip disagree in %d bytes, first at '
+                         + '0x%.8x. One of them is wrong and there is no way to tell which. '
+                         + 'Reseat the clip and lower the clock';
+  STR_READ_STABLE        = 'Both reads agree, so the dump can be trusted';
+  STR_IMG_STATS          = 'Dump: %s';
+  STR_IMG_KIND           = 'The dump looks like a %s';
+  STR_IMG_SUSPECT        = 'Suspicious dump: %s';
+  STR_TIMEOUT_FROM_CHIP  = 'Busy ceilings taken from the chip: page %d ms, erase %d ms, '
+                         + 'chip erase %d ms';
+  STR_GLOBAL_UNLOCK      = 'WPS is set, so the block protect bits decide nothing. '
+                         + 'Releasing the individual block locks as well (98h)';
+  STR_UNLOCK_FAILED      = 'The chip accepted the unlock and stayed protected. Check '
+                         + 'the WP# pin, and whether this part needs its configuration '
+                         + 'register changed too';
+  STR_UNLOCK_OK          = 'Unlocked: nothing on this chip is write protected now';
+  STR_QE_KEPT            = 'Quad enable was left set, as it was before';
   STR_OTP_TITLE          = 'Security register';
   STR_OTP_WHICH          = 'Which register, 1 to 3?';
   STR_OTP_ERASE_Q        = 'Erase it instead of writing to it?';

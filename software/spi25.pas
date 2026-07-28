@@ -55,6 +55,18 @@ var
   //ชิปที่รู้ยี่ห้อแล้วแต่ยังไม่ได้อ่าน SFDP ยังไม่รู้วิธีเข้าโหมด 4 ไบต์
   Chip25SFDPRead: boolean = False;
 
+  //ใช้คำสั่งอ่านเร็ว 0Bh แทน 03h ได้หรือไม่
+  //
+  //03h เป็นคำสั่งอ่านที่ไม่มีไบต์หลอก ซึ่งแลกมาด้วยเพดานความถี่ที่ต่ำกว่ามาก
+  //ดาต้าชีตส่วนใหญ่ให้ 03h ไว้ที่ 33 ถึง 50 MHz ส่วน 0Bh ไปได้ถึง 104 MHz
+  //เครื่องที่รองรับอยู่ตอนนี้ยิงได้ถึง 30 MHz ขึ้นไป ซึ่งอยู่ริมเพดานของ 03h
+  //พอดี อาการที่ได้คือข้อมูลเพี้ยนเป็นครั้งคราวโดยไม่มีอะไรฟ้อง
+  //
+  //เปิดเฉพาะเมื่ออ่าน SFDP สำเร็จ เพราะนั่นแปลว่าเป็นชิปตามมาตรฐาน JESD216
+  //ซึ่งมี 0Bh แน่นอน ชิปเก่าที่ไม่มีตาราง SFDP ก็ไม่ได้รับคำสั่งนี้
+  Chip25FastRead: boolean = False;
+  Chip25FastRead4BOpcode: byte = 0;  //0Ch ถ้าตาราง 4BAIT บอกว่ามี
+
   //opcode ชุดแอดเดรส 4 ไบต์ตัวจริง มาจากตาราง 4BAIT (FF84h) 0 = ชิปไม่มี
   //
   //ชิปที่มี opcode ชุดนี้ไม่ต้องสลับโหมดเลย ซึ่งปลอดภัยกว่ามาก เพราะการ
@@ -89,6 +101,11 @@ procedure ExitProgMode25;
 
 function UsbAsp25_Read(Opcode: Byte; Addr: longword; var buffer: array of byte; bufflen: integer): integer;
 function UsbAsp25_Read32bitAddr(Opcode: byte; Addr: longword; var buffer: array of byte; bufflen: integer): integer;
+
+//อ่านเร็ว แอดเดรส 3 ไบต์ตามด้วยไบต์หลอกหนึ่งไบต์ opcode ปกติคือ 0Bh
+function UsbAsp25_ReadFast(Opcode: byte; Addr: longword; var buffer: array of byte; bufflen: integer): integer;
+//อ่านเร็ว แอดเดรส 4 ไบต์ opcode ปกติคือ 0Ch
+function UsbAsp25_ReadFast32bitAddr(Opcode: byte; Addr: longword; var buffer: array of byte; bufflen: integer): integer;
 function UsbAsp25_Write(Opcode: byte; Addr: longword; buffer: array of byte; bufflen: integer): integer;
 function UsbAsp25_Write32bitAddr(Opcode: byte; Addr: longword; buffer: array of byte; bufflen: integer): integer;
 
@@ -102,6 +119,48 @@ function UsbAsp25_EraseSecReg(Addr: longword): integer;
 
 function UsbAsp25_Wren(): integer;
 function UsbAsp25_Wrdi(): integer;
+
+//สั่ง WREN แล้วอ่านกลับมาดูว่าแลตช์ติดจริงหรือไม่
+//
+//ชิปที่ขา WP# ถูกดึงต่ำ ชิปที่ status register ถูกล็อกไว้ หรือซ็อกเก็ตที่
+//ต่อไม่ติด จะรับคำสั่ง WREN ไปเงียบ ๆ แล้วไม่ทำอะไรเลย ทุกคำสั่งเขียนและลบ
+//หลังจากนั้นก็จะถูกทิ้งเงียบ ๆ เหมือนกัน กว่าจะรู้ตัวคือตอนตรวจข้อมูลกลับ
+//ซึ่งบนชิป 8MB คือหลังจากเสียเวลาไปทั้งงาน แล้วยังชี้สาเหตุผิดอีกด้วย
+//
+//การอ่าน status register หนึ่งครั้งต่อหนึ่งงานเปลี่ยนคำตอบนั้นให้เป็น
+//"ชิปไม่ยอมรับ write enable" ตั้งแต่ก่อนเริ่ม
+//คืน False เมื่อ WEL ไม่ติด รวมถึงกรณีที่อ่าน status register ไม่ได้เลย
+function UsbAsp25_WrenChecked(out WEL: boolean): boolean;
+
+//รีเซ็ตชิปด้วยวิธีที่ JEDEC กำหนด 66h แล้วตามด้วย 99h
+//
+//เครื่องมือตัวก่อนหน้าที่ตายกลางคันทิ้งชิปไว้ในโหมดแอดเดรส 4 ไบต์ได้
+//ชิปที่ค้างแบบนั้นตอบคำสั่งทุกอย่างด้วยข้อมูลจากแอดเดรสที่ผิดไปทั้งก้อน
+function UsbAsp25_SoftReset(): integer;
+
+//ออกจากโหมด QPI
+//
+//ชิปที่ค้างอยู่ในโหมด QPI ไม่เข้าใจคำสั่งที่ส่งมาทางขาเดียว 9Fh จึงได้
+//คำตอบเป็น 00 หรือ FF ล้วน ซึ่งอ่านออกมาเหมือนชิปตายสนิท ทั้งที่ยังดีอยู่
+//FFh เป็นคำสั่งออกจากโหมด QPI ที่ตีความได้ตรงกันทั้งในโหมด QPI และโหมดปกติ
+function UsbAsp25_ExitQPI(): integer;
+
+//อ่านรีจิสเตอร์เฉพาะยี่ห้อที่บอกว่าคำสั่งก่อนหน้าล้มเหลวหรือไม่
+//Micron ใช้ 70h ส่วน Macronix ใช้ 2Bh
+function UsbAsp25_ReadVendorStatus(Opcode: byte; out Value: byte): boolean;
+
+//ปลดล็อกทุกบล็อกพร้อมกัน opcode 98h
+//
+//ใช้เฉพาะกับชิปที่ตั้ง WPS = 1 ซึ่งแปลว่าพื้นที่ที่ถูกล็อกมาจากบิตรายบล็อก
+//ไม่ใช่จากบิต BP การล้าง BP จึงไม่ปลดอะไรเลยบนชิปกลุ่มนี้
+//ผู้เรียกต้องสั่ง WREN มาก่อน และต้องไม่ส่งคำสั่งนี้ให้ชิปที่ไม่ได้ตั้ง WPS
+//เพราะเป็น opcode ที่ไม่มีนิยามในดาต้าชีตของชิปที่ไม่มีบิตล็อกรายบล็อก
+function UsbAsp25_GlobalUnlock(): integer;
+
+//ล้างธงความผิดพลาดของ Micron 50h
+//ธงพวกนี้ค้างอยู่จนกว่าจะถูกล้าง ถ้าไม่ล้างก่อนเริ่มงานใหม่ ความล้มเหลว
+//ของงานก่อนหน้าจะถูกรายงานซ้ำอีกครั้งในงานที่จริง ๆ แล้วสำเร็จ
+function UsbAsp25_ClearFlagStatus(): integer;
 function UsbAsp25_ChipErase(): integer;
 function UsbAsp25_EraseSector(Opcode: byte; Addr: longword; FourByteAddr: boolean): integer;
 
@@ -131,6 +190,86 @@ begin
   Chip25SFDPRead := False;
   Chip25Read4BOpcode := 0;
   Chip25PageProg4BOpcode := 0;
+  Chip25FastRead := False;
+  Chip25FastRead4BOpcode := 0;
+end;
+
+function SPI25BufferLengthValid(Requested: integer;
+  const BufferLength: SizeInt): boolean;
+begin
+  Result := (Requested >= 0) and
+            (QWord(Requested) <= QWord(BufferLength));
+end;
+
+function SPI25AddressRangeValid(Addr: longword; Count: integer;
+  FourByteAddr: boolean): boolean;
+var
+  Limit: QWord;
+begin
+  Result := False;
+  if Count < 0 then Exit;
+
+  if FourByteAddr then
+    Limit := QWord(1) shl 32
+  else
+    Limit := QWord(1) shl 24;
+
+  //Use an exclusive end so both a zero-length request at the last address and
+  //a one-byte request ending exactly at the address-space limit are valid.
+  Result := (QWord(Addr) < Limit) and
+            (QWord(Addr) + QWord(Count) <= Limit);
+end;
+
+function SPI25CommandReadExact(CSR, CSW: byte;
+  const Command: array of byte; CommandLen: integer;
+  var Data: array of byte; DataLen: integer): integer;
+var
+  Sent, Got: integer;
+begin
+  Result := -1;
+  if (CommandLen < 1) or
+     (not SPI25BufferLengthValid(CommandLen, Length(Command))) or
+     (not SPI25BufferLengthValid(DataLen, Length(Data))) then Exit;
+
+  //A zero-byte read is a no-op.  In particular, do not leave CS asserted after
+  //sending a header that can never have a matching reply phase.
+  if DataLen = 0 then Exit(0);
+  FillByte(Data[0], DataLen, $FF);
+
+  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
+    Got := AsProgrammer.Programmer.SPIWriteRead(
+      CSR, CommandLen, Command, DataLen, Data)
+  else
+  begin
+    Sent := SPIWrite(CSW, CommandLen, Command);
+    if Sent <> CommandLen then Exit;
+    Got := SPIRead(CSR, DataLen, Data);
+  end;
+
+  if Got <> DataLen then
+  begin
+    FillByte(Data[0], DataLen, $FF);
+    Exit;
+  end;
+  Result := DataLen;
+end;
+
+function SPI25CommandWriteExact(const Command: array of byte;
+  CommandLen: integer; const Data: array of byte;
+  DataLen: integer): integer;
+begin
+  Result := -1;
+  if (CommandLen < 1) or
+     (not SPI25BufferLengthValid(CommandLen, Length(Command))) or
+     (not SPI25BufferLengthValid(DataLen, Length(Data))) then Exit;
+
+  //Issuing a page-program opcode without any data is at best undefined and at
+  //worst starts a device-specific command.  Treat it as a safe no-op.
+  if DataLen = 0 then Exit(0);
+
+  if SPIWrite(0, CommandLen, Command) <> CommandLen then Exit;
+  if SPIWrite(1, DataLen, Data) <> DataLen then Exit;
+  Result := DataLen;
 end;
 
 function UsbAsp25_BusyEx(out sreg: byte): boolean;
@@ -162,6 +301,7 @@ var
   len, n: integer;
 begin
   Locked := False;
+  if not SPI25AddressRangeValid(Addr, 1, FourByteAddr) then Exit(False);
 
   buff[0] := $3D;
   if FourByteAddr then
@@ -181,18 +321,11 @@ begin
   end;
 
   value := $FF;
-
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-    n := AsProgrammer.Programmer.SPIWriteRead(1, len, buff, 1, value)
-  else
-  begin
-    SPIWrite(0, len, buff);
-    n := SPIRead(1, 1, value);
-  end;
+  n := SPI25CommandReadExact(1, 0, buff, len, value, 1);
 
   //FF ล้วนคือคำตอบของชิปที่ไม่รู้จักคำสั่งนี้ หรือของซ็อกเก็ตที่ว่างอยู่
   //อย่าตีความว่าถูกล็อก เพราะจะกลายเป็นห้ามเขียนทั้งที่ไม่มีอะไรล็อก
-  if (n <= 0) or (value = $FF) then Exit(False);
+  if (n <> 1) or (value = $FF) then Exit(False);
 
   //บิต 0 คือสถานะล็อกของบล็อกที่แอดเดรสนี้ตกอยู่
   Locked := IsBitSet(value, 0);
@@ -203,10 +336,11 @@ end;
 function EnterProgMode25(spiSpeed: integer; SendAB: boolean = false): boolean;
 begin
   result := AsProgrammer.Programmer.SPIInit(spiSpeed);
+  if not Result then Exit;
   sleep(50);
 
   //ปลุกชิปจาก power-down
-  if SendAB then SPIWrite(1, 1, $AB);
+  if SendAB and (SPIWrite(1, 1, $AB) <> 1) then Exit(False);
   sleep(2);
 end;
 
@@ -219,7 +353,7 @@ end;
 //อ่าน id แล้วเติมลงโครงสร้าง
 function UsbAsp25_ReadID(var ID: MEMORY_ID): integer;
 var
-  buffer: array[0..3] of byte;
+  command, buffer: array[0..3] of byte;
 
   //อ่านคำตอบของคำสั่งที่เพิ่งส่งไป
   //
@@ -227,22 +361,31 @@ var
   //ส่ง opcode ออกไป ถ้าไม่ล้างแล้วการอ่านล้มเหลว ไบต์ที่ค้างอยู่คือ opcode
   //ของเราเอง ซึ่งจะถูกรายงานออกไปเหมือนเป็นคำตอบของชิป
   //เดิมทาง 9Fh กับ 15h ล้าง แต่ทาง 90h กับ ABh ไม่ล้าง
-  function ReadReply(Len: integer): boolean;
+  function ReadCommand(CommandLen, ReplyLen: integer): boolean;
   begin
     FillByte(buffer, 4, $FF);
-    Result := SPIRead(1, Len, buffer) = Len;
+    Result := SPI25CommandReadExact(1, 0, command, CommandLen,
+                                     buffer, ReplyLen) = ReplyLen;
     if not Result then FillByte(buffer, 4, $FF);
   end;
 
 begin
-  Result := 0;
+  FillByte(ID.ID9FH, SizeOf(ID.ID9FH), $FF);
+  FillByte(ID.ID90H, SizeOf(ID.ID90H), $FF);
+  ID.IDABH := $FF;
+  FillByte(ID.ID15H, SizeOf(ID.ID15H), $FF);
+  ID.Got9F := False;
+  ID.Got90 := False;
+  ID.GotAB := False;
+  ID.Got15 := False;
+  Result := -1;
 
   //9F
-  buffer[0] := $9F;
-  SPIWrite(0, 1, buffer);
-  ID.Got9F := ReadReply(3);
+  FillByte(command, SizeOf(command), 0);
+  command[0] := $9F;
+  ID.Got9F := ReadCommand(1, 3);
   move(buffer, ID.ID9FH, 3);
-  if ID.Got9F then Inc(Result);
+  if not ID.Got9F then Exit;
 
   //จำรหัสผู้ผลิตไว้ ทุกคำสั่งที่ต่างกันตามยี่ห้อจะดูจากค่านี้
   //00 กับ FF แปลว่าไม่มีชิปตอบ อย่าจำไว้เพราะจะทำให้เลือก opcode ผิด
@@ -250,27 +393,29 @@ begin
     Chip25ManufID := ID.ID9FH[0];
 
   //90
-  FillByte(buffer, 4, 0);
-  buffer[0] := $90;
-  SPIWrite(0, 4, buffer);
-  ID.Got90 := ReadReply(2);
+  FillByte(command, SizeOf(command), 0);
+  command[0] := $90;
+  ID.Got90 := ReadCommand(4, 2);
   move(buffer, ID.ID90H, 2);
-  if ID.Got90 then Inc(Result);
+  if not ID.Got90 then Exit;
 
   //AB
-  FillByte(buffer, 4, 0);
-  buffer[0] := $AB;
-  SPIWrite(0, 4, buffer);
-  ID.GotAB := ReadReply(1);
+  FillByte(command, SizeOf(command), 0);
+  command[0] := $AB;
+  ID.GotAB := ReadCommand(4, 1);
   move(buffer, ID.IDABH, 1);
-  if ID.GotAB then Inc(Result);
+  if not ID.GotAB then Exit;
 
   //15
-  buffer[0] := $15;
-  SPIWrite(0, 1, buffer);
-  ID.Got15 := ReadReply(2);
+  FillByte(command, SizeOf(command), 0);
+  command[0] := $15;
+  ID.Got15 := ReadCommand(1, 2);
   move(buffer, ID.ID15H, 2);
-  if ID.Got15 then Inc(Result);
+  if not ID.Got15 then Exit;
+
+  //Public compatibility: this function has always counted successful ID
+  //commands rather than bytes.
+  Result := 4;
 end;
 
 //อ่านตาราง SFDP (JESD216) opcode 5Ah: แอดเดรส 3 ไบต์ + ไบต์หลอก 1 ไบต์
@@ -278,21 +423,16 @@ function UsbAsp25_ReadSFDP(Addr: longword; var buffer: array of byte; bufflen: i
 var
   buff: array[0..4] of byte;
 begin
+  if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
+     (not SPI25AddressRangeValid(Addr, bufflen, False)) then Exit(-1);
+
   buff[0] := $5A;
   buff[1] := hi(addr);
   buff[2] := hi(lo(addr));
   buff[3] := lo(addr);
   buff[4] := $FF; //dummy
 
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-  begin
-    result := AsProgrammer.Programmer.SPIWriteRead(1, 5, buff, bufflen, buffer);
-  end
-  else
-  begin
-    SPIWrite(0, 5, buff);
-    result := SPIRead(1, bufflen, buffer);
-  end;
+  Result := SPI25CommandReadExact(1, 0, buff, 5, buffer, bufflen);
 end;
 
 //เลขประจำตัวจากโรงงาน opcode 4Bh: ไบต์หลอก 4 ไบต์ แล้วตามด้วยข้อมูล 8 ไบต์
@@ -300,21 +440,15 @@ function UsbAsp25_ReadUniqueID(var buffer: array of byte): integer;
 var
   buff: array[0..4] of byte;
 begin
+  if Length(buffer) < 8 then Exit(-1);
+
   buff[0] := $4B;
   buff[1] := $FF;
   buff[2] := $FF;
   buff[3] := $FF;
   buff[4] := $FF;
 
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-  begin
-    result := AsProgrammer.Programmer.SPIWriteRead(1, 5, buff, 8, buffer);
-  end
-  else
-  begin
-    SPIWrite(0, 5, buff);
-    result := SPIRead(1, 8, buffer);
-  end;
+  Result := SPI25CommandReadExact(1, 0, buff, 5, buffer, 8);
 end;
 
 //Winbond W74M Authentication Flash opcode 96h: ไบต์หลอก แล้วตามด้วย
@@ -324,18 +458,12 @@ function UsbAsp25_ReadAuthStatus(var buffer: array of byte; bufflen: integer): i
 var
   buff: array[0..1] of byte;
 begin
+  if not SPI25BufferLengthValid(bufflen, Length(buffer)) then Exit(-1);
+
   buff[0] := $96;
   buff[1] := $FF; //dummy
 
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-  begin
-    result := AsProgrammer.Programmer.SPIWriteRead(1, 2, buff, bufflen, buffer);
-  end
-  else
-  begin
-    SPIWrite(0, 2, buff);
-    result := SPIRead(1, bufflen, buffer);
-  end;
+  Result := SPI25CommandReadExact(1, 0, buff, 2, buffer, bufflen);
 end;
 
 //Security register (OTP) opcode 48h: แอดเดรส 3 ไบต์ + ไบต์หลอก 1 ไบต์
@@ -344,21 +472,16 @@ function UsbAsp25_ReadSecReg(Addr: longword; var buffer: array of byte; bufflen:
 var
   buff: array[0..4] of byte;
 begin
+  if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
+     (not SPI25AddressRangeValid(Addr, bufflen, False)) then Exit(-1);
+
   buff[0] := $48;
   buff[1] := hi(addr);
   buff[2] := hi(lo(addr));
   buff[3] := lo(addr);
   buff[4] := $FF; //dummy
 
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-  begin
-    result := AsProgrammer.Programmer.SPIWriteRead(1, 5, buff, bufflen, buffer);
-  end
-  else
-  begin
-    SPIWrite(0, 5, buff);
-    result := SPIRead(1, bufflen, buffer);
-  end;
+  Result := SPI25CommandReadExact(1, 0, buff, 5, buffer, bufflen);
 end;
 
 //เขียน security register opcode 42h โดยผู้เรียกต้องสั่ง WREN มาก่อน
@@ -366,13 +489,15 @@ function UsbAsp25_WriteSecReg(Addr: longword; buffer: array of byte; bufflen: in
 var
   buff: array[0..3] of byte;
 begin
+  if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
+     (not SPI25AddressRangeValid(Addr, bufflen, False)) then Exit(-1);
+
   buff[0] := $42;
   buff[1] := hi(addr);
   buff[2] := hi(lo(addr));
   buff[3] := lo(addr);
 
-  SPIWrite(0, 4, buff);
-  result := SPIWrite(1, bufflen, buffer);
+  Result := SPI25CommandWriteExact(buff, 4, buffer, bufflen);
 end;
 
 //ลบ security register opcode 44h โดยผู้เรียกต้องสั่ง WREN มาก่อน
@@ -380,6 +505,8 @@ function UsbAsp25_EraseSecReg(Addr: longword): integer;
 var
   buff: array[0..3] of byte;
 begin
+  if not SPI25AddressRangeValid(Addr, 1, False) then Exit(-1);
+
   buff[0] := $44;
   buff[1] := hi(addr);
   buff[2] := hi(lo(addr));
@@ -394,6 +521,8 @@ function UsbAsp25_EraseSector(Opcode: byte; Addr: longword; FourByteAddr: boolea
 var
   buff: array[0..4] of byte;
 begin
+  if not SPI25AddressRangeValid(Addr, 1, FourByteAddr) then Exit(-1);
+
   buff[0] := Opcode;
 
   if FourByteAddr then
@@ -418,27 +547,23 @@ function UsbAsp25_Read(Opcode: byte; Addr: longword; var buffer: array of byte; 
 var
   buff: array[0..3] of byte;
 begin
+  if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
+     (not SPI25AddressRangeValid(Addr, bufflen, False)) then Exit(-1);
 
   buff[0] := Opcode;
   buff[1] := hi(addr);
   buff[2] := hi(lo(addr));
   buff[3] := lo(addr);
 
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-  begin
-    result := AsProgrammer.Programmer.SPIWriteRead(1, 4, buff, bufflen, buffer);
-  end
-  else
-  begin
-      SPIWrite(0, 4, buff);
-      result := SPIRead(1, bufflen, buffer);
-  end;
+  Result := SPI25CommandReadExact(1, 0, buff, 4, buffer, bufflen);
 end;
 
 function UsbAsp25_Read32bitAddr(Opcode: byte; Addr: longword; var buffer: array of byte; bufflen: integer): integer;
 var
   buff: array[0..4] of byte;
 begin
+  if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
+     (not SPI25AddressRangeValid(Addr, bufflen, True)) then Exit(-1);
 
   buff[0] := Opcode;
   buff[1] := hi(hi(addr));
@@ -446,15 +571,42 @@ begin
   buff[3] := hi(lo(addr));
   buff[4] := lo(lo(addr));
 
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-  begin
-    result := AsProgrammer.Programmer.SPIWriteRead(1, 5, buff, bufflen, buffer);
-  end
-  else
-  begin
-      SPIWrite(0, 5, buff);
-      result := SPIRead(1, bufflen, buffer);
-  end;
+  Result := SPI25CommandReadExact(1, 0, buff, 5, buffer, bufflen);
+end;
+
+//อ่านเร็ว opcode + แอดเดรส 3 ไบต์ + ไบต์หลอก 1 ไบต์
+function UsbAsp25_ReadFast(Opcode: byte; Addr: longword; var buffer: array of byte; bufflen: integer): integer;
+var
+  buff: array[0..4] of byte;
+begin
+  if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
+     (not SPI25AddressRangeValid(Addr, bufflen, False)) then Exit(-1);
+
+  buff[0] := Opcode;
+  buff[1] := hi(addr);
+  buff[2] := hi(lo(addr));
+  buff[3] := lo(addr);
+  buff[4] := $FF; //dummy
+
+  Result := SPI25CommandReadExact(1, 0, buff, 5, buffer, bufflen);
+end;
+
+//อ่านเร็ว opcode + แอดเดรส 4 ไบต์ + ไบต์หลอก 1 ไบต์
+function UsbAsp25_ReadFast32bitAddr(Opcode: byte; Addr: longword; var buffer: array of byte; bufflen: integer): integer;
+var
+  buff: array[0..5] of byte;
+begin
+  if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
+     (not SPI25AddressRangeValid(Addr, bufflen, True)) then Exit(-1);
+
+  buff[0] := Opcode;
+  buff[1] := hi(hi(addr));
+  buff[2] := lo(hi(addr));
+  buff[3] := hi(lo(addr));
+  buff[4] := lo(lo(addr));
+  buff[5] := $FF; //dummy
+
+  Result := SPI25CommandReadExact(1, 0, buff, 6, buffer, bufflen);
 end;
 
 function UsbAsp25_Wren(): integer;
@@ -463,6 +615,75 @@ var
 begin
   buff:= $06;
   result := SPIWrite(1, 1, buff);
+end;
+
+function UsbAsp25_WrenChecked(out WEL: boolean): boolean;
+var
+  sreg: byte;
+  n: integer;
+begin
+  WEL := False;
+
+  if UsbAsp25_Wren <> 1 then Exit(False);
+
+  sreg := $FF;
+  n := UsbAsp25_ReadSR(sreg);
+
+  //อ่าน status register ไม่ได้ หรือได้ FF ล้วน แปลว่าไม่มีใครตอบอยู่ตรงนั้น
+  //ไม่ใช่ว่า WEL ติด ทั้งที่บิต 1 ของ FF ก็เป็นหนึ่งเหมือนกัน
+  if (n <= 0) or (sreg = $FF) then Exit(False);
+
+  WEL := IsBitSet(sreg, 1);
+  Result := WEL;
+end;
+
+function UsbAsp25_SoftReset(): integer;
+var
+  buff: byte;
+begin
+  buff := $66;
+  if SPIWrite(1, 1, buff) <> 1 then Exit(-1);
+  buff := $99;
+  Result := SPIWrite(1, 1, buff);
+  //ชิปต้องการเวลาตั้งตัวหลังรีเซ็ต ดาต้าชีตให้ไว้ราว 30 ไมโครวินาที
+  sleep(2);
+end;
+
+function UsbAsp25_ExitQPI(): integer;
+var
+  buff: byte;
+begin
+  buff := $FF;
+  Result := SPIWrite(1, 1, buff);
+  sleep(1);
+end;
+
+function UsbAsp25_ReadVendorStatus(Opcode: byte; out Value: byte): boolean;
+var
+  n: integer;
+begin
+  Value := $FF;
+  if Opcode = 0 then Exit(False);
+
+  n := SPI25CommandReadExact(1, 0, Opcode, 1, Value, 1);
+
+  Result := n = 1;
+end;
+
+function UsbAsp25_ClearFlagStatus(): integer;
+var
+  buff: byte;
+begin
+  buff := $50;
+  Result := SPIWrite(1, 1, buff);
+end;
+
+function UsbAsp25_GlobalUnlock(): integer;
+var
+  buff: byte;
+begin
+  buff := $98;
+  Result := SPIWrite(1, 1, buff);
 end;
 
 function UsbAsp25_Wrdi(): integer;
@@ -484,21 +705,21 @@ begin
   //Atmel AT25F รุ่นเก่าลบทั้งชิปด้วย 62h เท่านั้น
   if Chip25ManufID = $1F then
   begin
-    UsbAsp25_Wren;
+    if UsbAsp25_Wren <> 1 then Exit(-1);
     buff := $62;
-    SPIWrite(1, 1, buff);
+    if SPIWrite(1, 1, buff) <> 1 then Exit(-1);
   end;
 
   //SST ใช้ 60h ซึ่งเป็นคำสั่งลบทั้งชิปที่ถูกต้องของยี่ห้อนี้
   if Chip25ManufID = $BF then
   begin
-    UsbAsp25_Wren;
+    if UsbAsp25_Wren <> 1 then Exit(-1);
     buff := $60;
-    SPIWrite(1, 1, buff);
+    if SPIWrite(1, 1, buff) <> 1 then Exit(-1);
   end;
 
   //WEL ถูกล้างทุกครั้งที่คำสั่งลบเริ่มทำงาน จึงต้องสั่งใหม่ก่อน C7h
-  UsbAsp25_Wren;
+  if UsbAsp25_Wren <> 1 then Exit(-1);
   buff := $C7;
   result := SPIWrite(1, 1, buff);
 end;
@@ -508,14 +729,15 @@ end;
 //  50h Write Enable for Volatile Status Reg  ค่าที่เขียนหายเมื่อตัดไฟ
 //เดิมส่ง 50h เสมอหลังจากที่ผู้เรียกส่ง 06h ไปแล้ว ตัวหลังชนะ ผลคือการ
 //ปลดล็อกกลับมาล็อกเองทุกครั้งที่ถอดชิปออกแล้วเสียบใหม่
-procedure SendSRWriteEnable(Volatile: boolean);
+function SendSRWriteEnable(Volatile: boolean): boolean;
 var
   buff: byte;
 begin
+  Result := False;
   if Volatile then
   begin
     buff := $50;
-    SPIWrite(1, 1, buff);
+    Result := SPIWrite(1, 1, buff) = 1;
     Exit;
   end;
 
@@ -523,7 +745,7 @@ begin
   if Chip25SRWrenOpcode = $50 then
   begin
     buff := $50;
-    SPIWrite(1, 1, buff);
+    Result := SPIWrite(1, 1, buff) = 1;
     Exit;
   end;
 
@@ -531,18 +753,18 @@ begin
   if (Chip25SRWrenOpcode = 0) and (Chip25ManufID = $BF) then
   begin
     buff := $50;
-    SPIWrite(1, 1, buff);
+    Result := SPIWrite(1, 1, buff) = 1;
     Exit;
   end;
 
-  UsbAsp25_Wren;
+  Result := UsbAsp25_Wren = 1;
 end;
 
 function UsbAsp25_WriteSR(sreg: byte; opcode: byte = $01; Volatile: boolean = False): integer;
 var
   buff: array[0..1] of byte;
 begin
-  SendSRWriteEnable(Volatile);
+  if not SendSRWriteEnable(Volatile) then Exit(-1);
 
   Buff[0] := opcode;
   Buff[1] := sreg;
@@ -553,7 +775,7 @@ function UsbAsp25_WriteSR_2byte(sreg1, sreg2: byte; Volatile: boolean = False): 
 var
   buff: array[0..2] of byte;
 begin
-  SendSRWriteEnable(Volatile);
+  if not SendSRWriteEnable(Volatile) then Exit(-1);
 
   //กรณีที่ status register ยาว 2 ไบต์
   Buff[0] := $01;
@@ -564,15 +786,7 @@ end;
 
 function UsbAsp25_ReadSR(var sreg: byte; opcode: byte = $05): integer;
 begin
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-    begin
-      result := AsProgrammer.Programmer.SPIWriteRead(1, 1, opcode, 1, sreg);
-    end
-    else
-    begin
-         SPIWrite(0, 1, opcode);
-         result := SPIRead(1, 1, sreg);
-    end;
+  Result := SPI25CommandReadExact(1, 0, opcode, 1, sreg, 1);
 end;
 
 //คืนจำนวนไบต์ที่เขียนได้
@@ -580,20 +794,23 @@ function UsbAsp25_Write(Opcode: byte; Addr: longword; buffer: array of byte; buf
 var
   buff: array[0..3] of byte;
 begin
+  if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
+     (not SPI25AddressRangeValid(Addr, bufflen, False)) then Exit(-1);
 
   buff[0] := Opcode;
   buff[1] := lo(hi(addr));
   buff[2] := hi(lo(addr));
   buff[3] := lo(lo(addr));
 
-  SPIWrite(0, 4, buff);
-  result := SPIWrite(1, bufflen, buffer);
+  Result := SPI25CommandWriteExact(buff, 4, buffer, bufflen);
 end;
 
 function UsbAsp25_Write32bitAddr(Opcode: byte; Addr: longword; buffer: array of byte; bufflen: integer): integer;
 var
   buff: array[0..4] of byte;
 begin
+  if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
+     (not SPI25AddressRangeValid(Addr, bufflen, True)) then Exit(-1);
 
   buff[0] := Opcode;
   buff[1] := hi(hi(addr));
@@ -601,8 +818,7 @@ begin
   buff[3] := hi(lo(addr));
   buff[4] := lo(lo(addr));
 
-  SPIWrite(0, 5, buff);
-  result := SPIWrite(1, bufflen, buffer);
+  Result := SPI25CommandWriteExact(buff, 5, buffer, bufflen);
 end;
 
 function UsbAsp25_WriteSSTB(Opcode: byte; Data: byte): integer;
@@ -612,7 +828,8 @@ begin
   buff[0] := Opcode;
   buff[1] := Data;
 
-  result := SPIWrite(1, 2, buff)-1;
+  if SPIWrite(1, 2, buff) <> 2 then Exit(-1);
+  Result := 1;
 end;
 
 function UsbAsp25_WriteSSTW(Opcode: byte; Data1, Data2: byte): integer;
@@ -623,7 +840,8 @@ begin
   buff[1] := Data1;
   buff[2] := Data2;
 
-  result := SPIWrite(1, 3, buff)-1;
+  if SPIWrite(1, 3, buff) <> 3 then Exit(-1);
+  Result := 2;
 end;
 
 //เขียน bank register ของ Spansion บิต EXTADD เลือกโหมดแอดเดรส
@@ -632,7 +850,7 @@ var
   buff: byte;
 begin
   buff := $17;
-  SPIWrite(0, 1, buff);
+  if SPIWrite(0, 1, buff) <> 1 then Exit(-1);
   if ExtAddr then buff := %10000000 else buff := 0;
   Result := SPIWrite(1, 1, buff);
 end;
@@ -662,29 +880,30 @@ begin
 
     E4B_EXTC5:
       begin
-        UsbAsp25_Wren;
+        if UsbAsp25_Wren <> 1 then Exit(-1);
         buff := $C5;
-        SPIWrite(0, 1, buff);
+        if SPIWrite(0, 1, buff) <> 1 then Exit(-1);
         buff := 1;              //บิต A24 ของ extended address register
         Result := SPIWrite(1, 1, buff);
       end;
 
     E4B_NVB1:
       begin
-        UsbAsp25_Wren;
+        if UsbAsp25_Wren <> 1 then Exit(-1);
         buff := $B1;
-        SPIWrite(0, 1, buff);
+        if SPIWrite(0, 1, buff) <> 1 then Exit(-1);
         buff := 0;              //บิต 0 = 0 คือโหมด 4 ไบต์บน Micron
-        SPIWrite(0, 1, buff);
+        if SPIWrite(0, 1, buff) <> 1 then Exit(-1);
         buff := $FF;
         Result := SPIWrite(1, 1, buff);
       end;
 
   else
     //E4B_WREN_B7 และกรณีที่ยังไม่รู้
-    UsbAsp25_Wren;
+    if UsbAsp25_Wren <> 1 then Exit(-1);
     buff := $B7;
     Result := SPIWrite(1, 1, buff);
+    if Result <> 1 then Exit(-1);
 
     //Spansion, Cypress และ Infineon ใช้ bank register แทน B7h
     if Chip25ManufID = $01 then
@@ -708,17 +927,18 @@ begin
 
     E4B_EXTC5:
       begin
-        UsbAsp25_Wren;
+        if UsbAsp25_Wren <> 1 then Exit(-1);
         buff := $C5;
-        SPIWrite(0, 1, buff);
+        if SPIWrite(0, 1, buff) <> 1 then Exit(-1);
         buff := 0;
         Result := SPIWrite(1, 1, buff);
       end;
 
   else
-    UsbAsp25_Wren;
+    if UsbAsp25_Wren <> 1 then Exit(-1);
     buff := $E9;
     Result := SPIWrite(1, 1, buff);
+    if Result <> 1 then Exit(-1);
 
     if Chip25ManufID = $01 then
       Result := WriteBankRegister(False);
@@ -727,25 +947,55 @@ end;
 
 function SPIRead(CS: byte; BufferLen: integer; out buffer: array of byte): integer;
 begin
-  result := AsProgrammer.Programmer.SPIRead(CS, BufferLen, buffer);
+  Result := -1;
+  if not SPI25BufferLengthValid(BufferLen, Length(buffer)) then Exit;
+  if BufferLen = 0 then Exit(0);
+
+  Result := AsProgrammer.Programmer.SPIRead(CS, BufferLen, buffer);
+  if Result <> BufferLen then
+  begin
+    FillByte(buffer[0], BufferLen, $FF);
+    Result := -1;
+  end;
 end;
 
 function SPIWrite(CS: byte; BufferLen: integer; buffer: array of byte): integer;
 begin
-  result := AsProgrammer.Programmer.SPIWrite(CS, BufferLen, buffer);
+  Result := -1;
+  if not SPI25BufferLengthValid(BufferLen, Length(buffer)) then Exit;
+  if BufferLen = 0 then Exit(0);
+
+  Result := AsProgrammer.Programmer.SPIWrite(CS, BufferLen, buffer);
+  if Result <> BufferLen then Result := -1;
 end;
 
 function SPIReadWrite(CSR: byte; CSW: byte; RBufferLen: integer; out rbuffer: array of byte; WBufferLen: integer; wbuffer: array of byte): integer;
+var
+  Sent, Got: integer;
 begin
+  Result := -1;
+  if (WBufferLen < 1) or
+     (not SPI25BufferLengthValid(WBufferLen, Length(wbuffer))) or
+     (not SPI25BufferLengthValid(RBufferLen, Length(rbuffer))) then Exit;
+  if RBufferLen = 0 then Exit(0);
+
+  FillByte(rbuffer[0], RBufferLen, $FF);
   if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-  begin
-    result := AsProgrammer.Programmer.SPIWriteRead(1, WBufferLen, wbuffer, RBufferLen, rbuffer);
-  end
+    Got := AsProgrammer.Programmer.SPIWriteRead(
+      CSR, WBufferLen, wbuffer, RBufferLen, rbuffer)
   else
   begin
-       SPIWrite(CSW, WBufferLen, wbuffer);
-       result := SPIRead(CSR, RBufferLen, rbuffer);
+    Sent := SPIWrite(CSW, WBufferLen, wbuffer);
+    if Sent <> WBufferLen then Exit;
+    Got := SPIRead(CSR, RBufferLen, rbuffer);
   end;
+
+  if Got <> RBufferLen then
+  begin
+    FillByte(rbuffer[0], RBufferLen, $FF);
+    Exit;
+  end;
+  Result := RBufferLen;
 end;
 
 end.

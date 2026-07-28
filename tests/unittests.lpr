@@ -16,7 +16,8 @@ program unittests;
 {$mode objfpc}{$H+}
 
 uses
-  SysUtils, sfdp, jedec, serialnum, spi25, protbits, opresult, prodlog, flashops;
+  SysUtils, Classes, Math, sfdp, jedec, serialnum, spi25, protbits, opresult,
+  prodlog, flashops, imgcheck;
 
 var
   Failures: integer = 0;
@@ -633,6 +634,581 @@ begin
         not PlanEraseSFDP(Info, 0, 8 * 1024 * 1024, 8 * 1024 * 1024, Plan));
 end;
 
+// ------------------------------------------ the four byte address decision
+
+//บั๊กที่เทสต์ชุดนี้ตรึงไว้คือการตัดสินจากความยาวของงาน แทนที่จะตัดสินจาก
+//แอดเดรสสูงสุดที่งานนั้นแตะ ซึ่งทำให้การเขียนบางส่วนลงชิปใหญ่ไปลงผิดที่
+procedure Test4ByteDecision;
+const
+  MB = 1024 * 1024;
+begin
+  WriteLn('Address width: a partial write high up a big chip still needs four bytes');
+
+  //ภาพ 4MB เขียนลงชิป 32MB ที่แอดเดรส 16MB
+  //ความยาวคือ 4MB ซึ่งเล็กกว่าขอบ 3 ไบต์ แต่แอดเดรสที่แตะคือ 16MB ถึง 20MB
+  //ซึ่งเก็บด้วย 3 ไบต์ไม่ได้ ถ้าตัดสินผิดตรงนี้ ข้อมูลจะไปลงที่ 0 แทน
+  Check('a 4 MB write at 16 MB on a 32 MB chip needs four byte addresses',
+        Needs4ByteAddress(16 * MB, 4 * MB, 32 * MB));
+
+  Check('so does the same write judged only by where it reaches',
+        Needs4ByteAddress(16 * MB, 4 * MB, 0));
+
+  //ชิปใหญ่ต้องใช้ 4 ไบต์เสมอ แม้งานจะแตะแค่เพจเดียวที่ต้นชิป
+  //เพราะทางอ่าน ทางลบ และทางตรวจต้องอยู่ในโหมดเดียวกันทั้งหมด
+  Check('one page at address zero on a 32 MB chip still uses four bytes',
+        Needs4ByteAddress(0, 256, 32 * MB));
+
+  //ชิปเล็กไม่ต้องใช้
+  Check('a whole 8 MB chip does not', not Needs4ByteAddress(0, 8 * MB, 8 * MB));
+  Check('a page at the top of a 16 MB chip does not',
+        not Needs4ByteAddress(16 * MB - 256, 256, 16 * MB));
+
+  //ขอบพอดี 16MB คือไบต์สุดท้ายที่แอดเดรส 3 ไบต์เข้าถึงได้
+  Check('exactly 16 MB from zero still fits in three bytes',
+        not Needs4ByteAddress(0, 16 * MB, 16 * MB));
+  Check('one byte past it does not',
+        Needs4ByteAddress(0, 16 * MB + 1, 16 * MB + 1));
+
+  //ความยาวมั่ว ๆ ต้องไม่ล้นแล้วกลายเป็นช่วงสั้น ๆ ที่ดูปลอดภัย
+  Check('an overflowing length cannot look small',
+        Needs4ByteAddress($FFFFFF00, $FFFFFF00, 0));
+end;
+
+// ------------------------------------------------- SFDP declared timing
+
+procedure TestSFDPTiming;
+begin
+  WriteLn('SFDP timing: the unit encodings');
+  Check('erase units are 1, 16, 128 and 1000 ms',
+        (SFDPEraseUnitMs(0) = 1) and (SFDPEraseUnitMs(1) = 16) and
+        (SFDPEraseUnitMs(2) = 128) and (SFDPEraseUnitMs(3) = 1000));
+  Check('program units are 8 and 64 us',
+        (SFDPProgUnitUs(0) = 8) and (SFDPProgUnitUs(1) = 64));
+  Check('chip erase units are 16, 256, 4000 and 64000 ms',
+        (SFDPChipEraseUnitMs(0) = 16) and (SFDPChipEraseUnitMs(1) = 256) and
+        (SFDPChipEraseUnitMs(2) = 4000) and (SFDPChipEraseUnitMs(3) = 64000));
+
+  WriteLn('SFDP timing: the busy ceiling never goes below the floor');
+  Check('a chip that said nothing keeps the old constant',
+        BusyTimeoutMs(0, 30000, 600000) = 30000);
+  Check('a chip that asked for less still gets the floor',
+        BusyTimeoutMs(50, 30000, 600000) = 30000);
+  Check('a chip that asked for more gets what it asked for',
+        BusyTimeoutMs(90000, 30000, 600000) = 90000);
+  Check('a corrupt table cannot park the program for an hour',
+        BusyTimeoutMs(9999999, 30000, 600000) = 600000);
+end;
+
+// -------------------------------------------- vendor protection layouts
+
+procedure TestVendorLayouts;
+var
+  P: TProtInfo;
+  F, T: cardinal;
+begin
+  WriteLn('Protection: the layout is chosen from the manufacturer byte');
+  Check('Winbond', LayoutOf($EF) = plWinbond);
+  Check('GigaDevice follows Winbond', LayoutOf($C8) = plWinbond);
+  Check('Macronix', LayoutOf($C2) = plMacronix);
+  Check('ISSI follows Macronix', LayoutOf($9D) = plMacronix);
+  Check('Micron', LayoutOf($20) = plMicron);
+  Check('Spansion', LayoutOf($01) = plSpansion);
+  Check('SST', LayoutOf($BF) = plSST);
+  Check('anything else is unknown', LayoutOf($77) = plUnknown);
+
+  //Macronix เก็บ BP ไว้สี่บิต การอ่านด้วยแผนผัง Winbond จะได้แค่สามบิต
+  //แล้วรายงานพื้นที่ที่ถูกล็อกน้อยกว่าความจริง ซึ่งคือการปล่อยให้เขียนทับ
+  WriteLn('Protection: Macronix keeps four protect bits, not three');
+  P := DecodeProtEx($C2, %00101100, 0, %00001000);   //BP = 1011b = 11, TB จาก CR
+  Check('all four bits were read', P.BP = 11);
+  Check('the field is four bits wide', P.BPBits = 4);
+  Check('SEC does not exist here', not P.SEC);
+  Check('the direction came from the configuration register', P.TB);
+
+  P := DecodeProt(%00101100, 0);                     //แผนผังเดิมของ Winbond
+  Check('the Winbond reading of the same byte is only three bits', P.BP = 3);
+
+  WriteLn('Protection: Macronix without the configuration register is honest');
+  P := DecodeProtEx($C2, %00101100, 0, 0);
+  Check('it says the extent is not known', not P.RangeKnown);
+  P := DecodeProtEx($C2, %00000000, 0, 0);
+  Check('but nothing locked is still perfectly knowable', P.RangeKnown);
+
+  //Spansion ใช้บิต 6 กับ 5 เป็นธงความผิดพลาด อ่านเป็น SEC/TB คือได้ทิศทาง
+  //การล็อกที่กลับหัวทุกครั้งที่คำสั่งก่อนหน้าล้มเหลว
+  WriteLn('Protection: Spansion bits 6 and 5 are error flags, not SEC and TB');
+  P := DecodeProtEx($01, %01100100, 0, 0);
+  Check('SEC was not taken from bit 6', not P.SEC);
+  Check('TB was not taken from bit 5', not P.TB);
+  Check('BP is still three bits', (P.BP = 1) and (P.BPBits = 3));
+
+  WriteLn('Protection: Micron puts BP3 at bit 6 and TB at bit 5');
+  P := DecodeProtEx($20, %01100100, 0, 0);
+  Check('BP3 was lifted out of bit 6', P.BP = 9);
+  Check('TB came from bit 5', P.TB);
+
+  //บนแผนผังสี่บิต BP = 7 เป็นค่ากลาง ๆ ไม่ใช่ "ล็อกทั้งชิป"
+  WriteLn('Protection: BP=7 only means the whole chip on a three bit layout');
+  P := DecodeProt(%00011100, 0);
+  Check('three bit layout: the whole 8 MB chip is locked',
+        ProtectedRange(P, 8 * 1024 * 1024, F, T) and (F = 0) and
+        (T = 8 * 1024 * 1024 - 1));
+  P := DecodeProtEx($C2, %00011100, 0, %00001000);
+  Check('four bit layout: BP=7 is 4 MB from the bottom, not everything',
+        ProtectedRange(P, 8 * 1024 * 1024, F, T) and (F = 0) and
+        (T = 4 * 1024 * 1024 - 1));
+end;
+
+procedure TestSRLock;
+var
+  P: TProtInfo;
+begin
+  WriteLn('Protection: SRP1:SRP0 says why an unlock will not stick');
+  P := DecodeProt(0, 0);
+  Check('0:0 is a plain software unlock', SRLockState(P) = srlSoftware);
+  Check('and it can be unlocked', CanUnlockBySoftware(P));
+
+  P := DecodeProt($80, 0);
+  Check('0:1 hands the decision to the WP# pin', SRLockState(P) = srlHardware);
+  Check('which we still attempt', CanUnlockBySoftware(P));
+
+  P := DecodeProt(0, $01);
+  Check('1:0 is locked until the next power cycle',
+        SRLockState(P) = srlPowerLock);
+  Check('so software cannot unlock it', not CanUnlockBySoftware(P));
+
+  P := DecodeProt($80, $01);
+  Check('1:1 is permanent', SRLockState(P) = srlPermanent);
+  Check('and no unlock will ever work', not CanUnlockBySoftware(P));
+end;
+
+procedure TestClearProtection;
+var
+  P: TProtInfo;
+  N1, N2: byte;
+begin
+  WriteLn('Unlock: the protect bits go, everything else stays');
+
+  //Winbond: BP=3, TB, SEC, SRP0 ทั้งหมดต้องหายไป
+  //SR2 มี QE ติดอยู่ ซึ่งเป็นบิตที่ห้ามหาย บอร์ดที่บูตจากแฟลชในโหมด quad
+  //จะบูตไม่ขึ้นอีกเลยถ้ามันถูกล้างไปพร้อมกับบิตป้องกัน
+  P := DecodeProtEx($EF, %11101100, %00000010, 0);
+  ClearProtection(P, %11101100, %00000010, N1, N2);
+  Check('every protect bit in SR1 is gone', N1 = 0);
+  Check('quad enable survived the unlock', (N2 and %00000010) <> 0);
+
+  //CMP ต้องหายไปด้วย ไม่งั้นการล้าง BP จนเป็นศูนย์กลายเป็นล็อกทั้งชิป
+  P := DecodeProtEx($EF, %00001100, %01000010, 0);
+  ClearProtection(P, %00001100, %01000010, N1, N2);
+  Check('CMP is cleared, or clearing BP would lock everything',
+        (N2 and %01000000) = 0);
+  Check('and quad enable still survived', (N2 and %00000010) <> 0);
+
+  //WPS ต้องหายไป เพราะไม่งั้นบิต BP ที่เพิ่งล้างไปไม่มีความหมาย
+  P := DecodeProtEx($EF, %00001100, %00000100, 0);
+  ClearProtection(P, %00001100, %00000100, N1, N2);
+  Check('WPS is cleared so the protect bits mean something again',
+        (N2 and %00000100) = 0);
+
+  //Macronix เก็บ QE ไว้ที่บิต 6 ของ SR1 ซึ่งเป็นบิตที่แผนผัง Winbond
+  //เรียกว่า SEC และจะล้างทิ้ง การใช้หน้ากากผิดยี่ห้อจึงล้าง QE โดยไม่ตั้งใจ
+  P := DecodeProtEx($C2, %11111100, 0, 0);
+  ClearProtection(P, %11111100, 0, N1, N2);
+  Check('Macronix: the four protect bits are gone',
+        (N1 and %00111100) = 0);
+  Check('Macronix: bit 6 is quad enable and was left alone',
+        (N1 and %01000000) <> 0);
+  Check('Macronix: the status register write protect bit is gone',
+        (N1 and %10000000) = 0);
+
+  //Spansion บิต 6:5 เป็นธงความผิดพลาดซึ่งเขียนไม่ได้ ต้องไม่ไปยุ่งกับมัน
+  P := DecodeProtEx($01, %11111100, 0, 0);
+  ClearProtection(P, %11111100, 0, N1, N2);
+  Check('Spansion: BP is gone', (N1 and %00011100) = 0);
+  Check('Spansion: the error flags were not touched',
+        (N1 and %01100000) = %01100000);
+
+  WriteLn('Unlock: telling whether it actually worked');
+  Check('a chip with BP set is still protected',
+        StillProtected(DecodeProt(%00001100, 0)));
+  Check('a chip with CMP set is still protected',
+        StillProtected(DecodeProt(0, %01000000)));
+  Check('a chip with WPS set is still protected',
+        StillProtected(DecodeProt(0, %00000100)));
+  Check('a fully cleared chip is not', not StillProtected(DecodeProt(0, 0)));
+  Check('quad enable on its own is not protection',
+        not StillProtected(DecodeProt(0, %00000010)));
+end;
+
+procedure TestProgEraseFail;
+begin
+  WriteLn('Protection: program and erase failures the chip reports itself');
+
+  //Micron flag status register 70h: bit 5 erase error, bit 4 program error
+  //(MT25Q/N25Q datasheet -- the previous assignment was swapped)
+  Check('Micron reports an erase failure from FSR bit 5',
+        ProgEraseFail($20, 0, %00100000, True) = peErase);
+  Check('Micron reports a program failure from FSR bit 4',
+        ProgEraseFail($20, 0, %00010000, True) = peProgram);
+  Check('Micron reports a protection failure',
+        ProgEraseFail($20, 0, %00000010, True) = peProtect);
+  Check('a clean Micron flag register is not a failure',
+        ProgEraseFail($20, 0, %10000000, True) = peNone);
+  Check('without the flag register Micron says nothing',
+        ProgEraseFail($20, $FF, 0, False) = peNone);
+
+  //Spansion อ่านจาก SR1 เอง
+  Check('Spansion reports a program failure from SR1 bit 6',
+        ProgEraseFail($01, %01000000, 0, False) = peProgram);
+  Check('Spansion reports an erase failure from SR1 bit 5',
+        ProgEraseFail($01, %00100000, 0, False) = peErase);
+
+  //Macronix security register 2Bh
+  Check('Macronix reports a program failure',
+        ProgEraseFail($C2, 0, %00100000, True) = peProgram);
+  Check('Macronix reports an erase failure',
+        ProgEraseFail($C2, 0, %01000000, True) = peErase);
+
+  //ห้ามตีความบิต SEC/TB ของ Winbond ว่าเป็นความผิดพลาด ไม่งั้นชิปที่ล็อก
+  //ไว้ตามปกติจะถูกรายงานว่าเสียทุกตัว
+  Check('a Winbond chip with SEC and TB set is not a failure',
+        ProgEraseFail($EF, %01100000, $FF, True) = peNone);
+  Check('an unknown vendor is never guessed at',
+        ProgEraseFail($77, %01100000, $FF, True) = peNone);
+
+  Check('Micron needs the flag status register', VendorStatusOpcode($20) = $70);
+  Check('Macronix needs the security register', VendorStatusOpcode($C2) = $2B);
+  Check('Winbond needs nothing extra', VendorStatusOpcode($EF) = 0);
+end;
+
+// ------------------------------------------------------- image sanity
+
+procedure TestImgCheck;
+var
+  Buf, Buf2: array of byte;
+  S: TImgStats;
+  i: integer;
+  R: TDiffRanges;
+begin
+  WriteLn('Image check: a dump that is all FF is named as such');
+  SetLength(Buf, 4096);
+  FillByte(Buf[0], 4096, $FF);
+  S := ScanImage(@Buf[0], 4096);
+  Check('every byte counted', S.FFCount = 4096);
+  Check('one distinct value', S.DistinctBytes = 1);
+  Check('zero entropy', S.Entropy < 0.0001);
+  Check('the verdict is blank or absent', ImageVerdict(S) = ivAllErased);
+
+  WriteLn('Image check: a dump that is all 00');
+  FillByte(Buf[0], 4096, $00);
+  S := ScanImage(@Buf[0], 4096);
+  Check('the verdict is a silent data line', ImageVerdict(S) = ivAllZero);
+
+  WriteLn('Image check: a wrapped address shows up as a repeat');
+  SetLength(Buf, 4096);
+  for i := 0 to 4095 do Buf[i] := byte(i * 7 + (i div 256));
+  //ทำให้ครึ่งหลังซ้ำครึ่งแรก เหมือนแอดเดรสวนกลับที่ 2K
+  for i := 2048 to 4095 do Buf[i] := Buf[i - 2048];
+  S := ScanImage(@Buf[0], 4096);
+  Check('the stride was found', S.RepeatStride = 2048);
+  Check('the verdict is a wrapped address', ImageVerdict(S) = ivRepeats);
+  Check('the message names the stride',
+        Pos('2048', VerdictText(ivRepeats, S)) > 0);
+
+  WriteLn('Image check: ordinary data is left alone');
+  for i := 0 to 4095 do Buf[i] := byte(i * 31 + (i * i) div 17);
+  S := ScanImage(@Buf[0], 4096);
+  Check('no repeat claimed', S.RepeatStride = 0);
+  Check('the verdict is fine', ImageVerdict(S) = ivOK);
+
+  WriteLn('Image check: known signatures');
+  SetLength(Buf, 1024);
+  FillByte(Buf[0], 1024, 0);
+  Buf[$10] := $5A; Buf[$11] := $A5; Buf[$12] := $F0; Buf[$13] := $0F;
+  Check('an Intel flash descriptor is recognised',
+        DetectImageKind(@Buf[0], 1024) = 'Intel flash descriptor');
+
+  FillByte(Buf[0], 1024, 0);
+  Buf[$28] := byte('_'); Buf[$29] := byte('F');
+  Buf[$2A] := byte('V'); Buf[$2B] := byte('H');
+  Check('a UEFI firmware volume is recognised',
+        DetectImageKind(@Buf[0], 1024) = 'UEFI firmware volume');
+
+  WriteLn('Image check: comparing two reads of the same chip');
+  SetLength(Buf, 1024);
+  SetLength(Buf2, 1024);
+  for i := 0 to 1023 do begin Buf[i] := byte(i); Buf2[i] := byte(i); end;
+  Check('identical reads have no first difference',
+        FirstDifference(@Buf[0], @Buf2[0], 1024) = -1);
+  Check('and no differing bytes',
+        CountDifferences(@Buf[0], @Buf2[0], 1024) = 0);
+
+  Buf2[100] := $FF; Buf2[101] := $FF; Buf2[500] := $00;
+  Check('the first difference is found',
+        FirstDifference(@Buf[0], @Buf2[0], 1024) = 100);
+  Check('all three differing bytes are counted',
+        CountDifferences(@Buf[0], @Buf2[0], 1024) = 3);
+
+  R := DiffRanges(@Buf[0], @Buf2[0], 1024, 16);
+  Check('adjacent differences collapse into one range', Length(R) = 2);
+  Check('the first range is 100 to 101',
+        (R[0].First = 100) and (R[0].Last = 101));
+  Check('the second range is the single byte at 500',
+        (R[1].First = 500) and (R[1].Last = 500));
+end;
+
+// -------------------------------- the erase planner, over random inputs
+
+//แผนการลบคือที่ที่บั๊กทำให้ข้อมูลของคนอื่นหายจริง ๆ การทดสอบด้วยตัวอย่าง
+//ที่เลือกมาเองจะเจอเฉพาะสิ่งที่คนเขียนนึกออก ตรงนี้จึงยิงค่าสุ่มใส่แล้ว
+//ตรวจคุณสมบัติที่ต้องเป็นจริงเสมอ ไม่ว่าค่าที่เข้าไปจะเป็นอะไร
+procedure TestPlanProperties;
+const
+  ROUNDS = 3000;
+var
+  Info: TSFDPInfo;
+  Plan: TErasePlan;
+  ChipSize, Start, Len, F, T: cardinal;
+  i, r, RegionCount: integer;
+  Ok, Contiguous, Aligned, InBounds, Covers: boolean;
+  Bad: string;
+begin
+  WriteLn('Erase planner: properties that must hold for any request');
+  RandSeed := 20260727;
+  Bad := '';
+
+  for r := 1 to ROUNDS do
+  begin
+    FillChar(Info, SizeOf(Info), 0);
+    Info.Valid := True;
+    Info.HasSectorMap := True;
+
+    //ชนิดการลบมาตรฐาน 4K, 32K, 64K
+    Info.EraseTypes[1].Size := 4096;   Info.EraseTypes[1].Opcode := $20;
+    Info.EraseTypes[2].Size := 32768;  Info.EraseTypes[2].Opcode := $52;
+    Info.EraseTypes[3].Size := 65536;  Info.EraseTypes[3].Opcode := $D8;
+
+    //แผนผังแบบสุ่ม: ช่วงหัวและท้ายใช้ 4K ช่วงกลางใช้ได้ทุกขนาด
+    RegionCount := 1 + Random(3);
+    ChipSize := 0;
+    for i := 0 to RegionCount - 1 do
+    begin
+      Info.Regions[i].Size := cardinal(1 + Random(16)) * 65536;
+      if Random(2) = 0 then
+        Info.Regions[i].EraseTypeMask := %0001     //4K เท่านั้น
+      else
+        Info.Regions[i].EraseTypeMask := %0111;    //4K, 32K, 64K
+      Inc(ChipSize, Info.Regions[i].Size);
+    end;
+    Info.RegionCount := RegionCount;
+    Info.Density := ChipSize;
+
+    Start := cardinal(Random(integer(ChipSize)));
+    Len   := 1 + cardinal(Random(integer(ChipSize)));
+
+    if not PlanEraseSFDP(Info, Start, Len, ChipSize, Plan) then Continue;
+
+    //1. ทุกขั้นต้องอยู่บนขอบของก้อนขนาดของตัวเอง
+    //   ลบก้อนที่แอดเดรสไม่ตรงขอบ ชิปจะปัดลงเอง แล้วไปลบของที่อยู่ข้างล่าง
+    Aligned := True;
+    for i := 0 to High(Plan) do
+      if (Plan[i].Size = 0) or ((Plan[i].Addr mod Plan[i].Size) <> 0) then
+        Aligned := False;
+    if not Aligned then Bad := 'a step was not aligned to its own size';
+
+    //2. ขั้นต้องต่อกันสนิท ไม่ทับกัน ไม่มีรู
+    Contiguous := True;
+    for i := 1 to High(Plan) do
+      if Plan[i].Addr <> Plan[i-1].Addr + Plan[i-1].Size then Contiguous := False;
+    if not Contiguous then Bad := 'the steps were not contiguous';
+
+    //3. ห้ามเลยขอบชิป
+    InBounds := PlanBounds(Plan, F, T) and (T <= ChipSize);
+    if not InBounds then Bad := 'the plan ran past the end of the chip';
+
+    //4. ต้องครอบคลุมสิ่งที่ผู้ใช้ขอให้ลบทั้งหมด
+    //   แผนที่กินน้อยกว่าที่ขอแปลว่าเหลือข้อมูลเก่าค้างอยู่ แล้วการเขียนทับ
+    //   ลงไปจะได้ผลที่ไม่มีใครอธิบายได้
+    Covers := (F <= Start) and
+              (int64(T) >= Min(int64(Start) + int64(Len), int64(ChipSize)));
+    if not Covers then Bad := 'the plan did not cover the requested range';
+
+    //5. ผลรวมต้องเท่ากับช่วงที่ครอบคลุม ซึ่งตามมาจากข้อ 2 แต่ตรวจไว้อีกชั้น
+    if PlanTotalBytes(Plan) <> (T - F) then
+      Bad := 'the byte total did not match the bounds';
+
+    if Bad <> '' then
+    begin
+      WriteLn(Format('    round %d: chip=%d start=%d len=%d regions=%d',
+                     [r, ChipSize, Start, Len, RegionCount]));
+      Break;
+    end;
+  end;
+
+  Ok := Bad = '';
+  Check(Format('%d random requests all planned correctly', [ROUNDS]), Ok);
+  if not Ok then WriteLn('    ', Bad);
+end;
+
+// ------------------------------------------ real SFDP tables, decoded offline
+
+//ค่าที่ manifest คาดไว้สำหรับตารางหนึ่งตาราง
+function ExpectedValue(const Line, Key: string; out Value: string): boolean;
+var
+  P: integer;
+  Rest: string;
+begin
+  Value := '';
+  P := Pos(' ' + Key + '=', ' ' + Line);
+  if P = 0 then Exit(False);
+
+  Rest := Copy(' ' + Line, P + Length(Key) + 2, MaxInt);
+  P := Pos(' ', Rest);
+  if P > 0 then Rest := Copy(Rest, 1, P - 1);
+  Value := Trim(Rest);
+  Result := Value <> '';
+end;
+
+//เทียบตารางหนึ่งตารางกับบรรทัดหนึ่งบรรทัดของ manifest
+procedure CheckFixture(const FileName, Line: string);
+var
+  F: TFileStream;
+  Buf: array of byte;
+  Info: TSFDPInfo;
+  V: string;
+
+  procedure Want(const Key: string; Actual: int64);
+  var
+    Exp: int64;
+    S: string;
+  begin
+    if not ExpectedValue(Line, Key, S) then Exit;
+    Exp := StrToInt64Def(S, -1);
+    Check(Format('%s: %s is %d', [ExtractFileName(FileName), Key, Exp]),
+          Actual = Exp);
+  end;
+
+  procedure WantHex(const Key: string; Actual: byte);
+  var
+    S: string;
+  begin
+    if not ExpectedValue(Line, Key, S) then Exit;
+    Check(Format('%s: %s is %s', [ExtractFileName(FileName), Key, S]),
+          UpperCase(IntToHex(Actual, 2)) = UpperCase(S));
+  end;
+
+  procedure WantErase(const Key: string; Idx: integer);
+  var
+    S, SizePart, OpPart: string;
+    P: integer;
+  begin
+    if not ExpectedValue(Line, Key, S) then Exit;
+    P := Pos('/', S);
+    SizePart := Copy(S, 1, P - 1);
+    OpPart := Copy(S, P + 1, MaxInt);
+    Check(Format('%s: %s is %s', [ExtractFileName(FileName), Key, S]),
+          (Info.EraseTypes[Idx].Size = cardinal(StrToInt64Def(SizePart, -1))) and
+          (UpperCase(IntToHex(Info.EraseTypes[Idx].Opcode, 2)) = UpperCase(OpPart)));
+  end;
+
+begin
+  F := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
+  try
+    SetLength(Buf, F.Size);
+    if F.Size > 0 then F.ReadBuffer(Buf[0], F.Size);
+  finally
+    F.Free;
+  end;
+
+  if not SFDPDetectFromBuffer(@Buf[0], Length(Buf), Info) then
+  begin
+    Check(ExtractFileName(FileName) + ': decoded', False);
+    Exit;
+  end;
+  Check(ExtractFileName(FileName) + ': decoded', True);
+
+  Want('density', Info.Density);
+  Want('page', Info.PageSize);
+  Want('addr', Info.AddrBytes);
+  Want('regions', Info.RegionCount);
+
+  if ExpectedValue(Line, 'sectormap', V) then
+    Check(ExtractFileName(FileName) + ': sector map presence',
+          Info.HasSectorMap = (V = '1'));
+  if ExpectedValue(Line, 'uniform', V) then
+    Check(ExtractFileName(FileName) + ': uniform flag',
+          Info.Uniform = (V = '1'));
+  if ExpectedValue(Line, 'timing', V) then
+    Check(ExtractFileName(FileName) + ': declared timing present',
+          Info.HasTiming = (V = '1'));
+
+  WantErase('erase1', 1);
+  WantErase('erase2', 2);
+  WantErase('erase3', 3);
+
+  WantHex('read4b', Info.Read4BOpcode);
+  WantHex('fastread4b', Info.FastRead4BOpcode);
+  WantHex('prog4b', Info.PageProg4BOpcode);
+  WantHex('erase1op4b', Info.EraseTypes[1].Opcode4B);
+  WantHex('erase3op4b', Info.EraseTypes[3].Opcode4B);
+
+  //ตารางที่แจ้งเวลามาต้องได้เพดานรอที่ใช้ได้จริง ไม่ใช่ศูนย์หรือค่ามหาศาล
+  if Info.HasTiming then
+  begin
+    Check(ExtractFileName(FileName) + ': the page program ceiling is sane',
+          (Info.PageProgTimeMaxMs > 0) and (Info.PageProgTimeMaxMs < 60000));
+    Check(ExtractFileName(FileName) + ': the chip erase ceiling is sane',
+          (Info.ChipEraseTimeMaxMs > 0) and (Info.ChipEraseTimeMaxMs < 3600000));
+  end;
+end;
+
+//ไล่ทุกตารางที่วางไว้ใน tests\sfdp
+//
+//ตารางที่ดัมป์มาจากชิปจริงด้วย --sfdp-dump วางลงไปได้เลย เติมหนึ่งบรรทัดใน
+//manifest แล้วมันจะกลายเป็นเทสต์กันการถอยหลังของชิปตัวนั้นตลอดไป โดยที่
+//คนที่รันเทสต์ไม่ต้องมีชิปตัวนั้นอยู่ในมือ
+procedure TestSFDPCorpus;
+var
+  Dir, Line, FileName: string;
+  Manifest: TextFile;
+  Count: integer;
+begin
+  WriteLn('SFDP corpus: tables decoded straight from a file');
+
+  Dir := 'sfdp' + DirectorySeparator;
+  if not FileExists(Dir + 'manifest.txt') then
+  begin
+    WriteLn('  --   no corpus next to the test, skipped');
+    Exit;
+  end;
+
+  Count := 0;
+  AssignFile(Manifest, Dir + 'manifest.txt');
+  Reset(Manifest);
+  try
+    while not Eof(Manifest) do
+    begin
+      ReadLn(Manifest, Line);
+      Line := Trim(Line);
+      if (Line = '') or (Line[1] = '#') then Continue;
+
+      FileName := Dir + Copy(Line, 1, Pos(' ', Line + ' ') - 1);
+      if not FileExists(FileName) then
+      begin
+        Check('the manifest names a file that is there: ' + FileName, False);
+        Continue;
+      end;
+
+      CheckFixture(FileName, Line);
+      Inc(Count);
+    end;
+  finally
+    CloseFile(Manifest);
+  end;
+
+  Check(Format('%d tables in the corpus were all decoded', [Count]), Count > 0);
+end;
+
 begin
   WriteLn('AsProgrammer ProX unit tests');
   WriteLn;
@@ -655,6 +1231,15 @@ begin
   TestAlignErase;
   TestPlanUniform;
   TestPlanSectorMap;
+  TestPlanProperties;
+  Test4ByteDecision;
+  TestSFDPTiming;
+  TestVendorLayouts;
+  TestSRLock;
+  TestClearProtection;
+  TestProgEraseFail;
+  TestImgCheck;
+  TestSFDPCorpus;
 
   WriteLn;
   if Failures = 0 then

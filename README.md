@@ -6,7 +6,7 @@
 
 Sector-level erase · SFDP auto-detect · checksums · responsive UI
 
-![version](https://img.shields.io/badge/version-4.0-2BB3F3?style=flat-square)
+![version](https://img.shields.io/badge/version-4.4-2BB3F3?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
 ![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
@@ -24,12 +24,23 @@ programmers, while staying free and open source.
 | | |
 |---|---|
 | **Sector / block erase** | Erase only the sectors covering a range instead of the whole chip. 4 KB (`20h`), 32 KB (`52h`), 64 KB (`D8h`), or the size declared by the chip. |
-| **Smart write** | Unlock → erase just the needed sectors → write → verify, in one action. Patch a region of a BIOS without touching the rest. |
+| **Transactional Smart write** | Takes two matching full-chip snapshots, builds a preservation-aware differential plan, unlocks safely, then programs and fully verifies every affected erase block. A `0→1` change erases only its containing block and restores untouched neighbour bytes from the trusted snapshot; pure `1→0` changes skip erase. Identity, exact transfer counts, WEL, BUSY, cancellation cleanup, and evidence are one typed operation rather than loosely chained buttons. |
 | **SFDP auto-detect** | Reads the JEDEC JESD216 parameter table from the chip itself (`5Ah`) and fills in size, page size, address width and erase types. Works on chips missing from the database. Also reads the **4-byte address instruction table** (`FF84h`), **DWORD-16** (how *this* chip enters 4-byte mode, and whether its status register needs `06h` or `50h`) and the **sector map** (`FF81h`), so parts with boot blocks of a different size are reported instead of silently mis-erased. |
 | **Write protection guard** | Before every erase and write, the status register is decoded and the protected range compared against the target. A locked chip accepts the command and silently ignores it, which otherwise shows up much later as an unexplained verify failure. When `WPS=1` the BP bits mean nothing, so the individual block locks are read back one block at a time with `3Dh` — 4 KB granularity across the boot blocks, 64 KB elsewhere — instead of giving up and letting the write through unchecked. |
 | **Erase follows the chip's own map** | When the chip publishes an SFDP sector map, the erase is planned against it: boot-block parts are erased with the sector size that region actually uses, and long runs use the largest erase opcode that still fits inside the requested range. A whole-chip erase of a boot-block 8 MB part takes 158 commands instead of 2048. |
 | **Four byte addressing without mode switching** | Chips over 128 Mbit that publish a 4-byte address instruction table are driven with their own `13h` / `12h` / `21h` / `DCh` opcodes, so the chip is never left in a sticky 4-byte mode. Where a mode switch is still needed it is unwound in a `finally`, so a cancelled or failed job cannot leave the chip in a state the next tool reads as garbage. |
 | **Empty socket is named as such** | A missing, unpowered or back-to-front chip reads `FFh` from the status register, which looks exactly like "busy forever". That is now detected in half a second and reported as no chip answering, rather than after the full timeout — up to ten minutes on a chip erase — as "the chip stayed busy". |
+| **Read twice and compare** | A SOIC clip with one marginal contact returns a dump that is the right size, reads every byte, raises nothing, and is wrong. Reading the chip twice and diffing is the only thing that catches it. When the passes disagree the dump is refused rather than guessed at — there is no way to tell which pass was right. |
+| **The connection is checked before anything is touched** | The JEDEC id is read eight times before every read, write and erase. If it is not identical every time, the job stops before a single byte moves. |
+| **Write enable is confirmed, not assumed** | `WREN` is followed by a status register read to confirm `WEL` actually latched. A chip with `WP#` held low accepts `WREN`, ignores it, and then silently ignores everything after it. That used to surface as "verify failed at every address" after the whole write; now it is *"the chip did not accept write enable"* before the first page. |
+| **Program and erase failures the chip reports itself** | Micron's flag status register (`70h`), Macronix's security register (`2Bh`) and Spansion's `SR1` error bits are read after each erase and program. Those parts clear BUSY normally and raise a flag instead, so a failed erase used to pass unnoticed unless verify happened to be on. |
+| **The erase is checked to have taken** | A protected chip accepts the erase command, clears BUSY, and keeps its data. Each erased block is spot-checked afterwards, so *"the erase did not take"* is reported instead of a write over live data. |
+| **Vendor-aware protection bits** | Macronix and ISSI keep **four** protect bits where Winbond keeps three, so reading them the Winbond way reported a smaller locked area than the real one and let writes through. Spansion uses bits 6 and 5 as error flags, not `SEC`/`TB`. Each family is now decoded by its own layout, and a vendor whose layout is not known says so rather than guessing. |
+| **`SRP1:SRP0` explained** | The four combinations mean genuinely different things. Instead of an unexplained failure later you get *"hold WP# high or the unlock will be accepted and silently ignored"*, or *"this chip is permanently locked"*. |
+| **Timeouts come from the chip** | JESD216 DWORD-10 and DWORD-11 carry each part's real erase and program times. A 256 Mbit chip erase that legitimately needs twelve minutes is no longer cut off at ten, and a page write that should take 3 ms no longer blocks for five seconds before admitting failure. |
+| **Fast read** | Reads use `0Bh` (or `0Ch` for native four-byte parts) when the chip publishes SFDP. `03h` is specified to roughly 33–50 MHz on most parts, which is right at the edge of the clocks the FT232H and CH347 already run at. |
+| **Stuck chips are recovered** | A chip left in QPI mode or four-byte mode by another tool answers `9Fh` with all-`00` or all-`FF` and reads as dead. A QPI exit and a JEDEC soft reset (`66h`/`99h`) are tried before believing it. |
+| **The dump itself is checked** | After a read: entropy, the FF/00 ratio, and whether the image repeats at some stride. *"Every byte is FF"* and *"the dump repeats every 1 MB, so the address wrapped and the selected size is too large"* are the two commonest silent failures, and both are now named. Intel flash descriptors, UEFI volumes and coreboot images are identified. |
 | **Save a detected chip** | A chip found only through SFDP can be written into `chiplist-user.xml` and is picked up from then on. Kept separate from the shipped list so a program update never overwrites it. |
 | **Production traceability** | Each chip's factory unique id (`4Bh`) is logged with a timestamp, the image CRC32 and pass/fail. Optionally refuses a chip whose id already passed, so nothing is programmed or shipped twice. |
 | **Job files** | A one-line `crc32=` file pins the approved image. If the loaded buffer does not match, the write is refused — the cheapest guard against programming the wrong revision. |
@@ -74,7 +85,15 @@ Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-
 4. Connect the chip, press **Read ID**. If the chip is not in the list, use
    **Chip → Detect chip via SFDP**.
 5. Press **Read** to dump, or load a file and use the write button's dropdown →
-   *Unlock → erase only needed sectors → write → verify*.
+   **Smart write** for a preservation-aware, differential write with full
+   affected-block verification.
+
+The **Safe workflow** strip keeps the normal path visible: **Detect chip →
+Open image → Smart write**. Each step enables only when its prerequisites are
+present, and the message on the right says what is missing. Useful shortcuts
+are `F5` to detect, `Ctrl+O` to open an image, `Ctrl+R` to read,
+`Ctrl+Shift+P` for Smart Write, `Ctrl+Shift+V` to verify, and `Esc` to request
+a safe cancellation.
 
 > **Wrong voltage kills chips.** 1.8 V parts must never see 3.3 V or 5 V. Power them from an
 > external 1.8 V supply, tie all grounds together, and set the programmer output to open-drain.
@@ -91,6 +110,7 @@ as the buttons, so there is no second implementation to keep in step.
 AsProgrammer.exe --detect
 AsProgrammer.exe --read dump.bin  --chip W25Q64BV
 AsProgrammer.exe --write fw.hex   --chip W25Q64BV --erase --verify
+AsProgrammer.exe --write patch.bin --chip W25Q64BV --smart
 AsProgrammer.exe --verify fw.bin  --chip W25Q64BV
 AsProgrammer.exe --read dump.bin  --sfdp
 AsProgrammer.exe --help
@@ -103,6 +123,30 @@ AsProgrammer.exe --help
 | `0` | The operation succeeded |
 | `1` | The operation failed: verify mismatch, chip still protected, busy timeout, no programmer |
 | `2` | Wrong usage: unknown switch, missing file, no chip selected |
+
+### Checking
+
+```
+AsProgrammer.exe --read dump.bin --chip W25Q64BV --read-passes 2
+AsProgrammer.exe --compare approved.bin --chip W25Q64BV
+AsProgrammer.exe --sfdp-dump w25q64.sfdp.bin
+AsProgrammer.exe --sfdp-decode w25q64.sfdp.bin      # no hardware needed
+AsProgrammer.exe --scan dump.bin                    # no hardware needed
+```
+
+| Switch | Effect |
+|---|---|
+| `--read-passes N` | Read the chip N times (1–16) and fail if the reads disagree. The only thing that catches a clip making a marginal contact: the dump is otherwise indistinguishable from a good one |
+| `--compare FILE` | Compare the chip against `FILE` and report the first difference |
+| `--sfdp-dump FILE` | Write the chip's raw SFDP table to `FILE` |
+| `--sfdp-decode FILE` | Decode a table saved earlier, with no chip attached |
+| `--scan FILE` | Report on a dump without any hardware: entropy, a wrapped address, an all-FF read, the image type. Exit code 1 if it looks wrong |
+| `--no-fast-read` | Use `03h` instead of `0Bh` even when the chip declares SFDP |
+| `--smart` | Run SPI NOR through the transactional differential planner and executor. The planner preserves bytes outside the patch, performs only required erases/programs, and fully verifies affected blocks |
+| `--smart --plan-only` | Dry run: take the trusted snapshot, build the differential plan, and print it — erase blocks per opcode, program pages, verify coverage, and the chip-declared worst-case time — without touching the status register or writing anything |
+
+`--scan` and `--sfdp-decode` never touch a programmer, so they work on a
+machine that has none.
 
 `--hw` forces a programmer (`ch341`, `ch347`, `ft232h`, `usbasp`, `avrisp`,
 `arduino`, `buzzpirat`); without it the one that is plugged in is used.
@@ -132,6 +176,7 @@ AsProgrammer.exe --write fw.bin --chip W25Q64BV --erase --verify \
 | `--operator NAME` | Recorded in the log |
 | `--force` | Proceed even when the target area is write protected, or the chip already passed |
 | `--save-chip NAME` | Save the SFDP-detected chip into `chiplist-user.xml` |
+| `--export-chip NAME` | Write `NAME.export.txt` (a ready-to-contribute `chiplist.xml` line plus instructions) and `NAME.sfdp.bin` (a drop-in regression fixture for `tests/sfdp/`). One detected chip on your bench becomes coverage for everyone |
 
 A job file is plain `key=value`; `#` starts a comment. Any key may be omitted,
 and only the keys present are checked:
@@ -143,11 +188,39 @@ size=8388608
 crc32=0xDEADBEEF
 ```
 
+For a fail-closed production station, use an authenticated production manifest
+instead of the legacy optional job file:
+
+```powershell
+$env:ASPX_LINE_HMAC = '<hex-encoded secret of at least 32 bytes>'
+AsProgrammer.exe --prod-job product-a.job --prod-auth product-a.job.auth `
+  --prod-key-id line-a-2026 --prod-key-env ASPX_LINE_HMAC `
+  --evidence-dir D:\aspx-evidence --chip W25Q64JV
+```
+
+| Switch | Strict production meaning |
+|---|---|
+| `--prod-job FILE` | Canonical production manifest; its authenticated image path, range, chip profile, electrical limits, verification, UID, and read-pass requirements become the immutable request |
+| `--prod-auth FILE` | Detached HMAC-SHA-256 authentication record for the exact manifest bytes |
+| `--prod-key-id ID` | Independently configured key identifier that must match the authentication record |
+| `--prod-key-env NAME` | Name of the environment variable containing the hex HMAC key. The key itself must never be placed on the command line or in logs |
+| `--evidence-dir DIR` | Durable evidence destination. A programmed unit is not reported as PASS until full physical verification, atomic publication of the HMAC-signed evidence envelope, and recording into the station's HMAC-chained `consumed.log` anti-replay state all succeed. That state also refuses stale job revisions, already-passed chip UIDs, and a station clock that moved backwards |
+
+The five strict-production switches are used together. The image is read from
+the already verified, retained manifest image handle rather than reopened by
+filename. This mode is SPI-NOR-only and automatically enters transactional
+Smart Write; combining it with `--write`, legacy `--job`, or `--erase` is a
+usage error. Admission fails closed on authentication, expiry, chip-profile,
+programmer/adapter, or live electrical-preflight uncertainty. See
+[the production security model](docs/production-job-security.md) for the trust
+boundary and deployment requirements.
+
 ## Runtime files
 
-The `.exe` alone will not start. These must sit next to it — the DLL imports are static, so Windows
-resolves them at process start even for hardware you never touch. A missing one produces a
-*"cannot proceed because … .DLL was not found"* system error that looks like a broken build.
+The `.exe` starts on its own: every hardware DLL is loaded at run time, so you only need the
+files for the programmers you actually use. A missing DLL makes that one programmer report as
+absent — the same as if it were unplugged — instead of the old *"cannot proceed because … .DLL
+was not found"* system error before the window even opened.
 
 | File | Needed for |
 |---|---|
@@ -275,9 +348,33 @@ invariant stops the build rather than reaching a chip. None of it needs hardware
 | Suite | Covers |
 |---|---|
 | `tests\fftest.lpr` | Intel HEX and S-record round trips, sparse files, bad checksums, extended linear addressing |
-| `tests\unittests.lpr` | SFDP parsing (basic table, DWORD-16, `FF84h`, sector maps), write protection decoding, individual block lock scanning, erase and write planning (`flashops`), the operation result channel, the production log and job files |
+| `tests\unittests.lpr` | SFDP parsing (basic table, DWORD-16, DWORD-10/11 timing, `FF84h`, sector maps), per-vendor write protection decoding, `SRP1:SRP0`, the program/erase failure flags, individual block lock scanning, erase and write planning (`flashops`), image sanity checks (`imgcheck`), the operation result channel, the production log and job files |
 | `tests\hwtests.lpr` | The real `spi25` and `i2c` protocol layers driven through `tests\mockhw.pas`, a programmer that exists only in memory. Asserts on the exact opcodes sent and on how each I²C address type is split |
-| `tools\validate_chiplist.py` | Duplicate chip entries, bad ids, page/sector/size sanity across both chip tables |
+| `tests\adapter\spi25noradapter_tests.lpr` | The real hardware adapter's exact SPI framing, repeated JEDEC identity gate, native and stateful four-byte strategies, short-transfer rejection, and exactly-once cleanup |
+| `tests\norengine_tests.lpr` | Preservation-aware differential plans, typed operation outcomes, cancellation boundaries, deterministic failure injection at every device call, and randomized invariants |
+| `tests\sfdp_sector_map_tests.lpr` | JESD216 sector-map descriptor bit semantics and fail-closed rejection of unresolved or ambiguous maps |
+| `tests\sfdp\` | Whole SFDP tables decoded straight from a file and checked against `manifest.txt`. Dump a table from any chip with `--sfdp-dump`, drop it in, add one manifest line, and that part can never silently regress again — including for people who do not own it |
+| `tests\chipprofile\chipprofile_tests.lpr` | Stable canonical SPI NOR profile bytes and strict rejection of ambiguous records before production hashing |
+| `tests\stage9tests.lpr` | HMAC-authenticated manifests, retained image handles, electrical preflight, atomic durable evidence envelopes (unsigned and HMAC-signed), and the HMAC-chained anti-replay production state |
+| `tools\validate_chiplist.py` | Duplicate chip entries, bad ids, page/sector/size sanity, erase opcodes that no 25-series part defines, and supply voltages outside anything a serial flash runs at |
+
+The erase planner is also tested against **3000 randomly generated requests**
+per run, asserting the four properties that must hold whatever goes in: every
+step is aligned to its own size, the steps are contiguous, nothing runs past
+the end of the chip, and the plan covers everything that was asked for. That
+function is where a bug destroys somebody's data, and hand-picked examples only
+find the cases the author already thought of.
+
+The platform-independent suites are LCL-free, so they also build and run on
+Linux and macOS:
+
+```bash
+./tools/build.sh          # needs fp-compiler; runs everything, no hardware
+```
+
+CI runs the Windows build and, separately, the same suites on Linux x86-64 — a
+second compiler and a second word size over the code that decides whether a
+chip survives.
 
 The two Pascal suites need different versions of `spi25`: the logic tests link a stub that
 serves a synthetic SFDP image, the protocol tests link the real unit. `build.ps1` keeps them
@@ -293,21 +390,34 @@ records every byte and the tests assert on the transcript.
 software/
   main.pas / main.lfm     main window, flash operations, options
   spi25.pas               25-series SPI primitives (no LCL, no main — testable)
+  spi25noradapter.pas     exact real-hardware adapter for the NOR executor
+  operationmodel.pas      immutable requests, typed outcomes/events, cancellation
+  norplanner.pas          preservation-aware differential erase/program plans
+  norengine.pas           fail-closed single-owner transactional executor
   flashops.pas            erase and write planning arithmetic (likewise testable)
   spi45.pas spi95.pas     DataFlash and SPI EEPROM
   i2c.pas microwire.pas   I²C and MicroWire
-  sfdp.pas                JESD216 parameter table parser
-  protbits.pas            status register / write protection decoding
+  sfdp.pas                JESD216 parameter table parser, including declared timing
+  protbits.pas            status register / write protection decoding, per vendor
+  imgcheck.pas            what a dump looks like: entropy, wrapped address, image type
   opresult.pas            the result of the last operation, and the exit code
   prodlog.pas             production CSV log and job files
+  prodjob.pas prodcrypto.pas productiongate.pas
+                          authenticated production admission
+  chipprofile.pas         canonical hashable SPI NOR definitions
+  electricalpreflight.pas typed fail-closed electrical policy
+  prodevidence.pas        atomic durable run evidence
   chipsave.pas            writing chips into chiplist-user.xml
   opthread.pas            worker thread for long operations
   basehw.pas              hardware abstraction, owns the AsProgrammer instance
   ch341hw ch347hw ft232hhw usbasphw avrisphw arduinohw buzzpirathw
   pascalc.pas             script interpreter
 tests/mockhw.pas          in-memory programmer for the protocol tests
-tools/build.ps1           validate, test, build, package
+tests/sfdp/               SFDP tables plus the manifest of what each should decode to
+tools/build.ps1           validate, test, build, package (Windows)
+tools/build.sh            the hardware-free suites on Linux and macOS
 tools/validate_chiplist.py
+tools/make_sfdp_fixtures.py
 tools/make_icons.ps1      icon set generator
 chiplist.xml              chip database
 ```
@@ -323,9 +433,15 @@ Build the x86 Debug configuration of `software\buzzpirathlp\buzzpirathlp.sln` in
 ## Notes & caveats
 
 - **Background operations** are experimental. Off by default; leave them off until you have tested
-  on a chip you can afford to lose. With the option off the behaviour is identical to v3.
+  on a chip you can afford to lose. As of 4.4 they cover I²C, MicroWire and the 45/95/KB families
+  too — before that the option silently applied to SPI-25 only.
 - With background operations off, long transfers freeze the window. That is expected, not a crash —
   watch the log and be patient.
+- **Fast read is on by default** for chips that publish an SFDP table, because `03h` is out of spec
+  at the clocks the FT232H and CH347 run at. If a chip misbehaves, turn it off in *Options* or pass
+  `--no-fast-read`, and please report it.
+- The **connection check** costs eight `9Fh` reads before each operation. If you are driving a
+  chip that cannot answer `9Fh`, turn it off in *Options*.
 - **Virtual machines and USB hubs cause problems.** Use a native OS and a direct port.
 - Use a **short, good quality USB cable**. On the Bus Pirate keep protocol clocks around 100 kHz;
   long cables, clip adapters and low voltages all demand slower clocks.

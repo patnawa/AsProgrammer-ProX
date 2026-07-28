@@ -20,6 +20,40 @@ from collections import defaultdict
 MAX_PAGE = 2048
 PAGE_KEYWORDS = {"SSTB", "SSTW"}
 
+# The erase opcodes a 25 series part can actually define, and the size each one
+# covers on a part that follows the modern convention.
+#
+# These sizes are a convention, not a rule, and two families in the shipped
+# tables legitimately break it: the Atmel AT25F series erases 64 KB with 0x52,
+# and the original Micron M25P05 and M25P10 erase 32 KB with 0xD8. So a size
+# that disagrees is reported as something to check against the datasheet, not
+# as an error -- failing the build on correct data would be worse than the typo
+# this is looking for.
+#
+# None means the opcode exists but its granularity is vendor specific, so only
+# the opcode itself is checked.
+ERASE_OPCODE_SIZE = {
+    0x20: 4096,      # sector erase, 3 byte address
+    0x21: 4096,      # sector erase, 4 byte address
+    0x52: 32768,     # half block erase
+    0x5C: 32768,     # half block erase, 4 byte address
+    0xD8: 65536,     # block erase
+    0xDC: 65536,     # block erase, 4 byte address
+    0x40: None,      # Atmel and SST small sector erase
+    0x50: None,      # Atmel page erase on some parts
+    0x81: None,      # Atmel page erase
+    0xD7: None,      # SST 4K on some older parts
+}
+ERASE_OPCODES = set(ERASE_OPCODE_SIZE)
+KNOWN_ERASE_TEXT = ", ".join(f"0x{c:02X}" for c in sorted(ERASE_OPCODES))
+
+# Entries that are right even though they disagree with the convention above.
+# Listing them keeps the warning list short enough that somebody reads it.
+ERASE_SIZE_EXCEPTIONS = {
+    ("AT25F2048", 0x52), ("AT25F4096", 0x52),
+    ("M25P05", 0xD8), ("M25P10", 0xD8),
+}
+
 
 class Report:
     def __init__(self):
@@ -107,6 +141,13 @@ def check_chip(rep, path, protocol, vendor, elem):
                 # Erase walks the chip in whole sectors; a size that is not a
                 # multiple of the sector leaves a piece that cannot be erased.
                 rep.error(where, f"size {size} is not a multiple of sector {sector}")
+            elif not is_power_of_two(sector):
+                # Every erase opcode a 25 series part defines covers a power of
+                # two. A sector that is not one means the address arithmetic
+                # will not land on the boundaries the chip actually uses, and
+                # the chip rounds the address down silently -- erasing data
+                # below the range that was asked for.
+                rep.error(where, f"sector {sector} is not a power of two")
 
     # --- sectorcmd ---
     raw_cmd = attrs.get("sectorcmd")
@@ -118,6 +159,36 @@ def check_chip(rep, path, protocol, vendor, elem):
         else:
             if not 0 <= cmd <= 0xFF:
                 rep.error(where, f"sectorcmd is not a single byte: {raw_cmd!r}")
+            elif cmd not in ERASE_OPCODES:
+                # An opcode no 25 series part defines is not a slow erase, it
+                # is no erase at all: the chip ignores the command, the program
+                # sees BUSY clear and calls it a success, and the write that
+                # follows lands on data that was never erased.
+                rep.warn(where, f"sectorcmd 0x{cmd:02X} is not a known erase "
+                                f"opcode ({KNOWN_ERASE_TEXT})")
+
+            if raw_sector is not None and cmd in ERASE_OPCODE_SIZE:
+                want = ERASE_OPCODE_SIZE[cmd]
+                if (want is not None and sector != want
+                        and (name, cmd) not in ERASE_SIZE_EXCEPTIONS):
+                    rep.warn(where, f"sectorcmd 0x{cmd:02X} usually erases {want} "
+                                    f"bytes but sector says {sector}; check the "
+                                    f"datasheet, some older families differ")
+
+    # --- vcc ---
+    raw_vcc = attrs.get("vcc")
+    if raw_vcc is not None:
+        try:
+            vcc = float(raw_vcc)
+        except ValueError:
+            rep.error(where, f"vcc is not a number: {raw_vcc!r}")
+        else:
+            # Getting this wrong in the permissive direction destroys the part
+            # the first time somebody powers it, so an out of range value is an
+            # error rather than a warning.
+            if not 1.0 <= vcc <= 5.5:
+                rep.error(where, f"vcc {vcc} is outside anything a serial "
+                                 f"flash part runs at")
 
     return chip_id.upper() if chip_id else None
 

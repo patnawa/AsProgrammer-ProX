@@ -44,3 +44,22 @@ jobs:
           name: AsProgrammer-ProX
           path: release/*.zip
           if-no-files-found: error
+
+  # The GUI is Windows only, but nothing that decides whether a chip survives
+  # lives in the GUI. The parser, the erase planner, the protection decoder and
+  # the protocol layers are all LCL free, so they get a second compiler and a
+  # second target here. A pointer bug that i386 tolerates and x86-64 does not
+  # is exactly the kind of thing this catches for free.
+  linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Free Pascal
+        run: sudo apt-get update && sudo apt-get install -y fp-compiler
+
+      - name: Run the hardware-free suites
+        run: |
+          chmod +x tools/build.sh
+          ./tools/build.sh

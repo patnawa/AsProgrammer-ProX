@@ -78,11 +78,11 @@ errorCode := USBOPEN_ERR_NOTFOUND;
     if didUsbInit=0 then
       begin
         didUsbInit := 1;
-        usb_init;
+        usb_init();
       end;
-    usb_find_busses;
-    usb_find_devices;
-    bus := usb_get_busses;
+    usb_find_busses();
+    usb_find_devices();
+    bus := usb_get_busses();
     While assigned(bus) do
       begin
         dev := bus^.devices;

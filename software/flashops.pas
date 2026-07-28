@@ -28,6 +28,25 @@ type
 
   TErasePlan = array of TEraseStep;
 
+//แอดเดรสเกิน 3 ไบต์หรือไม่ ชิปที่ใหญ่กว่า 128Mbit ต้องใช้แอดเดรส 4 ไบต์
+const
+  ADDR_3BYTE_LIMIT = 16777216;   //16MB คือทั้งหมดที่แอดเดรส 3 ไบต์เข้าถึงได้
+
+//งานนี้ต้องใช้แอดเดรส 4 ไบต์หรือไม่
+//
+//ตัวตัดสินคือแอดเดรสสูงสุดที่จะถูกแตะ ไม่ใช่จำนวนไบต์ที่จะถูกแตะ
+//สองอย่างนี้เท่ากันเฉพาะตอนที่งานเริ่มจากแอดเดรสศูนย์เท่านั้น
+//
+//เดิมทางเขียนกับทางตรวจตัดสินจากความยาวของบัฟเฟอร์ ผลคือการเขียนภาพ 4MB
+//ลงชิป 32MB ที่แอดเดรส 16MB ถูกส่งด้วยแอดเดรส 3 ไบต์ ซึ่งเก็บ 16MB ไม่ได้
+//แอดเดรสจึงวนกลับไปที่ 0 แล้วข้อมูลไปทับบล็อกแรกของชิปแทน
+//และรอบตรวจก็ตัดสินผิดแบบเดียวกัน จึงไปอ่านที่ 0 มาเทียบแล้วรายงานว่าผ่าน
+//
+//ChipSize เป็นตัวตัดสินหลัก เพื่อให้ทางอ่าน ทางเขียน ทางลบ และทางตรวจ
+//ใช้โหมดแอดเดรสเดียวกันเสมอบนชิปตัวเดียวกัน ชิปที่ถูกสลับเข้าโหมด 4 ไบต์
+//แล้วไม่เข้าใจคำสั่งที่มีแอดเดรส 3 ไบต์อีกต่อไป
+function Needs4ByteAddress(StartAddress, RangeLen, ChipSize: cardinal): boolean;
+
 //จำนวนไบต์ที่เขียนได้จนถึงขอบเพจถัดไป
 //
 //ชิปตระกูล 25 จะวนแอดเดรสกลับไปต้นเพจเมื่อเขียนเลยขอบเพจ ไบต์ที่ล้นออกไป
@@ -71,6 +90,16 @@ function PlanBounds(const Plan: TErasePlan; out FromAddr, ToAddr: cardinal): boo
 function PlanAllHave4B(const Plan: TErasePlan): boolean;
 
 implementation
+
+function Needs4ByteAddress(StartAddress, RangeLen, ChipSize: cardinal): boolean;
+begin
+  //ชิปใหญ่ทั้งตัวใช้โหมด 4 ไบต์ ไม่ว่างานนี้จะแตะแค่ไหนก็ตาม
+  if ChipSize > ADDR_3BYTE_LIMIT then Exit(True);
+
+  //ชิปเล็กแต่ช่วงที่ขอเลยขอบ 3 ไบต์ ก็ยังต้องใช้ 4 ไบต์อยู่ดี
+  //บวกด้วย int64 เพราะผลรวมล้น cardinal ได้
+  Result := (int64(StartAddress) + int64(RangeLen)) > ADDR_3BYTE_LIMIT;
+end;
 
 function FirstChunkSize(StartAddress: cardinal; PageSize: word): word;
 var

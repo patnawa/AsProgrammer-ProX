@@ -72,10 +72,19 @@ if ($python) {
 # Put both in one directory and whichever spi25.pas landed last would win.
 Step "running tests"
 
-function Run-Suite($name, $dir, $files) {
+function Run-Suite($name, $dir, $files, [switch]$WithSfdpCorpus) {
   Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force $dir | Out-Null
   Copy-Item $files $dir
+  if ($WithSfdpCorpus) {
+    $corpusSource = "$root\tests\sfdp"
+    if (-not (Test-Path "$corpusSource\manifest.txt")) {
+      Die "the SFDP corpus manifest is missing"
+    }
+    $corpusDest = Join-Path $dir "sfdp"
+    New-Item -ItemType Directory -Force $corpusDest | Out-Null
+    Copy-Item "$corpusSource\*" $corpusDest -Force
+  }
   Push-Location $dir
   & "$fpcBin\fpc.exe" -Twin32 -Pi386 -Mobjfpc -Sh "$name.lpr" | Out-Null
   if (-not (Test-Path "$dir\$name.exe")) { Pop-Location; Die "$name did not compile" }
@@ -95,7 +104,15 @@ Run-Suite "unittests" $logicDir @(
   "$root\software\sfdp.pas", "$root\software\jedec.pas",
   "$root\software\serialnum.pas", "$root\software\protbits.pas",
   "$root\software\opresult.pas", "$root\software\prodlog.pas",
-  "$root\software\fileformats.pas", "$root\software\flashops.pas")
+  "$root\software\fileformats.pas", "$root\software\flashops.pas",
+  "$root\software\imgcheck.pas") -WithSfdpCorpus
+
+# Focused JESD216 sector-map descriptor semantics.  Keep the synthetic spi25
+# provider isolated from the real protocol unit used by the adapter suite.
+$sfdpMapDir = Join-Path $env:TEMP "aspx-tests-sfdp-map"
+Run-Suite "sfdp_sector_map_tests" $sfdpMapDir @(
+  "$root\tests\sfdp_sector_map_tests.lpr", "$root\tests\spi25.pas",
+  "$root\software\sfdp.pas")
 
 # the real SPI 25 and I2C protocol layers, driven through a programmer that is
 # all in memory
@@ -103,7 +120,57 @@ $hwDir = Join-Path $env:TEMP "aspx-tests-hw"
 Run-Suite "hwtests" $hwDir @(
   "$root\tests\hwtests.lpr", "$root\tests\mockhw.pas",
   "$root\software\spi25.pas", "$root\software\basehw.pas",
-  "$root\software\utilfunc.pas", "$root\software\i2c.pas")
+  "$root\software\utilfunc.pas", "$root\software\i2c.pas",
+  "$root\software\electricalpreflight.pas")
+
+# preservation-aware whole-operation service, including deterministic
+# fail-at-every-call and randomized invariant checks
+$norDir = Join-Path $env:TEMP "aspx-tests-nor"
+Run-Suite "norengine_tests" $norDir @(
+  "$root\tests\norengine_tests.lpr", "$root\tests\virtualspi25.pas",
+  "$root\software\operationmodel.pas", "$root\software\norplanner.pas",
+  "$root\software\norengine.pas")
+
+# Real TBaseHardware-to-NOR-service adapter framing, identity gates, exact
+# transfer counts, four-byte strategies, and exactly-once cleanup.
+$adapterDir = Join-Path $env:TEMP "aspx-tests-spi25-adapter"
+Run-Suite "spi25noradapter_tests" $adapterDir @(
+  "$root\tests\adapter\spi25noradapter_tests.lpr",
+  "$root\software\spi25noradapter.pas", "$root\software\spi25.pas",
+  "$root\software\basehw.pas", "$root\software\utilfunc.pas",
+  "$root\software\electricalpreflight.pas",
+  "$root\software\operationmodel.pas", "$root\software\norplanner.pas",
+  "$root\software\norengine.pas")
+
+# legacy EEPROM/DataFlash protocols have different framing rules from SPI NOR
+# and therefore keep their own stateful mock and suite
+$legacyDir = Join-Path $env:TEMP "aspx-tests-legacy"
+Run-Suite "legacy_protocol_tests" $legacyDir @(
+  "$root\tests\legacy_protocol\legacy_protocol_tests.lpr",
+  "$root\tests\legacy_protocol\legacy_mockhw.pas",
+  "$root\software\basehw.pas", "$root\software\utilfunc.pas",
+  "$root\software\electricalpreflight.pas",
+  "$root\software\spi25.pas", "$root\software\i2c.pas",
+  "$root\software\spi95.pas", "$root\software\spi45.pas",
+  "$root\software\microwire.pas")
+
+# authenticated production manifests, durable evidence, and typed electrical
+# capability/preflight policy (Windows CNG supplies SHA-256/HMAC)
+$productionDir = Join-Path $env:TEMP "aspx-tests-production"
+Run-Suite "stage9tests" $productionDir @(
+  "$root\tests\stage9tests.lpr", "$root\software\prodcrypto.pas",
+  "$root\software\prodjob.pas", "$root\software\prodevidence.pas",
+  "$root\software\prodstate.pas",
+  "$root\software\electricalpreflight.pas",
+  "$root\software\productiongate.pas")
+
+# Stable canonical chip-definition bytes used by authenticated production
+# manifests.  This suite is platform-independent even though CNG admission is
+# exercised above only on Windows.
+$profileDir = Join-Path $env:TEMP "aspx-tests-chip-profile"
+Run-Suite "chipprofile_tests" $profileDir @(
+  "$root\tests\chipprofile\chipprofile_tests.lpr",
+  "$root\software\chipprofile.pas")
 
 # --- the program ---
 Step "building AsProgrammer.exe"
@@ -161,5 +228,41 @@ foreach ($d in $dlls) {
 
 $zipOut = "$root\release\AsProgrammer-ProX-$Version.zip"
 Remove-Item $zipOut -ErrorAction SilentlyContinue
-Compress-Archive -Path "$out\*" -DestinationPath $zipOut
+
+# The entries are added one at a time so the paths inside the zip are written
+# with forward slashes.
+#
+# The ZIP spec requires that (APPNOTE 4.4.17.1: every slash must be a forward
+# slash). Compress-Archive writes backslashes, and so does .NET Framework's
+# ZipFile.CreateFromDirectory, which takes the platform separator -- that was
+# only fixed in .NET Core, and this script runs under Windows PowerShell 5.1.
+#
+# Windows Explorer and 7-Zip paper over it. unzip on Linux and macOS does not:
+# it reads 'icons\modern\00_write.png' as one long filename, so the icon set,
+# the translations and the per-chip scripts all land flat in the top directory,
+# and the program silently falls back to its built-in icons with no lang folder.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::Open($zipOut, 'Create')
+try {
+  $prefix = (Resolve-Path $out).Path.TrimEnd('\') + '\'
+  foreach ($file in Get-ChildItem -Recurse -File $out | Sort-Object FullName) {
+    $rel = $file.FullName.Substring($prefix.Length) -replace '\\', '/'
+    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+      $zip, $file.FullName, $rel,
+      [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+  }
+} finally {
+  $zip.Dispose()
+}
+
+# A zip that extracts wrongly on half the machines that download it is worth
+# catching here rather than in an issue report.
+$check = [System.IO.Compression.ZipFile]::OpenRead($zipOut)
+try {
+  $bad = @($check.Entries | Where-Object { $_.FullName -match '\\' })
+  if ($bad.Count -gt 0) { Die "the zip has $($bad.Count) entries with backslash separators" }
+  Write-Host ("    {0} entries, all with forward slashes" -f $check.Entries.Count)
+} finally {
+  $check.Dispose()
+}
 Step ("done -> {0} ({1:N0} bytes)" -f $zipOut, (Get-Item $zipOut).Length)

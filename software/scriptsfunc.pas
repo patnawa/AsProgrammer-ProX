@@ -16,7 +16,7 @@ function GetScriptSectionsFromFile(ScriptFile: string): TStrings;
 
 implementation
 
-uses main, scriptedit;
+uses main, scriptedit, opresult;
 
 const _SPI_SPEED_MAX = 255;
 
@@ -104,6 +104,7 @@ begin
 
   if ScriptEngine.ErrCode<>0 then
   begin
+    OpFail('chip script failed: ' + ScriptEngine.ErrMsg);
     if not ScriptEditForm.Visible then
     begin
       LogPrint(ScriptEngine.ErrMsg);
@@ -125,15 +126,25 @@ function RunScriptFromFile(ScriptFile: string; Section: string): boolean;
 var
   ScriptText, ParsedScriptText: TStrings;
 begin
+  Result := False;
   if not FileExists(ScriptsPath+ScriptFile) then Exit(false);
   try
     ScriptText:= TStringList.Create;
     ParsedScriptText:= TStringList.Create;
 
-    ScriptText.LoadFromFile(ScriptsPath+ScriptFile);
-    if not ParseScriptText(ScriptText, Section, ParsedScriptText) then Exit(false);
-    RunScript(ParsedScriptText);
-    Result := true;
+    try
+      ScriptText.LoadFromFile(ScriptsPath+ScriptFile);
+      if not ParseScriptText(ScriptText, Section, ParsedScriptText) then Exit(false);
+      RunScript(ParsedScriptText);
+      Result := true;
+    except
+      on E: Exception do
+      begin
+        OpFail('chip script raised an exception: ' + E.Message);
+        LogPrint('Script: ' + E.Message);
+        Result := True; //the section existed; never fall through to raw commands
+      end;
+    end;
   finally
     ScriptText.Free;
     ParsedScriptText.Free;

@@ -21,7 +21,10 @@ type
     fcNoSFDP,      // answers FF to everything
     fcBigPow2,     // density expressed as a power of two
     fcMicron256,   // DWORD-16 and a 4 byte address instruction table
-    fcBootBlock    // a sector map with regions of different erase sizes
+    fcBootBlock,   // one unambiguous sector map with mixed erase sizes
+    fcMapBitTrap,  // bit 0 set but bit 1 clear: command, never a map
+    fcConfigurableMap, // detection command + two selectable maps
+    fcAmbiguousMaps    // multiple maps without a way to select one
   );
 
 procedure SetFakeChip(AChip: TFakeChip);
@@ -47,10 +50,17 @@ procedure PutParamHeader(Index: integer; IdLSB, IdMSB: byte;
   Dwords: byte; Ptr: longword);
 var
   Base: integer;
+  Minor: byte;
 begin
   Base := 8 + Index * 8;
+  case IdLSB of
+    $81: Minor := $00; //Sector Map Parameter Table revision 1.0
+    $84: Minor := $01; //4-Byte Address Instruction Table revision 1.1
+  else
+    Minor := $06;      //Basic Flash Parameter Table revision 1.6
+  end;
   Image[Base]     := IdLSB;
-  Image[Base + 1] := $06;          // minor revision
+  Image[Base + 1] := Minor;
   Image[Base + 2] := $01;          // major revision
   Image[Base + 3] := Dwords;
   Image[Base + 4] := byte(Ptr);
@@ -125,15 +135,62 @@ begin
         Image[6] := $01;                       // two parameter headers
         PutParamHeader(1, $81, $FF, 4, PtrMap);
 
-        // map descriptor: bit 0 = map descriptor, bit 1 = last, three regions
-        PutDword(PtrMap + 0, $00020003);
+        //map descriptor: bit 1 = map, bit 0 = last, config 0, three regions
+        //reserved fields are ones as JESD216 specifies
+        PutDword(PtrMap + 0, $FF0200FF);
 
         // region 1: 64 KiB, erase type 1 only
-        PutDword(PtrMap + 4, $0000FF01);
+        PutDword(PtrMap + 4, $0000FFF1);
         // region 2: 8 MiB - 128 KiB, erase types 1 and 3
-        PutDword(PtrMap + 8, $007DFF05);
+        PutDword(PtrMap + 8, $007DFFF5);
         // region 3: 64 KiB, erase type 1 only
-        PutDword(PtrMap + 12, $0000FF01);
+        PutDword(PtrMap + 12, $0000FFF1);
+      end;
+
+    fcMapBitTrap:
+      begin
+        Image[6] := $01;
+        PutParamHeader(1, $81, $FF, 2, PtrMap);
+
+        //Bit 0 is only the end indicator. With bit 1 clear this is a
+        //two-DWORD command descriptor, despite looking like a one-region map
+        //to the old parser.
+        PutDword(PtrMap + 0, $FF0000FD);
+        PutDword(PtrMap + 4, $007FFFF1);
+      end;
+
+    fcConfigurableMap:
+      begin
+        Image[6] := $01;
+        PutParamHeader(1, $81, $FF, 8, PtrMap);
+
+        //One last configuration-detection command: read opcode 35h, select
+        //bit 2. A static SFDP reader cannot execute it and must not guess.
+        PutDword(PtrMap + 0, $043035FD);
+        PutDword(PtrMap + 4, $FFFFFFFF);
+
+        //Configuration 0: one uniform region, another map follows.
+        PutDword(PtrMap + 8,  $FF0000FE);
+        PutDword(PtrMap + 12, $007FFFF4);
+
+        //Configuration 1: boot regions, last map.
+        PutDword(PtrMap + 16, $FF0201FF);
+        PutDword(PtrMap + 20, $0000FFF1);
+        PutDword(PtrMap + 24, $007DFFF5);
+        PutDword(PtrMap + 28, $0000FFF1);
+      end;
+
+    fcAmbiguousMaps:
+      begin
+        Image[6] := $01;
+        PutParamHeader(1, $81, $FF, 4, PtrMap);
+
+        //Two valid-looking maps but no detection commands. The first map says
+        //it is not last, so selecting either map would be an unsafe guess.
+        PutDword(PtrMap + 0,  $FF0000FE);
+        PutDword(PtrMap + 4,  $007FFFF4);
+        PutDword(PtrMap + 8,  $FF0001FF);
+        PutDword(PtrMap + 12, $007FFFF1);
       end;
 
   end;

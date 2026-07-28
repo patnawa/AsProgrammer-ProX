@@ -318,63 +318,180 @@ var
 
 
 implementation
-uses main;
-//Classic functions
-function FT_GetNumDevices(pvArg1:Pointer; pvArg2:Pointer; dwFlags:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_ListDevices';
-function FT_ListDevices(pvArg1:Dword; pvArg2:Pointer; dwFlags:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_ListDevices';
-function FT_Open(Index:Integer; ftHandle:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_Open';
-function FT_OpenEx(pvArg1:Pointer; dwFlags:Dword; ftHandle:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_OpenEx';
-function FT_OpenByLocation(pvArg1:DWord; dwFlags:Dword; ftHandle:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_OpenEx';
-function FT_Close(ftHandle:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_Close';
-function FT_Read(ftHandle:Dword; FTInBuf:Pointer; BufferSize:LongInt; ResultPtr:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_Read';
-function FT_Write(ftHandle:Dword; FTOutBuf:Pointer; BufferSize:LongInt; ResultPtr:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_Write';
-function FT_ResetDevice(ftHandle:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_ResetDevice';
-function FT_SetBaudRate(ftHandle:Dword; BaudRate:DWord):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetBaudRate';
-function FT_SetDivisor(ftHandle:Dword; Divisor:DWord):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetDivisor';
-function FT_SetDataCharacteristics(ftHandle:Dword; WordLength,StopBits,Parity:Byte):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetDataCharacteristics';
-function FT_SetFlowControl(ftHandle:Dword; FlowControl:Word; XonChar,XoffChar:Byte):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetFlowControl';
-function FT_SetDtr(ftHandle:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetDtr';
-function FT_ClrDtr(ftHandle:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_ClrDtr';
-function FT_SetRts(ftHandle:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetRts';
-function FT_ClrRts(ftHandle:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_ClrRts';
-function FT_GetModemStatus(ftHandle:Dword; ModemStatus:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_GetModemStatus';
-function FT_SetChars(ftHandle:Dword; EventChar,EventCharEnabled,ErrorChar,ErrorCharEnabled:Byte):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetChars';
-function FT_Purge(ftHandle:Dword; Mask:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_Purge';
-function FT_SetTimeouts(ftHandle:Dword; ReadTimeout,WriteTimeout:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetTimeouts';
-function FT_GetQueueStatus(ftHandle:Dword; RxBytes:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_GetQueueStatus';
-function FT_SetBreakOn(ftHandle:Dword) : FT_Result; stdcall; External FT_DLL_Name name 'FT_SetBreakOn';
-function FT_SetBreakOff(ftHandle:Dword) : FT_Result; stdcall; External FT_DLL_Name name 'FT_SetBreakOff';
-function FT_GetStatus(ftHandle:DWord; RxBytes,TxBytes,EventStatus:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_GetStatus';
-function FT_SetEventNotification(ftHandle:DWord; EventMask:DWord; pvArgs:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetEventNotification';
-function FT_GetDeviceInfo(ftHandle:DWord; DevType,ID,SerNum,Desc,pvDummy:Pointer) : FT_Result; stdcall; External FT_DLL_Name name 'FT_GetDeviceInfo';
-function FT_SetResetPipeRetryCount(ftHandle:Dword; RetryCount:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetResetPipeRetryCount';
-function FT_StopInTask(ftHandle:Dword) : FT_Result; stdcall; External FT_DLL_Name name 'FT_StopInTask';
-function FT_RestartInTask(ftHandle:Dword) : FT_Result; stdcall; External FT_DLL_Name name 'FT_RestartInTask';
-function FT_ResetPort(ftHandle:Dword) : FT_Result; stdcall; External FT_DLL_Name name 'FT_ResetPort';
-function FT_CyclePort(ftHandle:Dword) : FT_Result; stdcall; External 'FTD2XX.DLL' name 'FT_CyclePort';
-function FT_CreateDeviceInfoList(NumDevs:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_CreateDeviceInfoList';
-function FT_GetDeviceInfoList(pFT_Device_Info_List:Pointer; NumDevs:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_GetDeviceInfoList';
-function FT_GetDeviceInfoDetail(Index:DWord; Flags,DevType,ID,LocID,SerialNumber,Description,DevHandle:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_GetDeviceInfoDetail';
-function FT_GetDriverVersion(ftHandle:Dword; DrVersion:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_GetDriverVersion';
-function FT_GetLibraryVersion(LbVersion:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_GetLibraryVersion';
+uses main{$IFDEF WINDOWS}, Windows{$ENDIF};
 
-// EEPROM functions
-function FT_EE_Read(ftHandle:DWord; pEEData:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_EE_Read';
-function FT_EE_Program(ftHandle:DWord; pEEData:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_EE_Program';
-// EEPROM primitives - you need an NDA for EEPROM checksum
-function FT_ReadEE(ftHandle:DWord; WordAddr:DWord; WordRead:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_ReadEE';
-function FT_WriteEE(ftHandle:DWord; WordAddr:DWord; WordData:word):FT_Result; stdcall; External FT_DLL_Name name 'FT_WriteEE';
-function FT_EraseEE(ftHandle:DWord):FT_Result; stdcall; External FT_DLL_Name name 'FT_EraseEE';
-function FT_EE_UARead(ftHandle:DWord; Data:Pointer; DataLen:DWord; BytesRead:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_EE_UARead';
-function FT_EE_UAWrite(ftHandle:DWord; Data:Pointer; DataLen:DWord):FT_Result; stdcall; External FT_DLL_Name name 'FT_EE_UAWrite';
-function FT_EE_UASize(ftHandle:DWord; UASize:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_EE_UASize';
+// The FT_ entry points below used to be static `External FT_DLL_Name`
+// imports, which Windows resolves at process start -- a missing ftd2xx.dll
+// therefore kept the whole program from launching, even for someone who
+// never touches an FT232H.  They are now procedure variables bound at
+// startup: to the real export when the DLL is present, and to a fail-closed
+// stub returning FT_DEVICE_NOT_FOUND when the DLL (or a single export) is
+// absent.  Everything below the binding block is unchanged.
 
-// FT2232C, FT232BM and FT245BM Extended API Functions
-function FT_GetLatencyTimer(ftHandle:Dword; Latency:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_GetLatencyTimer';
-function FT_SetLatencyTimer(ftHandle:Dword; Latency:Byte):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetLatencyTimer';
-function FT_GetBitMode(ftHandle:Dword; BitMode:Pointer):FT_Result; stdcall; External FT_DLL_Name name 'FT_GetBitMode';
-function FT_SetBitMode(ftHandle:Dword; Mask,Enable:Byte):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetBitMode';
-function FT_SetUSBParameters(ftHandle:Dword; InSize,OutSize:Dword):FT_Result; stdcall; External FT_DLL_Name name 'FT_SetUSBParameters';
+var
+  FTLib: THandle = 0;
+
+  FT_GetNumDevices: function(pvArg1:Pointer; pvArg2:Pointer; dwFlags:Dword):FT_Result; stdcall;
+  FT_ListDevices: function(pvArg1:Dword; pvArg2:Pointer; dwFlags:Dword):FT_Result; stdcall;
+  FT_Open: function(Index:Integer; ftHandle:Pointer):FT_Result; stdcall;
+  FT_OpenEx: function(pvArg1:Pointer; dwFlags:Dword; ftHandle:Pointer):FT_Result; stdcall;
+  FT_OpenByLocation: function(pvArg1:DWord; dwFlags:Dword; ftHandle:Pointer):FT_Result; stdcall;
+  FT_Close: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_Read: function(ftHandle:Dword; FTInBuf:Pointer; BufferSize:LongInt; ResultPtr:Pointer):FT_Result; stdcall;
+  FT_Write: function(ftHandle:Dword; FTOutBuf:Pointer; BufferSize:LongInt; ResultPtr:Pointer):FT_Result; stdcall;
+  FT_ResetDevice: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_SetBaudRate: function(ftHandle:Dword; BaudRate:DWord):FT_Result; stdcall;
+  FT_SetDivisor: function(ftHandle:Dword; Divisor:DWord):FT_Result; stdcall;
+  FT_SetDataCharacteristics: function(ftHandle:Dword; WordLength,StopBits,Parity:Byte):FT_Result; stdcall;
+  FT_SetFlowControl: function(ftHandle:Dword; FlowControl:Word; XonChar,XoffChar:Byte):FT_Result; stdcall;
+  FT_SetDtr: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_ClrDtr: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_SetRts: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_ClrRts: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_GetModemStatus: function(ftHandle:Dword; ModemStatus:Pointer):FT_Result; stdcall;
+  FT_SetChars: function(ftHandle:Dword; EventChar,EventCharEnabled,ErrorChar,ErrorCharEnabled:Byte):FT_Result; stdcall;
+  FT_Purge: function(ftHandle:Dword; Mask:Dword):FT_Result; stdcall;
+  FT_SetTimeouts: function(ftHandle:Dword; ReadTimeout,WriteTimeout:Dword):FT_Result; stdcall;
+  FT_GetQueueStatus: function(ftHandle:Dword; RxBytes:Pointer):FT_Result; stdcall;
+  FT_SetBreakOn: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_SetBreakOff: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_GetStatus: function(ftHandle:DWord; RxBytes,TxBytes,EventStatus:Pointer):FT_Result; stdcall;
+  FT_SetEventNotification: function(ftHandle:DWord; EventMask:DWord; pvArgs:Dword):FT_Result; stdcall;
+  FT_GetDeviceInfo: function(ftHandle:DWord; DevType,ID,SerNum,Desc,pvDummy:Pointer):FT_Result; stdcall;
+  FT_SetResetPipeRetryCount: function(ftHandle:Dword; RetryCount:Dword):FT_Result; stdcall;
+  FT_StopInTask: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_RestartInTask: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_ResetPort: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_CyclePort: function(ftHandle:Dword):FT_Result; stdcall;
+  FT_CreateDeviceInfoList: function(NumDevs:Pointer):FT_Result; stdcall;
+  FT_GetDeviceInfoList: function(pFT_Device_Info_List:Pointer; NumDevs:Pointer):FT_Result; stdcall;
+  FT_GetDeviceInfoDetail: function(Index:DWord; Flags,DevType,ID,LocID,SerialNumber,Description,DevHandle:Pointer):FT_Result; stdcall;
+  FT_GetDriverVersion: function(ftHandle:Dword; DrVersion:Pointer):FT_Result; stdcall;
+  FT_GetLibraryVersion: function(LbVersion:Pointer):FT_Result; stdcall;
+  FT_EE_Read: function(ftHandle:DWord; pEEData:Pointer):FT_Result; stdcall;
+  FT_EE_Program: function(ftHandle:DWord; pEEData:Pointer):FT_Result; stdcall;
+  FT_ReadEE: function(ftHandle:DWord; WordAddr:DWord; WordRead:Pointer):FT_Result; stdcall;
+  FT_WriteEE: function(ftHandle:DWord; WordAddr:DWord; WordData:word):FT_Result; stdcall;
+  FT_EraseEE: function(ftHandle:DWord):FT_Result; stdcall;
+  FT_EE_UARead: function(ftHandle:DWord; Data:Pointer; DataLen:DWord; BytesRead:Pointer):FT_Result; stdcall;
+  FT_EE_UAWrite: function(ftHandle:DWord; Data:Pointer; DataLen:DWord):FT_Result; stdcall;
+  FT_EE_UASize: function(ftHandle:DWord; UASize:Pointer):FT_Result; stdcall;
+  FT_GetLatencyTimer: function(ftHandle:Dword; Latency:Pointer):FT_Result; stdcall;
+  FT_SetLatencyTimer: function(ftHandle:Dword; Latency:Byte):FT_Result; stdcall;
+  FT_GetBitMode: function(ftHandle:Dword; BitMode:Pointer):FT_Result; stdcall;
+  FT_SetBitMode: function(ftHandle:Dword; Mask,Enable:Byte):FT_Result; stdcall;
+  FT_SetUSBParameters: function(ftHandle:Dword; InSize,OutSize:Dword):FT_Result; stdcall;
+
+// Fail-closed stubs, one per parameter shape.
+function FTStub_PPD(pvArg1:Pointer; pvArg2:Pointer; dwFlags:Dword):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DPD(pvArg1:Dword; pvArg2:Pointer; dwFlags:Dword):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_IP(Index:Integer; ftHandle:Pointer):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_PDP(pvArg1:Pointer; dwFlags:Dword; ftHandle:Pointer):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DDP(pvArg1:DWord; dwFlags:Dword; ftHandle:Pointer):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_D(ftHandle:Dword):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DPLP(ftHandle:Dword; Buf:Pointer; BufferSize:LongInt; ResultPtr:Pointer):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DD(ftHandle:Dword; A:DWord):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DBBB(ftHandle:Dword; A,B,C:Byte):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DWBB(ftHandle:Dword; A:Word; B,C:Byte):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DP(ftHandle:Dword; A:Pointer):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DBBBB(ftHandle:Dword; A,B,C,D:Byte):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DDD(ftHandle:Dword; A,B:Dword):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DPPP(ftHandle:DWord; A,B,C:Pointer):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DPPPPP(ftHandle:DWord; A,B,C,D,E:Pointer):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_P(A:Pointer):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_PP(A,B:Pointer):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_D7P(Index:DWord; A,B,C,D,E,F,G:Pointer):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DDW(ftHandle:DWord; A:DWord; B:word):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DPDP(ftHandle:DWord; A:Pointer; B:DWord; C:Pointer):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DPD2(ftHandle:DWord; A:Pointer; B:DWord):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DB(ftHandle:Dword; A:Byte):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+function FTStub_DBB(ftHandle:Dword; A,B:Byte):FT_Result; stdcall;
+begin Result := FT_DEVICE_NOT_FOUND; end;
+
+procedure FTBind(var P; Stub: Pointer; Name: PAnsiChar);
+begin
+  Pointer(P) := nil;
+  {$IFDEF WINDOWS}
+  if FTLib <> 0 then Pointer(P) := GetProcAddress(FTLib, Name);
+  {$ENDIF}
+  if Pointer(P) = nil then Pointer(P) := Stub;
+end;
+
+procedure FTBindAll;
+begin
+  FTBind(FT_GetNumDevices, @FTStub_PPD, 'FT_ListDevices');
+  FTBind(FT_ListDevices, @FTStub_DPD, 'FT_ListDevices');
+  FTBind(FT_Open, @FTStub_IP, 'FT_Open');
+  FTBind(FT_OpenEx, @FTStub_PDP, 'FT_OpenEx');
+  FTBind(FT_OpenByLocation, @FTStub_DDP, 'FT_OpenEx');
+  FTBind(FT_Close, @FTStub_D, 'FT_Close');
+  FTBind(FT_Read, @FTStub_DPLP, 'FT_Read');
+  FTBind(FT_Write, @FTStub_DPLP, 'FT_Write');
+  FTBind(FT_ResetDevice, @FTStub_D, 'FT_ResetDevice');
+  FTBind(FT_SetBaudRate, @FTStub_DD, 'FT_SetBaudRate');
+  FTBind(FT_SetDivisor, @FTStub_DD, 'FT_SetDivisor');
+  FTBind(FT_SetDataCharacteristics, @FTStub_DBBB, 'FT_SetDataCharacteristics');
+  FTBind(FT_SetFlowControl, @FTStub_DWBB, 'FT_SetFlowControl');
+  FTBind(FT_SetDtr, @FTStub_D, 'FT_SetDtr');
+  FTBind(FT_ClrDtr, @FTStub_D, 'FT_ClrDtr');
+  FTBind(FT_SetRts, @FTStub_D, 'FT_SetRts');
+  FTBind(FT_ClrRts, @FTStub_D, 'FT_ClrRts');
+  FTBind(FT_GetModemStatus, @FTStub_DP, 'FT_GetModemStatus');
+  FTBind(FT_SetChars, @FTStub_DBBBB, 'FT_SetChars');
+  FTBind(FT_Purge, @FTStub_DD, 'FT_Purge');
+  FTBind(FT_SetTimeouts, @FTStub_DDD, 'FT_SetTimeouts');
+  FTBind(FT_GetQueueStatus, @FTStub_DP, 'FT_GetQueueStatus');
+  FTBind(FT_SetBreakOn, @FTStub_D, 'FT_SetBreakOn');
+  FTBind(FT_SetBreakOff, @FTStub_D, 'FT_SetBreakOff');
+  FTBind(FT_GetStatus, @FTStub_DPPP, 'FT_GetStatus');
+  FTBind(FT_SetEventNotification, @FTStub_DDD, 'FT_SetEventNotification');
+  FTBind(FT_GetDeviceInfo, @FTStub_DPPPPP, 'FT_GetDeviceInfo');
+  FTBind(FT_SetResetPipeRetryCount, @FTStub_DD, 'FT_SetResetPipeRetryCount');
+  FTBind(FT_StopInTask, @FTStub_D, 'FT_StopInTask');
+  FTBind(FT_RestartInTask, @FTStub_D, 'FT_RestartInTask');
+  FTBind(FT_ResetPort, @FTStub_D, 'FT_ResetPort');
+  FTBind(FT_CyclePort, @FTStub_D, 'FT_CyclePort');
+  FTBind(FT_CreateDeviceInfoList, @FTStub_P, 'FT_CreateDeviceInfoList');
+  FTBind(FT_GetDeviceInfoList, @FTStub_PP, 'FT_GetDeviceInfoList');
+  FTBind(FT_GetDeviceInfoDetail, @FTStub_D7P, 'FT_GetDeviceInfoDetail');
+  FTBind(FT_GetDriverVersion, @FTStub_DP, 'FT_GetDriverVersion');
+  FTBind(FT_GetLibraryVersion, @FTStub_P, 'FT_GetLibraryVersion');
+  FTBind(FT_EE_Read, @FTStub_DP, 'FT_EE_Read');
+  FTBind(FT_EE_Program, @FTStub_DP, 'FT_EE_Program');
+  FTBind(FT_ReadEE, @FTStub_DDP, 'FT_ReadEE');
+  FTBind(FT_WriteEE, @FTStub_DDW, 'FT_WriteEE');
+  FTBind(FT_EraseEE, @FTStub_D, 'FT_EraseEE');
+  FTBind(FT_EE_UARead, @FTStub_DPDP, 'FT_EE_UARead');
+  FTBind(FT_EE_UAWrite, @FTStub_DPD2, 'FT_EE_UAWrite');
+  FTBind(FT_EE_UASize, @FTStub_DP, 'FT_EE_UASize');
+  FTBind(FT_GetLatencyTimer, @FTStub_DP, 'FT_GetLatencyTimer');
+  FTBind(FT_SetLatencyTimer, @FTStub_DB, 'FT_SetLatencyTimer');
+  FTBind(FT_GetBitMode, @FTStub_DP, 'FT_GetBitMode');
+  FTBind(FT_SetBitMode, @FTStub_DBB, 'FT_SetBitMode');
+  FTBind(FT_SetUSBParameters, @FTStub_DDD, 'FT_SetUSBParameters');
+end;
 
 
 Procedure FT_Error_Report(ErrStr: String; PortStatus : Integer);
@@ -1035,5 +1152,16 @@ Result :=  FT_SetUSBParameters(FT_Handle,InSize,OutSize);
 If Result <> FT_OK then FT_Error_Report('FT_SetUSBParameters ',Result);
 End;
 
+
+initialization
+  {$IFDEF WINDOWS}
+  FTLib := LoadLibrary(FT_DLL_Name);
+  {$ENDIF}
+  FTBindAll;
+
+finalization
+  {$IFDEF WINDOWS}
+  if FTLib <> 0 then FreeLibrary(FTLib);
+  {$ENDIF}
 
 End.

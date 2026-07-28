@@ -7,8 +7,8 @@ object MainForm: TMainForm
   Caption = 'AsProgrammer ProX v4'
   ClientHeight = 780
   ClientWidth = 1120
-  Constraints.MinHeight = 300
-  Constraints.MinWidth = 300
+  Constraints.MinHeight = 560
+  Constraints.MinWidth = 860
   Menu = MainMenu
   OnCloseQuery = FormCloseQuery
   AllowDropFiles = True
@@ -1046,6 +1046,34 @@ object MainForm: TMainForm
         object MenuSendAB: TMenuItem
           AutoCheck = True
           Caption = 'Выводить чип из сна'
+        end
+        object MenuFastRead: TMenuItem
+          AutoCheck = True
+          Caption = 'Fast read (0Bh) when the chip declares SFDP'
+          Checked = True
+        end
+        object MenuResetChip: TMenuItem
+          AutoCheck = True
+          Caption = 'Reset the chip before each operation'
+        end
+        object MenuVerifyErase: TMenuItem
+          AutoCheck = True
+          Caption = 'Blank check after erase'
+          Checked = True
+        end
+        object MenuDoubleRead: TMenuItem
+          AutoCheck = True
+          Caption = 'Read twice and compare'
+        end
+        object MenuCheckContact: TMenuItem
+          AutoCheck = True
+          Caption = 'Check the connection is stable before each operation'
+          Checked = True
+        end
+        object MenuScanImage: TMenuItem
+          AutoCheck = True
+          Caption = 'Sanity check the dump after reading'
+          Checked = True
         end
         object MenuItemBenchmark: TMenuItem
           Caption = 'Benchmark'

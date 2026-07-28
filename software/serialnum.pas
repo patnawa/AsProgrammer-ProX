@@ -37,6 +37,15 @@ type
     CheckUID: boolean;      //ไม่ยอมเขียนชิปที่เคยผ่านไปแล้ว ดูจากเลขประจำตัว
   end;
 
+  //One physical unit gets one immutable value.  Random serials must never be
+  //regenerated independently for injection, verification and logging.
+  TSerialAllocation = record
+    Valid: boolean;
+    Len: byte;
+    Bytes: array[0..7] of byte;
+    Text: string;
+  end;
+
 //ค่าเริ่มต้น
 procedure DefaultProdSettings(out S: TProdSettings);
 
@@ -49,6 +58,10 @@ function ApplySerial(const S: TProdSettings; var Data: array of byte;
 
 //รูปแบบที่อ่านออกของเลขรันนิ่ง ใช้ตอนเขียน log
 function SerialToStr(const S: TProdSettings): string;
+
+procedure AllocateSerial(const S: TProdSettings; out A: TSerialAllocation);
+function ApplyAllocatedSerial(const A: TSerialAllocation; Address: cardinal;
+  var Data: array of byte; DataSize: cardinal): boolean;
 
 implementation
 
@@ -165,6 +178,35 @@ begin
   Result := '';
   for i := 0 to S.SNLength - 1 do
     Result := Result + IntToHex(Bytes[i], 2);
+end;
+
+procedure AllocateSerial(const S: TProdSettings; out A: TSerialAllocation);
+var
+  i: integer;
+begin
+  FillChar(A, SizeOf(A), 0);
+  if (not S.SNEnabled) or (S.SNLength < 1) or (S.SNLength > 8) then Exit;
+
+  A.Len := S.SNLength;
+  BuildSerialBytes(S, A.Bytes);
+  A.Text := '';
+  for i := 0 to A.Len - 1 do
+    A.Text := A.Text + IntToHex(A.Bytes[i], 2);
+  A.Valid := True;
+end;
+
+function ApplyAllocatedSerial(const A: TSerialAllocation; Address: cardinal;
+  var Data: array of byte; DataSize: cardinal): boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  if (not A.Valid) or (A.Len < 1) or (A.Len > 8) then Exit;
+  if int64(Address) + A.Len > DataSize then Exit;
+
+  for i := 0 to A.Len - 1 do
+    Data[Address + cardinal(i)] := A.Bytes[i];
+  Result := True;
 end;
 
 initialization

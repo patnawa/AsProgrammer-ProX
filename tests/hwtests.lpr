@@ -348,6 +348,125 @@ begin
         (ID.ID9FH[1] = $40) and (ID.ID9FH[2] = $17));
 end;
 
+// ------------------------------------------------------------- fast read
+
+//03h ไม่มีไบต์หลอก 0Bh มีหนึ่งไบต์ ถ้าจำนวนไบต์หลอกผิดไปหนึ่งไบต์ ข้อมูล
+//ทั้งก้อนจะเลื่อนไปหนึ่งตำแหน่ง ซึ่งอ่านออกมาแล้วดูเหมือนข้อมูลจริงทุกอย่าง
+//นี่คือชนิดของความผิดพลาดที่ต้องจับที่ระดับไบต์ ไม่ใช่ที่ระดับผลลัพธ์
+procedure TestFastReadSendsDummy;
+var
+  Buf: array[0..3] of byte;
+begin
+  WriteLn('Fast read: 0Bh carries three address bytes and one dummy');
+  Fresh;
+
+  UsbAsp25_ReadFast($0B, $123456, Buf, 4);
+
+  Check('the whole command is 0B 12 34 56 FF',
+        Mock.Transcript = '0B123456FF');
+end;
+
+procedure TestPlainReadHasNoDummy;
+var
+  Buf: array[0..3] of byte;
+begin
+  WriteLn('Plain read: 03h carries three address bytes and nothing else');
+  Fresh;
+
+  UsbAsp25_Read($03, $123456, Buf, 4);
+
+  Check('the whole command is 03 12 34 56', Mock.Transcript = '03123456');
+end;
+
+procedure TestFastRead4Byte;
+var
+  Buf: array[0..3] of byte;
+begin
+  WriteLn('Fast read: 0Ch carries four address bytes and one dummy');
+  Fresh;
+
+  UsbAsp25_ReadFast32bitAddr($0C, $01234567, Buf, 4);
+
+  Check('the whole command is 0C 01 23 45 67 FF',
+        Mock.Transcript = '0C01234567FF');
+end;
+
+// -------------------------------------------------------- write enable
+
+procedure TestWrenCheckedSeesTheLatch;
+var
+  WEL: boolean;
+begin
+  WriteLn('Write enable: the latch is read back, not assumed');
+  Fresh;
+
+  //ชิปตอบว่า WEL ติดแล้ว บิต 1
+  Mock.SetReply([%00000010]);
+  Check('a chip that latched reports success', UsbAsp25_WrenChecked(WEL));
+  Check('and says so', WEL);
+  Check('06h went out first', Mock.SentInOrder($06, $05));
+end;
+
+procedure TestWrenCheckedCatchesRefusal;
+var
+  WEL: boolean;
+begin
+  WriteLn('Write enable: a chip that ignores WREN is caught here');
+  Fresh;
+
+  //ชิปที่ขา WP# ถูกดึงต่ำรับคำสั่งไปแล้วไม่ทำอะไร WEL จึงยังเป็นศูนย์
+  Mock.SetReply([%00000000]);
+  Check('the refusal is reported', not UsbAsp25_WrenChecked(WEL));
+  Check('and WEL is false', not WEL);
+end;
+
+procedure TestWrenCheckedOnSilentBus;
+var
+  WEL: boolean;
+begin
+  WriteLn('Write enable: an empty socket is not mistaken for a latched chip');
+  Fresh;
+
+  //FF ล้วนมีบิต 1 ติดอยู่ ซึ่งอ่านตรง ๆ แล้วดูเหมือน WEL ติด
+  //แต่ FF ล้วนคือบัสที่ไม่มีใครขับ ไม่ใช่คำตอบของชิป
+  Mock.SetReply([$FF]);
+  Check('all ones is not a latched write enable',
+        not UsbAsp25_WrenChecked(WEL));
+end;
+
+// ------------------------------------------------------------- recovery
+
+procedure TestSoftReset;
+begin
+  WriteLn('Recovery: the JEDEC reset is 66h then 99h, in that order');
+  Fresh;
+
+  UsbAsp25_SoftReset;
+
+  Check('both bytes went out in order', Mock.SentInOrder($66, $99));
+  Check('and nothing else did', Mock.Transcript = '6699');
+end;
+
+procedure TestExitQPI;
+begin
+  WriteLn('Recovery: leaving QPI mode is a single FFh');
+  Fresh;
+
+  UsbAsp25_ExitQPI;
+
+  Check('one byte, FFh', Mock.Transcript = 'FF');
+end;
+
+procedure TestGlobalUnlock;
+begin
+  WriteLn('Unlock: releasing every block lock is a single 98h');
+  Fresh;
+
+  UsbAsp25_GlobalUnlock;
+
+  Check('one byte, 98h', Mock.Transcript = '98');
+end;
+
 begin
   WriteLn('AsProgrammer ProX protocol tests');
   WriteLn;
@@ -371,6 +490,16 @@ begin
   TestWriteSR2Byte;
   TestReadIDRemembersVendor;
   TestReadIDIgnoresDeadChip;
+
+  TestPlainReadHasNoDummy;
+  TestFastReadSendsDummy;
+  TestFastRead4Byte;
+  TestWrenCheckedSeesTheLatch;
+  TestWrenCheckedCatchesRefusal;
+  TestWrenCheckedOnSilentBus;
+  TestSoftReset;
+  TestExitQPI;
+  TestGlobalUnlock;
 
   WriteLn;
   if Failures = 0 then
