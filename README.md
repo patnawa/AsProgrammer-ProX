@@ -482,6 +482,86 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 
 ---
 
+## Changelog
+
+### 4.6.1.0 — the Safe workflow strip tells you what is wrong
+
+- **Smart write is reachable for the EEPROM families.** The strip still gated
+  it on "is this SPI NOR", so the three families that gained a differential
+  writer in 4.6.0.0 were locked out of their own button.
+- **An image that does not fit the chip is reported before you press Write**,
+  with the two sizes that disagree, instead of after — and Smart write stays
+  disarmed until it does fit.
+- A step you cannot press **explains why in its tooltip**: wrong family, no
+  image, does not fit, odd MicroWire address.
+- `Next: detect or select a chip` no longer appears on I²C and MicroWire,
+  where Read ID does not exist and the Detect button is disabled.
+- The start-address box **refreshes the strip** (it never did), and parses
+  with `TryStrToQWord` — `Hex2Dec` raises on pasted non-hex text that the
+  keypress filter cannot stop.
+- **Layout is measured, not pinned to pixels**, so translations, larger fonts
+  and high-DPI displays no longer overlap or clip the buttons. Bold marks the
+  step you can take right now rather than sitting permanently on Smart write.
+
+### 4.6.0.0 — Smart write for the EEPROM families
+
+24Cxx, 93xx and 95xx are byte-alterable, so there is no erase to plan — but
+the shape of Smart write still pays. A snapshot is taken, **only the pages
+that differ are written**, and every page the range touches is read back,
+including the unchanged ones: that is what notices a same-model chip swapped
+in between snapshot and write. Changing one byte of a 24C256 costs one page
+write instead of 512. `--smart` and `--smart --plan-only` accept these
+families; strict production stays SPI-NOR-only.
+
+### 4.5.0.0 — fifteen hunted bugs, signed evidence, no DLLs needed to start
+
+A four-way deep-inspection review found fifteen real defects. The ones that
+could cost data:
+
+- the **write-protection guard decoded every vendor with the Winbond layout**,
+  so a locked Macronix or ISSI chip sailed straight through it;
+- **Spansion TBPROT was read from an opcode those chips do not implement**, so
+  a floating-bus `FF` inverted the reported lock direction;
+- **`Enter4B` failures were ignored** on write, read, verify and blank check,
+  wrapping 4-byte addresses onto block 0;
+- **auto-backup hard-failed every 95/45/KB write and erase**;
+- an **aborted serial-number apply could log PASS** for a unit that was never
+  programmed;
+- Micron's flag-status erase/program bits were swapped, AT45 busy-polls
+  trusted a dead bus reading `FF`, and an unaligned I²C erase wrapped onto
+  bytes below the requested range.
+
+Also new: evidence envelopes bind the run ID into their digest and strict
+production **signs them under the station key**; `prodstate.pas` gives a
+single station **fail-closed anti-replay state** (stale revisions, duplicate
+runs, consumed UIDs and a backwards clock are all refused before PASS);
+`--smart --plan-only` prints the full plan and the chip-declared worst-case
+time without touching the chip; `--export-chip` emits a ready-to-PR chiplist
+line plus a test fixture; the production suite **runs on Linux** as well as
+Windows; and **every hardware DLL is loaded at run time**, so the program
+starts with none of them present and a missing one reads as an absent
+programmer rather than a startup error.
+
+### 4.3.1.0 — the write loop that hung
+
+`WriteFlash25` sized its first chunk as `(ChipSize - StartAddress) mod
+PageSize`, which is **zero whenever the start address sits on a page
+boundary** — the loop then ran forever issuing zero-length page programs.
+Patching at `0x1000` on an 8 MB part hit it every time. The arithmetic moved
+into `flashops.pas`, which has no LCL and no `main`, so the test suite can
+reach it. Erase now follows the chip's own SFDP sector map, and a silent bus
+is named as such.
+
+### 4.2.0.0 — the command line told the truth
+
+`Result := 0` was set after every write regardless of outcome, so a verify
+mismatch, a still-protected chip and a busy timeout all exited `0`. There was
+no channel from the operation layer back to the caller at all. `--verify` was
+also parsed as both a flag and a value switch, so `--write fw.bin --verify
+--erase` read `--erase` as the verify filename.
+
+---
+
 ## Credits
 
 AsProgrammer ProX stands on:
