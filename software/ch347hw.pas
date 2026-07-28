@@ -28,6 +28,7 @@ public
   //spi
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; override;
   function SPIWrite(CS: byte; BufferLen: integer; buffer: array of byte): integer; override;
+  function SPIMaxTransfer: integer; override;
   function SPIInit(speed: integer): boolean; override;
   procedure SPIDeinit; override;
 
@@ -135,6 +136,12 @@ end;
 procedure TCH347Hardware.SPIDeinit;
 begin
   if not FDevOpened then Exit;
+end;
+
+function TCH347Hardware.SPIMaxTransfer: integer;
+begin
+  //The chunk size the whole-chip read path has always used on CH347.
+  Result := 65535;
 end;
 
 function TCH347Hardware.SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer;

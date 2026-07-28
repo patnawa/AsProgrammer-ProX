@@ -28,6 +28,7 @@ public
   //spi
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; override;
   function SPIWrite(CS: byte; BufferLen: integer; buffer: array of byte): integer; override;
+  function SPIMaxTransfer: integer; override;
   function SPIInit(speed: integer): boolean; override;
   procedure SPIDeinit; override;
 
@@ -131,6 +132,14 @@ procedure TCH341Hardware.SPIDeinit;
 begin
   if not FDevOpened then Exit;
   CH341Set_D5_D0(FDevHandle, 0, 0);
+end;
+
+function TCH341Hardware.SPIMaxTransfer: integer;
+begin
+  //Measured on a CH341A: CH341StreamSPI4 accepts a 3937-byte data phase and
+  //refuses 3938 (the DLL's 4096-byte command buffer minus per-packet command
+  //overhead).  2048 is the historically proven chunk, kept for headroom.
+  Result := 2048;
 end;
 
 function TCH341Hardware.SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer;

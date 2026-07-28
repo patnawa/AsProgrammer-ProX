@@ -27,6 +27,7 @@ public
   //spi
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; override;
   function SPIWrite(CS: byte; BufferLen: integer; buffer: array of byte): integer; override;
+  function SPIMaxTransfer: integer; override;
   function SPIInit(speed: integer): boolean; override;
   procedure SPIDeinit; override;
   procedure SetSPIcs(cs: byte);
@@ -180,6 +181,12 @@ procedure TFT232HHardware.SPIDeinit;
 begin
   if not FDevOpened then Exit;
   Set_USB_Device_BitMode($FF, FT_BITMODE_RESET);
+end;
+
+function TFT232HHardware.SPIMaxTransfer: integer;
+begin
+  //The chunk size the whole-chip read path has always used on FT232H.
+  Result := 16787;
 end;
 
 function TFT232HHardware.SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer;

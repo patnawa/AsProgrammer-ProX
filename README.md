@@ -484,6 +484,24 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 
 ## Changelog
 
+### 4.7.1.0 — a big verify read is not a disconnect
+
+Smart write on a CH341A failed instantly with *"disconnected: verify read:
+data read reply transferred -1 of 4096 bytes at 0x00000000"* — before a
+single byte had been written. The chip was fine and so was the cable. The
+CH341 vendor DLL refuses any single SPI transfer above 3937 bytes (measured
+on hardware; its command buffer is 4096 bytes minus per-packet overhead) and
+reports that refusal exactly like an unplugged programmer. The legacy read
+path always dodged this with 2048-byte chunks, but the Smart-write engine
+verifies in erase-block-sized reads — 4096 bytes — so the very first verify
+step died on every CH341.
+
+The hardware layer now states its per-call ceiling (`SPIMaxTransfer`: 2048
+on CH341 and other conservative backends, 16787 on FT232H, 65535 on CH347),
+and the NOR adapter splits long reads into complete re-addressed read
+commands within that ceiling. Same wire format, same data, no more phantom
+disconnects.
+
 ### 4.7.0.0 — the strip knows a new chip from an old one
 
 The strip could see whether a chip was *selected* and whether the buffer was

@@ -29,6 +29,13 @@ public
   procedure SPIDeinit; virtual; abstract;
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; virtual; abstract;
   function SPIWrite(CS: byte; BufferLen: integer; buffer: array of byte): integer; virtual; abstract;
+  //Largest data phase one SPIRead/SPIWrite call can carry.  Vendor drivers
+  //have hard per-call ceilings (the CH341 DLL refuses SPI streams above
+  //~3.9KB) and they report such a refusal the same way as an unplugged
+  //device, so a caller that exceeds the ceiling diagnoses a disconnect that
+  //never happened.  Callers must split longer transfers into complete
+  //re-addressed commands of at most this many bytes.
+  function SPIMaxTransfer: integer; virtual;
   //Default split transaction for programmers that keep CS asserted across
   //SPIWrite(CS=0) and SPIRead(CS=1).  Backends requiring one native combined
   //exchange (for example Bus Pirate) override this method.
@@ -132,6 +139,14 @@ begin
 
   Result := SPIRead(CS, RBufferLen, RBuffer);
   if Result <> RBufferLen then Result := -1;
+end;
+
+function TBaseHardware.SPIMaxTransfer: integer;
+begin
+  //2048 is the chunk size every legacy read path has always used for
+  //hardware without a larger proven limit; backends override with their own
+  //measured value.
+  Result := 2048;
 end;
 
 function TBaseHardware.GetElectricalCapabilities(

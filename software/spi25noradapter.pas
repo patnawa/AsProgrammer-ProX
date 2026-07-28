@@ -1137,17 +1137,54 @@ end;
 function TSPI25NORAdapter.Read(Address: QWord; Len: cardinal;
   out Data: TBytes): TNORIOResult;
 var
-  Header: TBytes;
+  Header, Part: TBytes;
+  Limit, Done, N: cardinal;
+  MaxTransfer: integer;
 begin
   Data := nil;
   if not RequireInitialized('data read', Result) then Exit;
   Result := CheckRange(Address, Len, 'read range');
   if not Result.Success then Exit;
-  Result := BuildAddressHeader(FConfig.ReadOpcode, Address,
-                               FConfig.FastRead, Header,
-                               'read command');
-  if not Result.Success then Exit;
-  Result := ExchangeExact(Header, Len, Data, 'data read');
+
+  //Vendor drivers have hard per-call ceilings (the CH341 DLL refuses SPI
+  //data phases above ~3.9KB and reports it exactly like an unplugged
+  //device), while verify steps are erase-block-sized.  Split a long read
+  //into complete re-addressed commands, each within the driver's limit.
+  try
+    MaxTransfer := FHardware.SPIMaxTransfer;
+  except
+    on E: Exception do
+      Exit(ExceptionResult('transfer-limit query', E));
+  end;
+  if MaxTransfer < 1 then
+    Exit(NORIOFailure(nioRejected,
+      'the hardware driver reports no usable transfer size'));
+  Limit := cardinal(MaxTransfer);
+
+  SetLength(Data, Len);
+  Done := 0;
+  while Done < Len do
+  begin
+    N := Len - Done;
+    if N > Limit then N := Limit;
+    Result := BuildAddressHeader(FConfig.ReadOpcode, Address + Done,
+                                 FConfig.FastRead, Header,
+                                 'read command');
+    if not Result.Success then
+    begin
+      Data := nil;
+      Exit;
+    end;
+    Result := ExchangeExact(Header, N, Part, 'data read');
+    if not Result.Success then
+    begin
+      Data := nil;
+      Exit;
+    end;
+    Move(Part[0], Data[Done], N);
+    Inc(Done, N);
+  end;
+  Result := NORIOSuccess(Len);
 end;
 
 function TSPI25NORAdapter.Deinitialize: TNORIOResult;

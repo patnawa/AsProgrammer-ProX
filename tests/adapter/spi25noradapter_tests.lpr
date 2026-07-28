@@ -42,6 +42,14 @@ type
     AlternateUniqueID: TSPI25UniqueID;
     SwitchUniqueIDAtPass: cardinal;
     UniqueIDReadCount: cardinal;
+    //Model of a vendor-driver per-call ceiling (the CH341 DLL refuses SPI
+    //data phases above ~3.9KB with the same FALSE an unplugged device
+    //produces).  0 means no ceiling.
+    DriverRefusesAbove: integer;
+    //What SPIMaxTransfer advertises to callers.  0 means the TBaseHardware
+    //default.
+    AdvertisedMaxTransfer: integer;
+    LargestReadSeen: integer;
 
     constructor Create;
     function Trace: string;
@@ -56,6 +64,7 @@ type
       var Buffer: array of byte): integer; override;
     function SPIWrite(CS: byte; BufferLen: integer;
       Buffer: array of byte): integer; override;
+    function SPIMaxTransfer: integer; override;
     function SPIWriteRead(CS: byte; WBufferLen: integer;
       WBuffer: array of byte; RBufferLen: integer;
       var RBuffer: array of byte): integer; override;
@@ -169,6 +178,16 @@ begin
   if Length(FLastHeader) = 0 then Exit;
 
   case FLastHeader[0] of
+    //Plain data read: every byte is a function of its absolute chip address,
+    //so a reassembled multi-command read proves each chunk landed at the
+    //right offset.
+    $03:
+      if Length(FLastHeader) >= 4 then
+        for i := 0 to BufferLen - 1 do
+          Buffer[i] := byte((cardinal(FLastHeader[1]) shl 16) +
+                            (cardinal(FLastHeader[2]) shl 8) +
+                            cardinal(FLastHeader[3]) + cardinal(i)) xor $C3;
+
     $9F:
       begin
         Inc(IdentityReadCount);
@@ -245,11 +264,22 @@ function TAdapterMockHardware.SPIRead(CS: byte; BufferLen: integer;
 begin
   Inc(ReadCalls);
   AddTrace('R' + IntToStr(CS) + ':' + IntToStr(BufferLen));
+  if BufferLen > LargestReadSeen then LargestReadSeen := BufferLen;
+  if (DriverRefusesAbove > 0) and (BufferLen > DriverRefusesAbove) then
+    Exit(-1);
   FillReply(BufferLen, Buffer);
   if (ShortReadOnCall > 0) and (ReadCalls = ShortReadOnCall) then
     Result := BufferLen - 1
   else
     Result := BufferLen;
+end;
+
+function TAdapterMockHardware.SPIMaxTransfer: integer;
+begin
+  if AdvertisedMaxTransfer > 0 then
+    Result := AdvertisedMaxTransfer
+  else
+    Result := inherited SPIMaxTransfer;
 end;
 
 function TAdapterMockHardware.SPIWrite(CS: byte; BufferLen: integer;
@@ -271,6 +301,9 @@ begin
   Inc(ExchangeCalls);
   AddTrace('X' + IntToStr(CS) + ':' + BytesHex(WBuffer) + '>' +
            IntToStr(RBufferLen));
+  if RBufferLen > LargestReadSeen then LargestReadSeen := RBufferLen;
+  if (DriverRefusesAbove > 0) and (RBufferLen > DriverRefusesAbove) then
+    Exit(-1);
   RememberHeader(WBuffer);
   FillReply(RBufferLen, RBuffer);
   if (ShortExchangeOnCall > 0) and
@@ -776,6 +809,99 @@ begin
   end;
 end;
 
+procedure TestDriverTransferCapChunksLongReads;
+var
+  Hardware: TAdapterMockHardware;
+  Adapter: TSPI25NORAdapter;
+  Config: TSPI25NORConfig;
+  R: TNORIOResult;
+  Data: TBytes;
+  Correct: boolean;
+
+  function PatternOK(Base: cardinal; const D: TBytes): boolean;
+  var
+    j: SizeInt;
+  begin
+    Result := True;
+    for j := 0 to High(D) do
+      if D[j] <> (byte(Base + cardinal(j)) xor $C3) then Exit(False);
+  end;
+
+begin
+  WriteLn('Driver cap: block-sized reads become re-addressed chunked commands');
+  Hardware := TAdapterMockHardware.Create;
+  //A real CH341A accepts a 3937-byte SPI data phase and refuses 3938 with
+  //the same FALSE an unplugged programmer produces.  The NOR verify step is
+  //erase-block-sized (4096), which used to be reported as "disconnected ...
+  //-1 of 4096 bytes at 0x00000000" before any byte was written.
+  Hardware.DriverRefusesAbove := 3937;
+  Hardware.AdvertisedMaxTransfer := 2048;
+  InitSPI25NORConfig(Config);
+  ZeroDelays(Config);
+  DisableSPI25Identity(Config);
+  Adapter := TSPI25NORAdapter.Create(Hardware, Config);
+  try
+    Check('open succeeds', Adapter.Open.Success);
+    Check('initialize succeeds', Adapter.Initialize.Success);
+
+    R := Adapter.Read(0, 4096, Data);
+    Check('erase-block-sized verify read succeeds under the driver cap',
+          R.Success and (R.Transferred = 4096) and (Length(Data) = 4096));
+    Check('no single driver read exceeds the advertised transfer limit',
+          Hardware.LargestReadSeen <= 2048);
+    Check('every chunk is a complete re-addressed read command',
+          Hardware.Saw('W0:03000000;') and Hardware.Saw('W0:03000800;'));
+    Check('chunks reassemble at their absolute chip offsets',
+          (Length(Data) = 4096) and PatternOK(0, Data));
+
+    //An unaligned range that is not a multiple of the limit, away from zero:
+    //the tail chunk must carry the remainder and the right start address.
+    R := Adapter.Read($123400, 5000, Data);
+    Correct := R.Success and (R.Transferred = 5000) and
+               (Length(Data) = 5000);
+    Check('unaligned long read succeeds', Correct);
+    Check('unaligned chunks are re-addressed',
+          Hardware.Saw('W0:03123400;') and Hardware.Saw('W0:03123C00;') and
+          Hardware.Saw('W0:03124400;'));
+    Check('unaligned reassembly matches absolute addresses',
+          Correct and PatternOK($123400, Data));
+
+    //Short transfers inside a later chunk must still fail closed with no
+    //partial buffer escaping to the verifier.
+    Hardware.ShortReadOnCall := Hardware.ReadCalls + 2;
+    R := Adapter.Read(0, 4096, Data);
+    Check('short second chunk is a typed failure',
+          (not R.Success) and (R.Error = nioTransport));
+    Check('failed chunked read exposes no partial buffer',
+          Length(Data) = 0);
+    Hardware.ShortReadOnCall := 0;
+  finally
+    Adapter.Free;
+    Hardware.Free;
+  end;
+
+  //With no ceiling configured the advertised limit still bounds each call:
+  //small reads must remain a single command (no behavior change).
+  Hardware := TAdapterMockHardware.Create;
+  InitSPI25NORConfig(Config);
+  ZeroDelays(Config);
+  DisableSPI25Identity(Config);
+  Adapter := TSPI25NORAdapter.Create(Hardware, Config);
+  try
+    Check('open succeeds', Adapter.Open.Success);
+    Check('initialize succeeds', Adapter.Initialize.Success);
+    R := Adapter.Read($000010, 16, Data);
+    Check('short read stays one command',
+          R.Success and (Hardware.ReadCalls = 1) and
+          Hardware.Saw('W0:03000010;'));
+    Check('short read data is exact',
+          (Length(Data) = 16) and PatternOK($10, Data));
+  finally
+    Adapter.Free;
+    Hardware.Free;
+  end;
+end;
+
 procedure TestIdentityConfigurationMustBeExplicit;
 var
   Config: TSPI25NORConfig;
@@ -818,6 +944,7 @@ begin
   TestIdentityFailuresBlockMutation;
   TestUniqueIDSwapRejectedBeforeMutation;
   TestExactCountsAndDisconnectMapping;
+  TestDriverTransferCapChunksLongReads;
   TestIdentityConfigurationMustBeExplicit;
 
   WriteLn;
