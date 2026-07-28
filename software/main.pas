@@ -313,12 +313,14 @@ type
     FWorkflowPanel: TPanel;
     FWorkflowTitle: TLabel;
     FWorkflowState: TLabel;
+    FWorkflowSep: TPanel;
     FWorkflowDetect: TButton;
     FWorkflowOpen: TButton;
     FWorkflowSmart: TButton;
     FWorkflowRead: TButton;
     FWorkflowVerify: TButton;
     procedure CreateWorkflowBar;
+    procedure LayoutWorkflowBar;
     procedure UpdateWorkflowText;
     procedure UpdateWorkflowState;
   public
@@ -1120,6 +1122,9 @@ begin
   end;
 end;
 
+//ตัวช่วยที่แถบ Safe workflow ต้องใช้ แต่นิยามอยู่ท้ายไฟล์
+function IsEEPROMSmartWriteTarget: boolean; forward;
+
 procedure ApplyTheme(Dark: boolean);
 var
   i: integer;
@@ -1218,7 +1223,13 @@ begin
 
     MainForm.FWorkflowSmart.Color := SurfaceColor;
     MainForm.FWorkflowSmart.Font.Color := AccentColor;
-    MainForm.FWorkflowSmart.Font.Style := [fsBold];
+
+    if MainForm.FWorkflowSep <> nil then
+      MainForm.FWorkflowSep.Color := TextColor;
+
+    //ตัวหนาเป็นของ UpdateWorkflowState ซึ่งเน้นเฉพาะขั้นที่กดได้จริง
+    //ไม่ใช่ตั้งค้างไว้ที่ Smart write ตลอดเวลา
+    MainForm.LayoutWorkflowBar;
     MainForm.UpdateWorkflowState;
   end;
 end;
@@ -1232,12 +1243,11 @@ const
   ButtonTop = 8;
   ButtonHeight = 34;
 
-  procedure MakeButton(out B: TButton; ALeft, AWidth: integer;
-    Handler: TNotifyEvent);
+  procedure MakeButton(out B: TButton; Handler: TNotifyEvent);
   begin
     B := TButton.Create(Self);
     B.Parent := FWorkflowPanel;
-    B.SetBounds(ALeft, ButtonTop, AWidth, ButtonHeight);
+    B.SetBounds(0, ButtonTop, 80, ButtonHeight);
     B.OnClick := Handler;
     B.TabStop := True;
   end;
@@ -1257,27 +1267,87 @@ begin
   FWorkflowTitle := TLabel.Create(Self);
   FWorkflowTitle.Parent := FWorkflowPanel;
   FWorkflowTitle.SetBounds(12, 5, 88, 40);
-  FWorkflowTitle.Alignment := taCenter;
+  FWorkflowTitle.Alignment := taLeftJustify;
   FWorkflowTitle.Layout := tlCenter;
   FWorkflowTitle.AutoSize := False;
   FWorkflowTitle.Font.Style := [fsBold];
 
-  MakeButton(FWorkflowDetect, 106, 110, @ButtonReadIDClick);
-  MakeButton(FWorkflowOpen,   222, 110, @ButtonOpenHexClick);
-  MakeButton(FWorkflowSmart,  338, 122, @MenuSmartWriteClick);
-  MakeButton(FWorkflowRead,   466,  96, @ButtonReadClick);
-  MakeButton(FWorkflowVerify, 568,  86, @ButtonVerifyClick);
+  MakeButton(FWorkflowDetect, @ButtonReadIDClick);
+  MakeButton(FWorkflowOpen,   @ButtonOpenHexClick);
+  MakeButton(FWorkflowSmart,  @MenuSmartWriteClick);
+
+  //เส้นคั่นระหว่างเส้นทางสามขั้นกับปุ่มช่วยเหลือ ทำให้เห็นว่าอะไรคือ
+  //"ทางที่ควรเดิน" และอะไรคือเครื่องมือประกอบ
+  FWorkflowSep := TPanel.Create(Self);
+  FWorkflowSep.Parent := FWorkflowPanel;
+  FWorkflowSep.BevelOuter := bvNone;
+  FWorkflowSep.SetBounds(0, ButtonTop + 4, 1, ButtonHeight - 8);
+
+  MakeButton(FWorkflowRead,   @ButtonReadClick);
+  MakeButton(FWorkflowVerify, @ButtonVerifyClick);
 
   FWorkflowState := TLabel.Create(Self);
   FWorkflowState.Parent := FWorkflowPanel;
-  FWorkflowState.SetBounds(670, 5, FWorkflowPanel.ClientWidth - 682, 40);
+  FWorkflowState.SetBounds(0, 5, 100, 40);
   FWorkflowState.Anchors := [akLeft, akTop, akRight];
   FWorkflowState.Alignment := taRightJustify;
   FWorkflowState.Layout := tlCenter;
   FWorkflowState.AutoSize := False;
+  //ข้อความเต็มอยู่ใน Hint เสมอ เผื่อหน้าต่างแคบจนป้ายแสดงได้ไม่หมด
   FWorkflowState.ShowHint := True;
+  FWorkflowState.WordWrap := False;
 
   UpdateWorkflowText;
+end;
+
+//วางตำแหน่งจากความกว้างของข้อความจริง ไม่ใช่พิกัดตายตัว
+//
+//ของเดิมตรึงพิกัดไว้ที่ 106/222/338/466/568/670 ซึ่งพอดีกับข้อความอังกฤษที่
+//ฟอนต์ขนาดปกติเท่านั้น พอแปลเป็นภาษาอื่น เปลี่ยนฟอนต์ หรือเปิดจอ DPI สูง
+//ปุ่มจะทับกันหรือข้อความถูกตัด
+procedure TMainForm.LayoutWorkflowBar;
+const
+  GAP = 6;
+  PAD = 26;   //ที่ว่างซ้ายขวาในปุ่ม
+  SEP_GAP = 12;
+var
+  X: integer;
+
+  procedure Place(B: TButton);
+  var
+    W: integer;
+  begin
+    W := FWorkflowPanel.Canvas.TextWidth(B.Caption) + PAD;
+    if W < 70 then W := 70;
+    B.SetBounds(X, B.Top, W, B.Height);
+    Inc(X, W + GAP);
+  end;
+
+begin
+  if FWorkflowPanel = nil then Exit;
+
+  FWorkflowPanel.Canvas.Font := FWorkflowTitle.Font;
+  FWorkflowTitle.Width := FWorkflowPanel.Canvas.TextWidth(
+                            FWorkflowTitle.Caption) + 8;
+  X := FWorkflowTitle.Left + FWorkflowTitle.Width + GAP + 4;
+
+  //ปุ่มใช้ฟอนต์ของตัวเอง วัดด้วยฟอนต์นั้นถึงจะได้ความกว้างจริง
+  FWorkflowPanel.Canvas.Font := FWorkflowDetect.Font;
+  Place(FWorkflowDetect);
+  Place(FWorkflowOpen);
+  Place(FWorkflowSmart);
+
+  Inc(X, SEP_GAP - GAP);
+  FWorkflowSep.Left := X;
+  Inc(X, FWorkflowSep.Width + SEP_GAP);
+
+  Place(FWorkflowRead);
+  Place(FWorkflowVerify);
+
+  //ป้ายสถานะกินที่ว่างที่เหลือ และหดได้เมื่อหน้าต่างแคบ
+  FWorkflowState.Left := X + GAP;
+  FWorkflowState.Width := FWorkflowPanel.ClientWidth - FWorkflowState.Left - 12;
+  if FWorkflowState.Width < 40 then FWorkflowState.Width := 40;
 end;
 
 procedure TMainForm.UpdateWorkflowText;
@@ -1295,39 +1365,86 @@ begin
   FWorkflowDetect.ShowHint := True;
   FWorkflowOpen.Hint := STR_WORKFLOW_OPEN + ' (Ctrl+O)';
   FWorkflowOpen.ShowHint := True;
-  FWorkflowSmart.Hint :=
-    'Preserve neighbouring bytes, erase only when required, program, and verify'
-    + ' (Ctrl+Shift+P)';
   FWorkflowSmart.ShowHint := True;
   FWorkflowRead.Hint := STR_WORKFLOW_READ + ' (Ctrl+R)';
   FWorkflowRead.ShowHint := True;
   FWorkflowVerify.Hint := STR_WORKFLOW_VERIFY + ' (Ctrl+Shift+V)';
   FWorkflowVerify.ShowHint := True;
 
+  LayoutWorkflowBar;
   UpdateWorkflowState;
 end;
 
 //บอกขั้นต่อไปด้วยสถานะจริงของโปรแกรม และปิดเฉพาะปุ่มลัดชุดใหม่เมื่อเงื่อนไข
 //ยังไม่ครบ ปุ่มดั้งเดิมยังอยู่เพื่อไม่ขวางงานวิเคราะห์/ฮาร์ดแวร์แบบพิเศษ
+//
+//ปุ่มที่กดไม่ได้ต้องมีเหตุผลที่อ่านได้เสมอ ทั้งในป้ายสถานะและใน tooltip
+//ของปุ่มนั้นเอง การปิดปุ่มเฉย ๆ โดยไม่บอกว่าทำไม คือทางที่ผู้ใช้ไปติดแล้ว
+//เดาเอาเองว่าโปรแกรมพัง
 procedure TMainForm.UpdateWorkflowState;
 var
-  HasBuffer, IsNOR: boolean;
-  StateText: string;
+  HasBuffer, SmartCapable, SizeKnown, AddrOK, FitsChip, MWAligned: boolean;
+  BufSize, ChipSize, StartAddr: QWord;
+  Parsed: QWord;
+  StateText, SmartWhy: string;
   StateColor: TColor;
+  NextStep: TButton;
 begin
   if FWorkflowPanel = nil then Exit;
 
-  HasBuffer := MPHexEditorEx.DataSize > 0;
-  IsNOR := RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25);
+  BufSize := MPHexEditorEx.DataSize;
+  HasBuffer := BufSize > 0;
+
+  //Smart write ไม่ใช่ของ SPI NOR อย่างเดียวอีกแล้ว ตั้งแต่ 4.6 ตระกูลที่ลบ
+  //ไม่ได้ (24Cxx, 93xx, 95xx) ก็มีตัวจัดการ differential ของตัวเอง
+  SmartCapable := (RadioSPI.Checked and
+                   (ComboSPICMD.ItemIndex = SPI_CMD_25)) or
+                  IsEEPROMSmartWriteTarget;
+
+  ChipSize := 0;
+  if IsNumber(ComboChipSize.Text) then
+    ChipSize := StrToInt64Def(ComboChipSize.Text, 0);
+  SizeKnown := ChipSize > 0;
+
+  StartAddr := 0;
+  AddrOK := TryStrToQWord('$' + Trim(StartAddressEdit.Text), Parsed);
+  if AddrOK then StartAddr := Parsed;
+
+  //ภาพที่ใหญ่เกินพื้นที่ที่เหลือจากแอดเดรสเริ่ม เดิมรู้ตัวหลังกดเขียนแล้ว
+  FitsChip := SizeKnown and AddrOK and (StartAddr < ChipSize) and
+              (BufSize <= ChipSize - StartAddr);
+
+  //93xx เป็นชิปแบบคำ ตัวจัดการต้องการแอดเดรสและความยาวเป็นเลขคู่
+  MWAligned := (not RadioMW.Checked) or
+               (((StartAddr and 1) = 0) and ((BufSize and 1) = 0));
 
   FWorkflowOpen.Enabled := not OperationRunning;
   FWorkflowDetect.Enabled := (not OperationRunning) and
     ProgrammerPresent and RadioSPI.Checked;
   FWorkflowRead.Enabled := (not OperationRunning) and
-    ProgrammerPresent and ChipDetected;
+    ProgrammerPresent and ChipDetected and SizeKnown;
   FWorkflowVerify.Enabled := FWorkflowRead.Enabled and HasBuffer;
-  FWorkflowSmart.Enabled := FWorkflowVerify.Enabled and IsNOR;
+  FWorkflowSmart.Enabled := FWorkflowVerify.Enabled and SmartCapable and
+                            FitsChip and MWAligned;
 
+  //tooltip ของ Smart write บอกเหตุผลที่กดไม่ได้ ไม่ใช่คำอธิบายทั่วไปที่
+  //ไม่เกี่ยวกับสถานะตรงหน้า
+  if FWorkflowSmart.Enabled then
+    SmartWhy := 'Preserve neighbouring bytes, write only what differs, ' +
+                'and verify (Ctrl+Shift+P)'
+  else if not SmartCapable then
+    SmartWhy := 'Smart write covers SPI NOR, SPI 95, I2C 24 and MicroWire 93'
+  else if not HasBuffer then
+    SmartWhy := 'Open an image first'
+  else if not FitsChip then
+    SmartWhy := 'The image does not fit the chip from this start address'
+  else if not MWAligned then
+    SmartWhy := STR_WORKFLOW_MW_ODD
+  else
+    SmartWhy := 'Connect a programmer and select a chip first';
+  FWorkflowSmart.Hint := SmartWhy;
+
+  NextStep := nil;
   if OperationRunning then
   begin
     StateText := STR_WORKFLOW_RUNNING;
@@ -1340,24 +1457,66 @@ begin
   end
   else if not ChipDetected then
   begin
-    StateText := STR_WORKFLOW_PICK_CHIP;
+    //Read ID ใช้ได้เฉพาะ SPI การบอกให้ "detect" บนชิป I2C/MicroWire คือการ
+    //ชี้ไปที่ปุ่มที่กดไม่ได้
+    if RadioSPI.Checked then
+    begin
+      StateText := STR_WORKFLOW_PICK_CHIP;
+      NextStep := FWorkflowDetect;
+    end
+    else
+      StateText := STR_WORKFLOW_PICK_LIST;
+    StateColor := TColor($D16E0A);
+  end
+  else if not SizeKnown then
+  begin
+    StateText := STR_WORKFLOW_NO_SIZE;
     StateColor := TColor($D16E0A);
   end
   else if not HasBuffer then
   begin
     StateText := STR_WORKFLOW_LOAD;
     StateColor := TColor($D16E0A);
+    NextStep := FWorkflowOpen;
   end
-  else if IsNOR then
+  else if not AddrOK then
+  begin
+    StateText := STR_WORKFLOW_BAD_ADDR;
+    StateColor := TColor($C0392B);
+  end
+  else if not FitsChip then
+  begin
+    StateText := Format(STR_WORKFLOW_TOO_BIG,
+      [BufSize, ChipSize - StartAddr, IntToHex(StartAddr, 1)]);
+    if StartAddr >= ChipSize then
+      StateText := Format(STR_WORKFLOW_TOO_BIG,
+        [BufSize, 0, IntToHex(StartAddr, 1)]);
+    StateColor := TColor($C0392B);
+  end
+  else if not MWAligned then
+  begin
+    StateText := STR_WORKFLOW_MW_ODD;
+    StateColor := TColor($C0392B);
+  end
+  else if SmartCapable then
   begin
     StateText := STR_WORKFLOW_READY;
     StateColor := TColor($5B9E2E);
+    NextStep := FWorkflowSmart;
   end
   else
   begin
     StateText := STR_WORKFLOW_LEGACY;
     StateColor := TColor($5B9E2E);
   end;
+
+  //เน้นเฉพาะขั้นที่กดได้จริงตอนนี้ ของเดิมตัวหนาที่ Smart write ตลอดเวลา
+  //ซึ่งชี้ไปที่ปุ่มที่ยังกดไม่ได้ตั้งแต่เปิดโปรแกรม
+  FWorkflowDetect.Font.Style := [];
+  FWorkflowOpen.Font.Style := [];
+  FWorkflowSmart.Font.Style := [];
+  if (NextStep <> nil) and NextStep.Enabled then
+    NextStep.Font.Style := [fsBold];
 
   FWorkflowState.Caption := StateText;
   FWorkflowState.Hint := StateText;
@@ -9035,12 +9194,21 @@ begin
 end;
 
 procedure TMainForm.StartAddressEditChange(Sender: TObject);
+var
+  Parsed: QWord;
 begin
   if StartAddressEdit.Text = '' then StartAddressEdit.Text := '0';
-  if Hex2Dec('$'+StartAddressEdit.Text) > 0 then
+  //Hex2Dec ยกข้อยกเว้นเมื่อเจอข้อความที่ไม่ใช่เลขฐานสิบหก ซึ่งเข้ามาได้ทาง
+  //การวาง (ตัวกรองปุ่มกดกันได้แค่การพิมพ์)
+  if not TryStrToQWord('$' + Trim(StartAddressEdit.Text), Parsed) then
+    Parsed := 0;
+  if Parsed > 0 then
      StartAddressEdit.Color:= clYellow
   else
      StartAddressEdit.Color:= clDefault;
+  //แถบ Safe workflow ตรวจว่าภาพลงชิปได้จากแอดเดรสนี้หรือไม่ จึงต้องรู้ตัว
+  //ทุกครั้งที่แอดเดรสเปลี่ยน
+  UpdateWorkflowState;
 end;
 
 procedure TMainForm.StartAddressEditKeyPress(Sender: TObject; var Key: char);

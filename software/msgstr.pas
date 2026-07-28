@@ -138,10 +138,16 @@ resourcestring
   STR_WORKFLOW_VERIFY    = 'Verify';
   STR_WORKFLOW_CONNECT   = 'Next: connect a programmer';
   STR_WORKFLOW_PICK_CHIP = 'Next: detect or select a chip';
+  STR_WORKFLOW_PICK_LIST = 'Next: pick the chip from the list (Read ID is SPI only)';
   STR_WORKFLOW_LOAD      = 'Next: open an image or read the chip';
   STR_WORKFLOW_READY     = 'Ready for Smart write';
-  STR_WORKFLOW_LEGACY    = 'Ready for this memory type';
+  STR_WORKFLOW_LEGACY    = 'Ready - this memory type writes with the Write button';
   STR_WORKFLOW_RUNNING   = 'Operation in progress - Esc cancels safely';
+  //ปัญหาที่เดิมรู้ตัวหลังกดเขียนไปแล้ว ตอนนี้บอกตั้งแต่ยังไม่กด
+  STR_WORKFLOW_NO_SIZE   = 'Next: set the chip size';
+  STR_WORKFLOW_BAD_ADDR  = 'The start address is not a hexadecimal number';
+  STR_WORKFLOW_TOO_BIG   = 'The image is %d bytes but only %d fit from 0x%s';
+  STR_WORKFLOW_MW_ODD    = 'MicroWire Smart write needs an even start address and length';
   STR_COMPARE_SEE_LOG    = 'The differing ranges are listed in the log below,'#13#10
                          + 'and highlighted in the editor.';
   STR_DIFF_IN_EDITOR     = 'The editor shows the second side, with the differing bytes highlighted';

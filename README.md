@@ -90,9 +90,14 @@ Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-
    affected-block verification.
 
 The **Safe workflow** strip keeps the normal path visible: **Detect chip →
-Open image → Smart write**. Each step enables only when its prerequisites are
-present, and the message on the right says what is missing. Useful shortcuts
-are `F5` to detect, `Ctrl+O` to open an image, `Ctrl+R` to read,
+Open image → Smart write**, with `Read chip` and `Verify` kept to the right of
+a divider as the supporting tools. Each step enables only when its
+prerequisites are met, the next step you can actually take is the one shown in
+bold, and the message on the right says what is missing — including the things
+that used to surface only after you pressed Write, such as an image that does
+not fit the chip from the current start address. A step you cannot press
+explains why in its tooltip rather than just sitting greyed out. Useful
+shortcuts are `F5` to detect, `Ctrl+O` to open an image, `Ctrl+R` to read,
 `Ctrl+Shift+P` for Smart Write, `Ctrl+Shift+V` to verify, and `Esc` to request
 a safe cancellation.
 
