@@ -1,6 +1,22 @@
 # Design: differential Smart Write for the EEPROM families
 
-Status: designed, not yet implemented (task 6).
+Status: IMPLEMENTED in 4.6.0.0. Shipped as `eepromengine.pas` (planner and
+executor), `eepromadapters.pas` (the I2C/95xx/93xx hardware adapters),
+`tests/virtualeeprom.pas` + `tests/eepromengine_tests.lpr` (29 checks
+including a full fault matrix and 400 randomized rounds), routed from
+`MenuSmartWriteClick` and accepted by CLI `--smart` / `--smart --plan-only`.
+
+Two decisions changed during implementation, both deliberately:
+
+- The virtual chip **rejects** a page write that is unaligned or not exactly
+  one page, instead of reproducing the 24Cxx page-buffer wrap. Modelling the
+  corruption would let a planner bug produce a subtly wrong image that a
+  test might miss; rejecting turns the same bug into an immediate failure.
+- Verification covers **every page the requested range touches**, not only
+  the pages that were written. Reading back unchanged pages is the only
+  thing that detects a same-model chip swapped in after the snapshot.
+
+The text below is the original design and remains accurate.
 
 ## Why
 

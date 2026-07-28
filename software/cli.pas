@@ -1149,10 +1149,14 @@ begin
   if HasSwitch('smart') then
   begin
     Action := 'smart-write';
-    if (not MainForm.RadioSPI.Checked) or
-       (MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25) then
+    //SPI25 NOR วิ่งผ่านตัวจัดการแบบธุรกรรม ส่วน 24Cxx/93xx/95xx ที่ลบไม่ได้
+    //วิ่งผ่านตัวจัดการ EEPROM ซึ่ง MenuSmartWriteClick เลือกให้เอง
+    if not ((MainForm.RadioSPI.Checked and
+             (MainForm.ComboSPICMD.ItemIndex in [SPI_CMD_25, SPI_CMD_95])) or
+            MainForm.RadioI2C.Checked or MainForm.RadioMW.Checked) then
     begin
-      Say('--smart is supported only for SPI 25-series NOR flash');
+      Say('--smart supports SPI 25-series NOR, SPI 95-series EEPROM, ' +
+          'I2C 24-series and MicroWire 93-series');
       Exit(EXIT_USAGE);
     end;
     if HasSwitch('erase') then

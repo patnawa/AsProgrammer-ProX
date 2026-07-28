@@ -15,7 +15,7 @@ unit appver;
 interface
 
 const
-  PROX_VERSION = '4.5.0.0';
+  PROX_VERSION = '4.6.0.0';
 
 implementation
 

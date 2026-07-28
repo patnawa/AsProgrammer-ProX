@@ -18,7 +18,7 @@ uses
   utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, serialnum, jedec, protbits,
   opresult, prodlog, chipsave, flashops, imgcheck,
   operationmodel, norplanner, norengine, spi25noradapter, prodcrypto,
-  prodevidence,
+  prodevidence, eepromengine, eepromadapters,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
 
@@ -232,6 +232,7 @@ type
     procedure BlankCheckMenuItemClick(Sender: TObject);
     procedure MenuEraseRangeClick(Sender: TObject);
     procedure MenuSmartWriteClick(Sender: TObject);
+    procedure SmartWriteEEPROM(Sender: TObject);
     procedure MenuChecksumClick(Sender: TObject);
     procedure MenuSFDPDetectClick(Sender: TObject);
     procedure MenuBackgroundOpsClick(Sender: TObject);
@@ -9837,6 +9838,92 @@ end;
 //blocks must be read/modify/erased/restored.  One headless executor then owns
 //the second hardware session, WREN/WEL checks, WIP draining, full-block
 //verification, cancellation, 4-byte-mode cleanup, and evidence commit.
+//อ่านทั้งชิปผ่านตัวจับคู่ตัวเดียวกับที่จะใช้เขียน
+//
+//อ่านผ่านทางเดียวกับที่เขียนโดยตั้งใจ: snapshot ที่มาจากเส้นทางอื่นอาจต่างกัน
+//ในรายละเอียดที่ทำให้แผน differential ผิด
+function ReadCurrentChipEEPROM(Device: TEEPROMDevice; Stream: TMemoryStream;
+  ChipSize, PageSize: cardinal): boolean;
+var
+  Addr: QWord;
+  Chunk: cardinal;
+  Data: TBytes;
+  R: TEEPROMIOResult;
+begin
+  Result := False;
+  Stream.Clear;
+  ProgressReset(ChipSize);
+
+  Addr := 0;
+  while Addr < ChipSize do
+  begin
+    //อ่านทีละหลายหน้าเพื่อความเร็ว แต่ไม่เกิน 4KB ต่อครั้ง
+    Chunk := PageSize;
+    while (Chunk < 4096) and (Chunk + PageSize <= ChipSize - Addr) do
+      Inc(Chunk, PageSize);
+    if QWord(Chunk) > ChipSize - Addr then Chunk := cardinal(ChipSize - Addr);
+
+    R := Device.ReadPage(Addr, Chunk, Data);
+    if not R.Success then
+    begin
+      OpFail('snapshot read failed: ' + R.ErrorText, Addr);
+      Exit;
+    end;
+    if (R.Transferred <> Chunk) or (cardinal(Length(Data)) <> Chunk) then
+    begin
+      OpFail(Format('snapshot short read: received %d of %d bytes',
+                    [R.Transferred, Chunk]), Addr);
+      Exit;
+    end;
+    Stream.WriteBuffer(Data[0], Chunk);
+    Inc(Addr, Chunk);
+
+    ProgressStep(Chunk);
+    OpProcessMessages;
+    if UserCancel then
+    begin
+      OpCancel;
+      Exit;
+    end;
+  end;
+
+  Stream.Position := 0;
+  Result := Stream.Size = int64(ChipSize);
+  if not Result then
+    OpFail('the snapshot did not come back at the chip size');
+end;
+
+//ชิปที่เลือกอยู่เป็นตระกูล EEPROM ที่ Smart Write มีตัวจัดการให้หรือไม่
+//(24Cxx ทาง I2C, 93xx ทาง MicroWire, 95xx ทาง SPI)
+function IsEEPROMSmartWriteTarget: boolean;
+begin
+  Result := MainForm.RadioI2C.Checked or MainForm.RadioMW.Checked or
+            (MainForm.RadioSPI.Checked and
+             (MainForm.ComboSPICMD.ItemIndex = SPI_CMD_95));
+end;
+
+//สรุปแผน Smart Write ของ EEPROM เป็นภาษาคน สำหรับโหมดดูแผนอย่างเดียว
+procedure LogEEPROMPlanPreview(const Plan: TEEPROMPlan; WriteCycleMs: cardinal);
+var
+  Writes: integer;
+  EtaMs: QWord;
+begin
+  Writes := EEPROMPlanCountKind(Plan, epsWrite);
+  LogPrint('--- Smart Write plan preview: nothing has been written ---');
+  if Writes = 0 then
+    LogPrint('The chip already matches the image; no page would be written')
+  else
+    LogPrint(Format('  write: %d pages of %d bytes (%d bytes changed)',
+      [Writes, Plan.PageSize, Plan.ChangedBytes]));
+  LogPrint(Format('  verify: %d page reads, %d bytes',
+    [EEPROMPlanCountKind(Plan, epsVerify), Plan.VerifyBytes]));
+  EtaMs := QWord(Writes) * QWord(WriteCycleMs);
+  if EtaMs >= 1000 then
+    LogPrint(Format('  worst-case write-cycle time: about %d s',
+                    [(EtaMs + 999) div 1000]));
+  LogPrint('Run Smart write without --plan-only to execute this plan.');
+end;
+
 //สรุปแผน Smart Write เป็นภาษาคน สำหรับโหมดดูแผนอย่างเดียว
 //เพดานเวลามาจากตัวเลขที่ชิปประกาศเอง (ทาง SFDP DWORD-10/11 ถ้ามี)
 procedure LogSmartPlanPreview(const Plan: TNORPlan);
@@ -9981,6 +10068,15 @@ var
 
 begin
   if OperationRunning then Exit;
+
+  //ตระกูลที่ลบไม่ได้ (24Cxx, 93xx, 95xx) มีตัวจัดการของตัวเอง: ไม่มีขั้นลบ
+  //แผนจึงเป็นแค่ "เขียนเฉพาะหน้าที่ต่าง แล้วตรวจทุกหน้าที่แตะ"
+  if IsEEPROMSmartWriteTarget then
+  begin
+    SmartWriteEEPROM(Sender);
+    Exit;
+  end;
+
   OpBegin(opkWrite);
   //FillChar ห้ามใช้กับเรคคอร์ดที่มีสตริง (ดูคำอธิบายที่จุดเดียวกันใน
   //ButtonWriteClick)
@@ -10557,6 +10653,321 @@ begin
     CurrentBytes := nil;
     PatchBytes := nil;
     if PlanBuilt then ClearNORPlan(Plan);
+    SetProgressPos(0);
+    LogPrint(STR_OP_RESULT + OpSummary);
+    if ControlsLocked then UnlockControl;
+  end;
+end;
+
+//Smart Write สำหรับตระกูลที่ลบไม่ได้: 24Cxx, 93xx, 95xx
+//
+//EEPROM เขียนทับได้ทีละไบต์ ไม่มีขั้นลบ แผนจึงเหลือแค่ "เขียนเฉพาะหน้าที่
+//ต่างจากภาพที่ต้องการ แล้วตรวจทุกหน้าที่อยู่ในช่วงที่ขอ" การตรวจหน้าที่
+//ไม่ได้เขียนด้วยคือสิ่งเดียวที่จับได้ว่าชิปถูกสลับตัวหลังอ่าน snapshot
+procedure TMainForm.SmartWriteEEPROM(Sender: TObject);
+var
+  Device: TEEPROMDevice;
+  Executor: TEEPROMPlanExecutor;
+  Token: TCancellationToken;
+  Request: TOperationRequest;
+  Outcome: TOperationOutcome;
+  Plan: TEEPROMPlan;
+  PlanBuilt, ControlsLocked, Opened, BusEntered: boolean;
+  Snapshot, PatchStream: TMemoryStream;
+  Current, Patch: TBytes;
+  ChipSize, PageSize, PatchStart, PatchSize, WriteCycleMs: cardinal;
+  DevAddr: byte;
+  Parsed: QWord;
+  Err: string;
+  OldWorker: boolean;
+
+  procedure ExecutePlan;
+  begin
+    Outcome := Executor.Execute(Request, Plan, ChipSize, Token);
+  end;
+
+begin
+  if OperationRunning then Exit;
+  OpBegin(opkWrite);
+  CurrentSerial := Default(TSerialAllocation);
+  CurrentSerialValid := False;
+  CurrentSerialReserved := False;
+  LastChipUID := '';
+  LastProgramCRC := BufferCRC32;
+
+  Device := nil;
+  Executor := nil;
+  Token := nil;
+  Snapshot := nil;
+  PatchStream := nil;
+  Current := nil;
+  Patch := nil;
+  PlanBuilt := False;
+  ControlsLocked := False;
+  Opened := False;
+  BusEntered := False;
+  DevAddr := 0;
+  FillChar(Outcome, SizeOf(Outcome), 0);
+  InitOperationRequest(Request);
+  Request.OperationID :=
+    FormatDateTime('yyyymmddhhnnsszzz', Now) + '-' +
+    IntToHex(GetTickCount64 and $FFFFFFFF, 8);
+  Request.Kind := okProgram;
+  Request.Chip.Name := CurrentICParam.Name;
+
+  try
+  try
+    if StrictProductionMode then
+    begin
+      OpFail('strict production is SPI-NOR-only');
+      Exit;
+    end;
+    if MPHexEditorEx.DataSize = 0 then
+    begin
+      LogPrint(STR_ERASE_RANGE_EMPTY);
+      OpFail('the write buffer is empty');
+      Exit;
+    end;
+
+    if (not TryStrToQWord(Trim(ComboChipSize.Text), Parsed)) or
+       (Parsed = 0) or (Parsed > High(cardinal)) then
+    begin
+      OpFail('the chip size is not a usable positive integer');
+      Exit;
+    end;
+    ChipSize := cardinal(Parsed);
+
+    if (not TryStrToQWord('$' + Trim(StartAddressEdit.Text), Parsed)) or
+       (Parsed > High(cardinal)) then
+    begin
+      OpFail('the start address is not a usable hexadecimal address');
+      Exit;
+    end;
+    PatchStart := cardinal(Parsed);
+    PatchSize := MPHexEditorEx.DataSize;
+    if (PatchStart >= ChipSize) or (PatchSize > ChipSize - PatchStart) then
+    begin
+      OpFail('the requested patch does not fit the selected chip');
+      Exit;
+    end;
+    Request.Target.Address := PatchStart;
+    Request.Target.Length := PatchSize;
+    Request.Chip.Capacity := ChipSize;
+
+    //ขนาดหน้าและตัวจับคู่ฮาร์ดแวร์ ต่างกันตามตระกูล
+    if RadioMW.Checked then
+    begin
+      //93xx เป็นชิปแบบคำ: หน้าคือหนึ่งคำ = สองไบต์เสมอ
+      if not IsNumber(ComboMWBitLen.Text) then
+      begin
+        OpFail('the MicroWire address bit length is not a number');
+        Exit;
+      end;
+      PageSize := 2;
+      WriteCycleMs := MW_ADAPTER_WRITE_CYCLE_MS;
+      if ((PatchStart and 1) <> 0) or ((PatchSize and 1) <> 0) then
+      begin
+        OpFail('MicroWire Smart Write needs an even start address and length');
+        Exit;
+      end;
+    end
+    else
+    begin
+      if (not TryStrToQWord(Trim(ComboPageSize.Text), Parsed)) or
+         (Parsed = 0) or (Parsed > 2048) then
+      begin
+        OpFail('Smart Write requires a numeric page size from 1 to 2048 bytes');
+        Exit;
+      end;
+      PageSize := cardinal(Parsed);
+      if RadioI2C.Checked then
+        WriteCycleMs := I2C_ADAPTER_WRITE_CYCLE_MS
+      else
+        WriteCycleMs := SPI95_ADAPTER_WRITE_CYCLE_MS;
+    end;
+
+    if (ChipSize mod PageSize) <> 0 then
+    begin
+      OpFail(Format('the chip size %d is not a whole number of %d-byte pages',
+                    [ChipSize, PageSize]));
+      Exit;
+    end;
+
+    if RadioI2C.Checked and (ComboAddrType.ItemIndex < 0) then
+    begin
+      OpFail('the I2C address type is not selected');
+      Exit;
+    end;
+
+    LockControl;
+    ControlsLocked := True;
+    if not OpenDevice then
+    begin
+      OpFail('the programmer could not be opened');
+      Exit;
+    end;
+    Opened := True;
+
+    if not VoltageWarningOK then
+    begin
+      OpFail('aborted because of the supply voltage');
+      Exit;
+    end;
+
+    //เข้าโหมดบัสตามตระกูล แล้วสร้างตัวจับคู่ฮาร์ดแวร์ให้ตรงกัน
+    if RadioI2C.Checked then
+    begin
+      EnterProgModeI2C();
+      BusEntered := True;
+      DevAddr := SetI2CDevAddr();
+      if UsbAspI2C_BUSY(DevAddr) then
+      begin
+        LogPrint(STR_I2C_NO_ANSWER);
+        OpFail('the I2C EEPROM did not acknowledge its address');
+        Exit;
+      end;
+      if not I2CAddressRangeValid(ComboAddrType.ItemIndex, PatchStart,
+                                  integer(PatchSize)) then
+      begin
+        OpFail('the I2C address range is outside this address type');
+        Exit;
+      end;
+      Device := TI2CEEPROMAdapter.Create(DevAddr, ComboAddrType.ItemIndex);
+    end
+    else if RadioMW.Checked then
+    begin
+      if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then
+      begin
+        OpFail('the programmer could not initialize the MicroWire bus');
+        Exit;
+      end;
+      BusEntered := True;
+      Device := TMWEEPROMAdapter.Create(StrToInt(ComboMWBitLen.Text));
+    end
+    else
+    begin
+      if not EnterProgMode25(SetSPISpeed(0), MenuSendAB.Checked) then
+      begin
+        OpFail('the programmer could not initialize the SPI bus');
+        Exit;
+      end;
+      BusEntered := True;
+      if not SPI95AddressRangeValid(integer(ChipSize), PatchStart,
+                                    integer(PatchSize)) then
+      begin
+        OpFail('the SPI EEPROM write range is outside the selected chip');
+        Exit;
+      end;
+      Device := TSPI95EEPROMAdapter.Create(integer(ChipSize));
+    end;
+
+    //snapshot ที่เชื่อถือได้: อ่านทั้งชิปผ่านทางอ่านของตระกูลนั้นเอง
+    LogPrint(STR_BACKUP_MAKING);
+    Snapshot := TMemoryStream.Create;
+    if not ReadCurrentChipEEPROM(Device, Snapshot, ChipSize, PageSize) then
+    begin
+      OpFail('a trusted full-chip snapshot could not be read');
+      Exit;
+    end;
+
+    PatchStream := TMemoryStream.Create;
+    MPHexEditorEx.SaveToStream(PatchStream);
+    PatchStream.Position := 0;
+    if not ApplySerialToStream(PatchStream) then Exit;
+    if not ReserveCurrentSerial then Exit;
+    PatchSize := PatchStream.Size;
+    Request.Target.Length := PatchSize;
+
+    SetLength(Current, ChipSize);
+    Snapshot.Position := 0;
+    Snapshot.ReadBuffer(Current[0], ChipSize);
+    SetLength(Patch, PatchSize);
+    PatchStream.Position := 0;
+    if PatchSize > 0 then PatchStream.ReadBuffer(Patch[0], PatchSize);
+
+    if not BuildEEPROMDifferentialPlan(Current, Patch, PatchStart, PageSize,
+                                       Plan, Err) then
+    begin
+      OpFail('cannot construct the differential write plan: ' + Err);
+      Exit;
+    end;
+    PlanBuilt := True;
+    LogPrint(Format(
+      'Smart plan: %d changed bytes, %d pages to write, %d bytes verified',
+      [Plan.ChangedBytes, EEPROMPlanCountKind(Plan, epsWrite),
+       Plan.VerifyBytes]));
+
+    if SmartWritePlanOnly then
+    begin
+      LogEEPROMPlanPreview(Plan, WriteCycleMs);
+      Exit;
+    end;
+
+    if OperationCancellationRequested then
+    begin
+      OpCancel;
+      Exit;
+    end;
+
+    Token := TCancellationToken.Create;
+    ActiveNORCancellation := Token;
+    Executor := TEEPROMPlanExecutor.Create(Device);
+
+    OldWorker := UseWorkerThread;
+    UseWorkerThread := True;
+    try
+      RunOperation(@ExecutePlan);
+    finally
+      UseWorkerThread := OldWorker;
+    end;
+
+    if not LastOp.Failed then
+      case Outcome.Status of
+        osSucceeded:
+          begin
+            OpProgress(PatchSize, PatchSize);
+            LogPrint(STR_DONE);
+          end;
+        osCancelled:
+          OpCancel;
+        osFailed:
+          if Outcome.HasFailureAddress then
+            OpFail(OperationErrorName(Outcome.ErrorCode) + ': ' +
+                   Outcome.ErrorText, Outcome.FailureAddress)
+          else
+            OpFail(OperationErrorName(Outcome.ErrorCode) + ': ' +
+                   Outcome.ErrorText);
+      else
+        OpFail('the EEPROM executor returned no terminal outcome');
+      end;
+  except
+    on E: Exception do
+      OpFail('EEPROM Smart Write raised ' + E.ClassName + ': ' + E.Message);
+  end;
+  finally
+    ActiveNORCancellation := nil;
+    Executor.Free;
+    Device.Free;
+    Token.Free;
+    Snapshot.Free;
+    PatchStream.Free;
+    Current := nil;
+    Patch := nil;
+    if PlanBuilt then ClearEEPROMPlan(Plan);
+
+    if BusEntered then
+      try
+        if RadioSPI.Checked then ExitProgMode25;
+      except
+        on E: Exception do
+          if not LastOp.Failed then
+            OpFail('bus cleanup raised ' + E.ClassName + ': ' + E.Message);
+      end;
+    if Opened then AsProgrammer.Programmer.DevClose;
+
+    if (ProdSettings.ProdLogFile <> '') and (MPHexEditorEx.DataSize > 0) then
+      WriteProdLogEntry(MPHexEditorEx.DataSize, LastProgramCRC, LastChipUID);
+
     SetProgressPos(0);
     LogPrint(STR_OP_RESULT + OpSummary);
     if ControlsLocked then UnlockControl;

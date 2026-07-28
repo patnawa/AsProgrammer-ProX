@@ -100,6 +100,11 @@ run_suite norengine_tests "$nor" \
   tests/norengine_tests.lpr tests/virtualspi25.pas \
   software/operationmodel.pas software/norplanner.pas software/norengine.pas
 
+eeprom="$tmp/eeprom"
+run_suite eepromengine_tests "$eeprom" \
+  tests/eepromengine_tests.lpr tests/virtualeeprom.pas \
+  software/operationmodel.pas software/eepromengine.pas
+
 adapter="$tmp/spi25-adapter"
 run_suite spi25noradapter_tests "$adapter" \
   tests/adapter/spi25noradapter_tests.lpr \

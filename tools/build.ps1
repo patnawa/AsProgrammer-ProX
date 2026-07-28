@@ -131,6 +131,13 @@ Run-Suite "norengine_tests" $norDir @(
   "$root\software\operationmodel.pas", "$root\software\norplanner.pas",
   "$root\software\norengine.pas")
 
+# The EEPROM sibling of the NOR service: page-differential plans and the
+# executor, with the same fault matrix and randomized invariants.
+$eepromDir = Join-Path $env:TEMP "aspx-tests-eeprom"
+Run-Suite "eepromengine_tests" $eepromDir @(
+  "$root\tests\eepromengine_tests.lpr", "$root\tests\virtualeeprom.pas",
+  "$root\software\operationmodel.pas", "$root\software\eepromengine.pas")
+
 # Real TBaseHardware-to-NOR-service adapter framing, identity gates, exact
 # transfer counts, four-byte strategies, and exactly-once cleanup.
 $adapterDir = Join-Path $env:TEMP "aspx-tests-spi25-adapter"

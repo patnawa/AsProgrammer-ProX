@@ -25,6 +25,7 @@ programmers, while staying free and open source.
 |---|---|
 | **Sector / block erase** | Erase only the sectors covering a range instead of the whole chip. 4 KB (`20h`), 32 KB (`52h`), 64 KB (`D8h`), or the size declared by the chip. |
 | **Transactional Smart write** | Takes two matching full-chip snapshots, builds a preservation-aware differential plan, unlocks safely, then programs and fully verifies every affected erase block. A `0→1` change erases only its containing block and restores untouched neighbour bytes from the trusted snapshot; pure `1→0` changes skip erase. Identity, exact transfer counts, WEL, BUSY, cancellation cleanup, and evidence are one typed operation rather than loosely chained buttons. |
+| **Smart write on EEPROMs too** | 24Cxx, 93xx and 95xx are byte-alterable, so there is no erase to plan — but the shape still pays. A snapshot is taken, only the pages that actually differ are written, and every page the range touches is read back and compared, including the unchanged ones. Changing one byte of a 24C256 costs one page write instead of 512, and verifying the untouched pages is what notices a chip swapped between snapshot and write. `--smart --plan-only` previews the plan here too. |
 | **SFDP auto-detect** | Reads the JEDEC JESD216 parameter table from the chip itself (`5Ah`) and fills in size, page size, address width and erase types. Works on chips missing from the database. Also reads the **4-byte address instruction table** (`FF84h`), **DWORD-16** (how *this* chip enters 4-byte mode, and whether its status register needs `06h` or `50h`) and the **sector map** (`FF81h`), so parts with boot blocks of a different size are reported instead of silently mis-erased. |
 | **Write protection guard** | Before every erase and write, the status register is decoded and the protected range compared against the target. A locked chip accepts the command and silently ignores it, which otherwise shows up much later as an unexplained verify failure. When `WPS=1` the BP bits mean nothing, so the individual block locks are read back one block at a time with `3Dh` — 4 KB granularity across the boot blocks, 64 KB elsewhere — instead of giving up and letting the write through unchecked. |
 | **Erase follows the chip's own map** | When the chip publishes an SFDP sector map, the erase is planned against it: boot-block parts are erased with the sector size that region actually uses, and long runs use the largest erase opcode that still fits inside the requested range. A whole-chip erase of a boot-block 8 MB part takes 158 commands instead of 2048. |
@@ -142,7 +143,7 @@ AsProgrammer.exe --scan dump.bin                    # no hardware needed
 | `--sfdp-decode FILE` | Decode a table saved earlier, with no chip attached |
 | `--scan FILE` | Report on a dump without any hardware: entropy, a wrapped address, an all-FF read, the image type. Exit code 1 if it looks wrong |
 | `--no-fast-read` | Use `03h` instead of `0Bh` even when the chip declares SFDP |
-| `--smart` | Run SPI NOR through the transactional differential planner and executor. The planner preserves bytes outside the patch, performs only required erases/programs, and fully verifies affected blocks |
+| `--smart` | Run SPI NOR through the transactional differential planner and executor. The planner preserves bytes outside the patch, performs only required erases/programs, and fully verifies affected blocks. On 24Cxx, 93xx and 95xx it runs the EEPROM differential executor instead: write only the differing pages, verify every page the range touches |
 | `--smart --plan-only` | Dry run: take the trusted snapshot, build the differential plan, and print it — erase blocks per opcode, program pages, verify coverage, and the chip-declared worst-case time — without touching the status register or writing anything |
 
 `--scan` and `--sfdp-decode` never touch a programmer, so they work on a
@@ -352,6 +353,7 @@ invariant stops the build rather than reaching a chip. None of it needs hardware
 | `tests\hwtests.lpr` | The real `spi25` and `i2c` protocol layers driven through `tests\mockhw.pas`, a programmer that exists only in memory. Asserts on the exact opcodes sent and on how each I²C address type is split |
 | `tests\adapter\spi25noradapter_tests.lpr` | The real hardware adapter's exact SPI framing, repeated JEDEC identity gate, native and stateful four-byte strategies, short-transfer rejection, and exactly-once cleanup |
 | `tests\norengine_tests.lpr` | Preservation-aware differential plans, typed operation outcomes, cancellation boundaries, deterministic failure injection at every device call, and randomized invariants |
+| `tests\eepromengine_tests.lpr` | The EEPROM sibling: page-differential plans, round trips against a virtual chip that *rejects* unaligned page writes rather than reproducing the wrap, verification catching a chip that will not take the data, cancellation boundaries, failure injected at every device call, and 400 randomized snapshot/patch rounds asserting the chip ends up exactly `snapshot ← patch` with one write per differing page |
 | `tests\sfdp_sector_map_tests.lpr` | JESD216 sector-map descriptor bit semantics and fail-closed rejection of unresolved or ambiguous maps |
 | `tests\sfdp\` | Whole SFDP tables decoded straight from a file and checked against `manifest.txt`. Dump a table from any chip with `--sfdp-dump`, drop it in, add one manifest line, and that part can never silently regress again — including for people who do not own it |
 | `tests\chipprofile\chipprofile_tests.lpr` | Stable canonical SPI NOR profile bytes and strict rejection of ambiguous records before production hashing |
@@ -394,6 +396,8 @@ software/
   operationmodel.pas      immutable requests, typed outcomes/events, cancellation
   norplanner.pas          preservation-aware differential erase/program plans
   norengine.pas           fail-closed single-owner transactional executor
+  eepromengine.pas        page-differential planner/executor for 24/93/95
+  eepromadapters.pas      those three families' real-hardware adapters
   flashops.pas            erase and write planning arithmetic (likewise testable)
   spi45.pas spi95.pas     DataFlash and SPI EEPROM
   i2c.pas microwire.pas   I²C and MicroWire
