@@ -148,6 +148,7 @@ resourcestring
   STR_WORKFLOW_BAD_ADDR  = 'The start address is not a hexadecimal number';
   STR_WORKFLOW_TOO_BIG   = 'The image is %d bytes but only %d fit from 0x%s';
   STR_WORKFLOW_MW_ODD    = 'MicroWire Smart write needs an even start address and length';
+  STR_WORKFLOW_BAD_PAGE  = 'Next: set a page size between 1 and 2048 bytes';
   //ชิปใหม่กับชิปเก่าต่างกันตรงที่ "มีอะไรให้เสียไหม" ซึ่งเดิมแถบนี้ไม่รู้เลย
   STR_WF_CHIP_PICKED     = 'Chip chosen by hand, not identified - press Detect chip to confirm';
   STR_WF_UNREAD          = 'Ready, but the chip has not been read - you do not know what is on it';

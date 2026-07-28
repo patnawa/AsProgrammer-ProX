@@ -615,7 +615,7 @@ procedure TestProductionState(const Directory: string);
 var
   Key, WrongKey, Raw: TBytes;
   Entries: TProdStateEntries;
-  ErrMsg, StateFile: string;
+  ErrMsg, StateFile, SurvivingMAC: string;
   i, LastLineAt: integer;
 begin
   Key := MakeKey(33);
@@ -680,6 +680,22 @@ begin
   WriteBytes(StateFile, Copy(Raw, 0, LastLineAt));
   Check(not LoadProductionState(StateFile, Key, Entries, ErrMsg),
         'truncating whole recorded entries is detected by the head anchor');
+
+  //การโจมตีที่สมอแบบเดิมกันไม่ได้: ตัดท้ายทิ้งแล้วคัดลอก MAC ของบรรทัด
+  //สุดท้ายที่เหลือ (ซึ่งพิมพ์อยู่ในไฟล์นั้นเอง) ไปใส่เป็นสมอ ทำได้โดยไม่ต้อง
+  //มีกุญแจเลย สมอที่ผูกด้วย HMAC ต้องปฏิเสธ
+  LastLineAt := 0;
+  for i := 0 to High(Raw) - 1 do
+    if Raw[i] = 10 then LastLineAt := i + 1;
+  WriteBytes(StateFile, Copy(Raw, 0, LastLineAt));
+  //ช่องสุดท้ายของบรรทัดก่อนหน้าคือ MAC ของมัน ยาว 64 ตัวอักษรก่อน LF
+  SurvivingMAC := '';
+  for i := LastLineAt - 65 to LastLineAt - 2 do
+    SurvivingMAC := SurvivingMAC + Chr(Raw[i]);
+  WriteBytes(StateFile + '.head', StringBytes(SurvivingMAC + #10));
+  Check(not LoadProductionState(StateFile, Key, Entries, ErrMsg),
+        'a truncated log re-anchored with its own last MAC is still refused');
+
   WriteBytes(StateFile, Raw);
 
   //ต่อท้ายไบต์ที่ไม่มี LF ปิด: การเขียนที่ขาดกลางคันต้อง fail closed

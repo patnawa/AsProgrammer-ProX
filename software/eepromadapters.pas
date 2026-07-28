@@ -189,12 +189,20 @@ begin
 
   // Every page needs its own observed WEL: a page program clears it, and a
   // WREN the chip ignored means everything after it is silently dropped.
+  //UsbAsp95_WrenChecked คืนค่าเท่ากับ WEL เสมอ การเช็ค WEL ซ้ำหลังจากนั้น
+  //จึงเป็นกิ่งที่ไม่มีวันทำงาน ต้องแยกสาเหตุด้วยการอ่าน SR เองแทน
   if not UsbAsp95_WrenChecked(WEL) then
-    Exit(EEPROMIOFailure(eioTransport,
-      'the SPI EEPROM write-enable transaction was not exact'));
-  if not WEL then
+  begin
+    if UsbAsp95_ReadSR(Status) <> 1 then
+      Exit(EEPROMIOFailure(eioTransport,
+        'the SPI EEPROM write-enable transaction was not exact'));
+    if Status = $FF then
+      Exit(EEPROMIOFailure(eioDisconnected,
+        'the SPI EEPROM status bus reads FF; no chip is answering'));
+    //ชิปรับคำสั่งแล้วแต่ WEL ไม่ติด = ถูกป้องกันการเขียนอยู่ ไม่ใช่สายเสีย
     Exit(EEPROMIOFailure(eioRejected,
-      'the SPI EEPROM did not latch write enable'));
+      'the SPI EEPROM did not latch write enable; it is write protected'));
+  end;
 
   Wrote := UsbAsp95_Write(FChipSize, longword(Address), Data, Length(Data));
   if Wrote <> Length(Data) then
@@ -238,9 +246,14 @@ end;
 
 function TSPI95EEPROMAdapter.Deinitialize: TEEPROMIOResult;
 begin
-  // Best effort: leave the chip write-disabled for the next tool.
-  UsbAsp95_Wrdi();
-  Result := EEPROMIOSuccess;
+  //ปล่อยชิปไว้ในสถานะห้ามเขียนให้เครื่องมือตัวถัดไป และถ้าทำไม่สำเร็จต้อง
+  //บอก ไม่ใช่กลืนไว้ ไม่งั้นผลลัพธ์จะอ้างว่าชิปปลอดภัยทั้งที่ WEL ยังติดอยู่
+  if UsbAsp95_Wrdi() <> 1 then
+    Result := EEPROMIOFailure(eioTransport,
+      'the SPI EEPROM write-disable was not transferred exactly; ' +
+      'it may remain write-enabled')
+  else
+    Result := EEPROMIOSuccess;
 end;
 
 function TSPI95EEPROMAdapter.Close: TEEPROMIOResult;
@@ -266,10 +279,15 @@ function TMWEEPROMAdapter.Initialize: TEEPROMIOResult;
 begin
   // EWEN is session state on 93xx; it is undone exactly once in
   // Deinitialize, which the engine guarantees to call.
+  //
+  // The flag goes up BEFORE the attempt on purpose: a short EWEN means some
+  // of the frame already reached the chip, so it may well be write-enabled.
+  // Marking it only on success would skip EWDS in cleanup and leave the part
+  // write-enabled on the socket for whatever the next tool does.
+  FWriteEnabled := True;
   if UsbAspMW_Ewen(FAddrBitLen) <> FAddrBitLen + 3 then
     Exit(EEPROMIOFailure(eioRejected,
       'the MicroWire EEPROM did not accept EWEN'));
-  FWriteEnabled := True;
   Result := EEPROMIOSuccess;
 end;
 

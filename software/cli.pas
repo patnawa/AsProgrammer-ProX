@@ -682,9 +682,14 @@ begin
     begin
       RecordUID := LastChipUID;
       if RecordUID = '' then RecordUID := 'none';
+      //ต้องใช้เวลาเดียวกับตอนรับงาน ไม่ใช่อ่านนาฬิกาใหม่
+      //
+      //งานเขียนกินเวลาหลายนาที ถ้า NTP ปรับเวลาถอยหลังระหว่างนั้น การอ่าน
+      //นาฬิกาใหม่จะทำให้ด่านนาฬิกาเดินถอยหลังปฏิเสธการบันทึก ทั้งที่ชิปถูก
+      //เขียนไปเรียบร้อยแล้ว ผลคือหน่วยนั้นถูกใช้ไปแต่ไม่มีบันทึก และ UID
+      //เดิมยังเขียนซ้ำได้อีก
       if not AppendProductionState(StateFile, Key, Job.JobID, Job.Revision,
-               LastStrictRunID, RecordUID,
-               QWord(DateTimeToUnix(Now, False)), ErrMsg) then
+               LastStrictRunID, RecordUID, VerificationUTC, ErrMsg) then
       begin
         Say('the unit passed physically but the durable production state ' +
             'could not record it: ' + ErrMsg);

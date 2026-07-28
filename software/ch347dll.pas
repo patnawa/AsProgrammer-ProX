@@ -124,6 +124,7 @@ var
   Lib: HMODULE = 0;
   LoadTried: boolean = False;
   LoadError: string = '';
+  LoadLock: TRTLCriticalSection;
 
   p_CH347OpenDevice: T_CH347OpenDevice = nil;
   p_CH347CloseDevice: T_CH347CloseDevice = nil;
@@ -149,11 +150,18 @@ begin
 end;
 
 function EnsureCH347: boolean;
+var
+  Loaded: HMODULE;
 begin
+  //งานยาวรันบน worker thread ขณะที่ PollProgrammer ยังเดินอยู่บน thread หลัก
+  //ทั้งสองเข้ามาที่นี่พร้อมกันได้ ถ้าตั้ง Lib ก่อน resolve เสร็จ อีก thread
+  //จะเห็นว่า "โหลดแล้ว" แล้วเรียกพอยน์เตอร์ที่ยังเป็น nil
+  EnterCriticalSection(LoadLock);
+  try
   if not LoadTried then
   begin
-    LoadTried := True;
-    Lib := LoadLibrary('CH347DLL.DLL');
+    Loaded := LoadLibrary('CH347DLL.DLL');
+    Lib := Loaded;
     if Lib = 0 then
       LoadError := 'CH347DLL.DLL was not found next to the program'
     else if not (Resolve('CH347OpenDevice', FARPROC(p_CH347OpenDevice)) and
@@ -178,8 +186,13 @@ begin
       FreeLibrary(Lib);
       Lib := 0;
     end;
+    //ตั้งธงเป็นอันสุดท้าย หลังพอยน์เตอร์ทุกตัวพร้อมใช้งานแล้วจริง ๆ
+    LoadTried := True;
   end;
   Result := Lib <> 0;
+  finally
+    LeaveCriticalSection(LoadLock);
+  end;
 end;
 
 function CH347DriverAvailable(out Error: string): boolean;
@@ -378,6 +391,14 @@ begin
   Result := False;
 end;
 
+{$ENDIF}
+
+{$IFDEF WINDOWS}
+initialization
+  InitCriticalSection(LoadLock);
+
+finalization
+  DoneCriticalSection(LoadLock);
 {$ENDIF}
 
 end.

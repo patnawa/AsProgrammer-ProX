@@ -330,6 +330,7 @@ uses Windows;
 
 var
   Lib: THandle = 0;
+  FinalLib: THandle = 0;
   LoadError: string = '';
 
 // Fail-closed stubs, one per signature shape.  They behave exactly like an
@@ -503,7 +504,9 @@ begin
   Bind(CH341ResetRead, @Stub_IdxToBool, 'CH341ResetRead');
   Bind(CH341ResetWrite, @Stub_IdxToBool, 'CH341ResetWrite');
   Bind(CH341SetDeviceNotify, @Stub_Notify, 'CH341SetDeviceNotify');
-  Bind(CH341SetupSerial, @Stub_CardCardCard, 'CH341SetupSerial');
+  //สามพารามิเตอร์ ไม่ใช่สี่: stdcall ให้ฝั่งถูกเรียกเป็นคนล้างสแตก
+  //stub ที่รับพารามิเตอร์เกินจะ ret เกินไปสี่ไบต์ แล้วสแตกของผู้เรียกพัง
+  Bind(CH341SetupSerial, @Stub_CardCard, 'CH341SetupSerial');
 end;
 
 initialization
@@ -518,7 +521,16 @@ initialization
 
 finalization
   {$IFDEF WINDOWS}
-  if Lib <> 0 then FreeLibrary(Lib);
+  if Lib <> 0 then
+  begin
+    //ชี้ทุกตัวกลับไปที่ stub ก่อนคืนไลบรารี ไม่งั้นสิ่งที่ถูกทำลายทีหลัง
+    //(callback ที่ยังไม่ถูกยกเลิก, ExitProc, อ็อบเจกต์ฮาร์ดแวร์) จะเรียกเข้า
+    //หน่วยความจำที่ถูกปลดแมปไปแล้วแทนที่จะได้ค่าล้มเหลวแบบปิดสนิท
+    FinalLib := Lib;
+    Lib := 0;
+    BindAll;
+    FreeLibrary(FinalLib);
+  end;
   {$ENDIF}
 
 end.

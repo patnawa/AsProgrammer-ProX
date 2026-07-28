@@ -91,6 +91,7 @@ uses
 
 const
   CHAIN_DOMAIN = 'AsProgrammer-ProX/prodstate/v1';
+  ANCHOR_DOMAIN = 'AsProgrammer-ProX/prodstate-anchor/v1';
 
 type
   TStringArray = array of string;
@@ -225,13 +226,37 @@ begin
   Result := True;
 end;
 
-function WriteHeadAnchor(const FileName: string;
-  const Head: TSHA256Digest; out ErrMsg: string): boolean;
+//สมอต้องมีกุญแจ ไม่ใช่แค่ไดเจสต์เปล่า
+//
+//ของเดิมเก็บ DigestToHex(Head) ดิบ ๆ ซึ่งเป็นค่าเดียวกับที่พิมพ์อยู่ในช่องที่
+//เจ็ดของทุกบรรทัดในไฟล์ที่มันควรจะปกป้อง ใครก็ตามที่ลบท้ายไฟล์ทิ้งแล้วคัดลอก
+//ช่องที่เจ็ดของบรรทัดสุดท้ายที่เหลือมาใส่ ก็ได้สถานะที่ผ่านการตรวจทุกข้อ
+//โดยไม่ต้องมีกุญแจเลย ตอนนี้สมอผูกด้วย HMAC พร้อมจำนวนรายการ
+function ComputeAnchor(const Key: TBytes; Count: cardinal;
+  const Head: TSHA256Digest; out Anchor: TSHA256Digest;
+  out ErrMsg: string): boolean;
+var
+  Input: TBytes;
+  Prefix: RawByteString;
+begin
+  Prefix := ANCHOR_DOMAIN + #0 + UIntText(Count) + #0;
+  SetLength(Input, Length(Prefix) + SizeOf(Head));
+  Move(Prefix[1], Input[0], Length(Prefix));
+  Move(Head[0], Input[Length(Prefix)], SizeOf(Head));
+  Result := HMACSHA256(Key, Input, Anchor, ErrMsg);
+  ClearSensitiveBytes(Input);
+end;
+
+function WriteHeadAnchor(const FileName: string; const Key: TBytes;
+  Count: cardinal; const Head: TSHA256Digest; out ErrMsg: string): boolean;
 var
   Data: TBytes;
   Text: RawByteString;
+  Anchor: TSHA256Digest;
 begin
-  Text := DigestToHex(Head) + #10;
+  Result := False;
+  if not ComputeAnchor(Key, Count, Head, Anchor, ErrMsg) then Exit;
+  Text := DigestToHex(Anchor) + #10;
   SetLength(Data, Length(Text));
   Move(Text[1], Data[0], Length(Text));
   Result := AtomicWriteDurable(FileName + '.head', Data, True, ErrMsg);
@@ -264,7 +289,7 @@ var
   Raw: RawByteString;
   Line: string;
   Fields: TStringArray;
-  PrevMAC, MAC, ExpectedMAC: TSHA256Digest;
+  PrevMAC, MAC, ExpectedMAC, Anchor, Expected: TSHA256Digest;
   i, LineStart, Count: integer;
   E: TProdStateEntry;
 begin
@@ -398,7 +423,15 @@ begin
       SetLength(Entries, 0);
       Exit;
     end;
-    if Line <> DigestToHex(ChainHead) then
+    if not ComputeAnchor(Key, cardinal(Count), ChainHead, Expected,
+                         ErrMsg) then
+    begin
+      SetLength(Entries, 0);
+      Exit;
+    end;
+    //เทียบแบบไม่ลัดออกกลางคัน เหมือนที่ทำกับ MAC ของทุกบรรทัด
+    if (not HexToDigest(Line, Anchor)) or
+       (not DigestEqualConstantTime(Anchor, Expected)) then
     begin
       ErrMsg := 'the production state head anchor does not match; entries ' +
                 'have been removed or replaced';
@@ -517,6 +550,18 @@ begin
   if not CheckProductionAdmission(Entries, JobID, Revision, RunID, UID,
                                   TrustedUTC, ErrMsg) then Exit;
 
+  //ต้องกันเพดานก่อนเขียน ไม่ใช่ตอนอ่าน
+  //
+  //ถ้าปล่อยให้เขียนเลยเพดานไป บรรทัดนั้นจะลงดิสก์และรายงาน PASS แต่การโหลด
+  //ครั้งถัดไปจะปฏิเสธทั้งไฟล์ และเมื่อโหลดไม่ได้ก็เขียนต่อไม่ได้อีกเลย
+  //สถานีตายถาวรจากหน่วยที่ผ่านพอดี ๆ หนึ่งตัว
+  if Length(Entries) + 1 > PRODSTATE_MAX_ENTRIES then
+  begin
+    ErrMsg := Format('the production state already holds %d entries; ' +
+                     'archive it before continuing', [Length(Entries)]);
+    Exit;
+  end;
+
   Body := LineBody(cardinal(Length(Entries) + 1), JobID, Revision, RunID,
                    UID, TrustedUTC);
   if not ChainMAC(Key, PrevMAC, Body, MAC, ErrMsg) then Exit;
@@ -557,7 +602,8 @@ begin
 
   //สมอหัวโซ่ต้องตามบรรทัดใหม่ไป ถ้าเขียนสมอไม่สำเร็จ การโหลดครั้งถัดไปจะ
   //fail closed ซึ่งถูกต้อง: สถานะที่สมอไม่ตรงห้ามใช้ตัดสินการผลิต
-  Result := WriteHeadAnchor(FileName, MAC, ErrMsg);
+  Result := WriteHeadAnchor(FileName, Key, cardinal(Length(Entries) + 1),
+                            MAC, ErrMsg);
 end;
 
 end.

@@ -1151,12 +1151,16 @@ function IsEEPROMSmartWriteTarget: boolean; forward;
 //โดยไม่ต้องไล่ล้างตามทุกจุดที่แก้ค่าได้
 function CurrentChipKey: string;
 begin
+  //แอดเดรสเริ่มต้องอยู่ในกุญแจด้วย ไม่งั้นการอ่านจากออฟเซ็ตหนึ่งจะถูกจำว่า
+  //เป็นความรู้เรื่องทั้งชิป: อ่านครึ่งบนที่ว่างเปล่าแล้วเลื่อนกลับมาที่ 0
+  //แถบจะประกาศว่า "ชิปเปล่า" ทั้งที่ครึ่งล่างมีบูตโหลดเดอร์อยู่
   Result := IntToStr(Ord(MainForm.RadioSPI.Checked)) + '/' +
             IntToStr(Ord(MainForm.RadioI2C.Checked)) + '/' +
             IntToStr(Ord(MainForm.RadioMW.Checked)) + '/' +
             IntToStr(MainForm.ComboSPICMD.ItemIndex) + '/' +
             CurrentICParam.Name + '/' + LastID9F + '/' +
-            Trim(MainForm.ComboChipSize.Text);
+            Trim(MainForm.ComboChipSize.Text) + '/' +
+            UpperCase(Trim(MainForm.StartAddressEdit.Text));
 end;
 
 //ตัวตนของชิปถือว่าได้รับการยืนยันแล้วหรือยัง
@@ -1217,12 +1221,31 @@ begin
   ChipContentOwner := CurrentChipKey;
 end;
 
-//ผู้ใช้เปลี่ยนอะไรที่ทำให้ความรู้เดิมใช้ไม่ได้ หรือถอดเครื่องโปรแกรมออก
-procedure ForgetChipKnowledge;
+//เนื้อในชิปเปลี่ยนไปแล้ว (เพิ่งเขียนหรือเพิ่งลบ) แต่ตัวตนยังเป็นตัวเดิม
+procedure ForgetChipContent;
 begin
   ChipContentKnown := ckUnknown;
   ChipContentOwner := '';
+end;
+
+//เลือกชิปตัวใหม่ด้วยมือ: สิ่งที่รู้เรื่องเนื้อในและธงยืนยันตัวตนตกไป
+//แต่รหัสที่ซ็อกเก็ตเคยตอบมายังเป็นข้อเท็จจริงของซ็อกเก็ต ไม่ใช่ของการเลือก
+//จึงเก็บไว้ (ผู้ใช้ที่เลือกชิปตรงกับที่เสียบอยู่จริงต้องนับว่าพิสูจน์แล้ว)
+procedure ForgetChipSelectionKnowledge;
+begin
+  ForgetChipContent;
   ChipIdentityConfirmed := False;
+end;
+
+//ซ็อกเก็ตเปลี่ยนไปแล้ว หรือการตรวจล้มเหลว: ทุกอย่างรวมถึงรหัสที่อ่านได้
+//
+//ต้องล้างรหัสด้วย ไม่งั้นรหัสของชิปตัวก่อนจะกลายเป็น "หลักฐาน" ให้ชิปตัวใหม่
+//การตรวจที่ล้มเหลวจะไม่เตือน และที่แย่กว่านั้นคือมันเป็นใบอนุญาตให้เรียก
+//ดัมป์ FF ล้วนว่า "ชิปเปล่า" ทั้งที่ซ็อกเก็ตเงียบสนิท
+procedure ForgetChipKnowledge;
+begin
+  ForgetChipSelectionKnowledge;
+  LastID9F := '';
 end;
 
 //บัฟเฟอร์มาจากไฟล์ ไม่ใช่จากชิปที่เสียบอยู่
@@ -1516,6 +1539,7 @@ end;
 procedure TMainForm.UpdateWorkflowState;
 var
   HasBuffer, SmartCapable, SizeKnown, AddrOK, FitsChip, MWAligned: boolean;
+  PageOK: boolean;
   BufSize, ChipSize, StartAddr: QWord;
   Parsed: QWord;
   StateText, SmartWhy: string;
@@ -1550,6 +1574,13 @@ begin
   MWAligned := (not RadioMW.Checked) or
                (((StartAddr and 1) = 0) and ((BufSize and 1) = 0));
 
+  //ทางเขียนต้องการหน้าเพจที่เป็นตัวเลข 1..2048 ถ้าไม่ตรวจที่นี่ด้วย แถบจะ
+  //ไฟเขียวแล้วงานไปตายเอาหลังกดยืนยันการทำลายข้อมูลไปแล้ว
+  //MicroWire ไม่ใช้ช่องนี้ ตัวจัดการบังคับหน้าเพจเป็น 2 ไบต์เอง
+  PageOK := RadioMW.Checked or
+            (TryStrToQWord(Trim(ComboPageSize.Text), Parsed) and
+             (Parsed >= 1) and (Parsed <= 2048));
+
   FWorkflowOpen.Enabled := not OperationRunning;
   FWorkflowDetect.Enabled := (not OperationRunning) and
     ProgrammerPresent and RadioSPI.Checked;
@@ -1557,7 +1588,7 @@ begin
     ProgrammerPresent and ChipDetected and SizeKnown;
   FWorkflowVerify.Enabled := FWorkflowRead.Enabled and HasBuffer;
   FWorkflowSmart.Enabled := FWorkflowVerify.Enabled and SmartCapable and
-                            FitsChip and MWAligned;
+                            FitsChip and MWAligned and PageOK;
 
   //tooltip ของ Smart write บอกเหตุผลที่กดไม่ได้ ไม่ใช่คำอธิบายทั่วไปที่
   //ไม่เกี่ยวกับสถานะตรงหน้า
@@ -1572,6 +1603,8 @@ begin
     SmartWhy := 'The image does not fit the chip from this start address'
   else if not MWAligned then
     SmartWhy := STR_WORKFLOW_MW_ODD
+  else if not PageOK then
+    SmartWhy := STR_WORKFLOW_BAD_PAGE
   else
     SmartWhy := 'Connect a programmer and select a chip first';
   FWorkflowSmart.Hint := SmartWhy;
@@ -1639,6 +1672,11 @@ begin
     StateText := STR_WORKFLOW_MW_ODD;
     StateColor := TColor($C0392B);
   end
+  else if not PageOK then
+  begin
+    StateText := STR_WORKFLOW_BAD_PAGE;
+    StateColor := TColor($D16E0A);
+  end
   else if SmartCapable then
   begin
     //--- ถึงตรงนี้ทุกอย่างพร้อมทางเทคนิคแล้ว คำถามที่เหลือคือคำถามเดียวที่
@@ -1694,9 +1732,14 @@ begin
 
   //เน้นเฉพาะขั้นที่กดได้จริงตอนนี้ ของเดิมตัวหนาที่ Smart write ตลอดเวลา
   //ซึ่งชี้ไปที่ปุ่มที่ยังกดไม่ได้ตั้งแต่เปิดโปรแกรม
+  //ต้องล้างทั้งห้าปุ่ม ไม่ใช่แค่สามปุ่มของเส้นทางหลัก เพราะ Read chip ก็ถูก
+  //ตั้งเป็นขั้นถัดไปได้ ถ้าล้างไม่ครบมันจะหนาค้างไว้ตลอด แล้วแถบจะชี้ไปสอง
+  //ที่พร้อมกัน หรือชี้ไปที่ปุ่มที่ถูกปิดไปแล้ว
   FWorkflowDetect.Font.Style := [];
   FWorkflowOpen.Font.Style := [];
   FWorkflowSmart.Font.Style := [];
+  FWorkflowRead.Font.Style := [];
+  FWorkflowVerify.Font.Style := [];
   if (NextStep <> nil) and NextStep.Enabled then
     NextStep.Font.Style := [fsBold];
 
@@ -6620,6 +6663,10 @@ begin
   //ถ้าไม่ล้าง opcode ที่เลือกตามยี่ห้อจะเป็นของชิปตัวก่อนหน้า
   Reset25ChipHints;
   ForgetSFDP;
+  //การเลือกชิปตัวใหม่ด้วยมือ ไม่ได้พิสูจน์อะไรกับซ็อกเก็ตเลย ธงยืนยันตัวตน
+  //ของชิปตัวก่อนต้องตกไปด้วย ไม่งั้นชิปที่เลือกเองจะสวมสถานะ "ยืนยันแล้ว"
+  //ผู้เรียกที่ยืนยันได้จริง (Read ID) จะตั้งธงกลับหลังเรียกฟังก์ชันนี้เอง
+  ForgetChipSelectionKnowledge;
 
   Result := findchip.SelectChip(ChipListFile, AName);
   if not Result then
@@ -7053,6 +7100,9 @@ begin
 
   I2C_ChunkSize := 65535;
   OpBegin(opkWrite);
+  //ชิปกำลังจะถูกเปลี่ยนเนื้อใน ความรู้เดิมว่า "เปล่า" หรือ "มีข้อมูล"
+  //ใช้ต่อไม่ได้อีก ไม่งั้นการเขียนรอบถัดไปจะอ้างสถานะก่อนเขียนรอบนี้
+  ForgetChipContent;
   //TSerialAllocation มีสตริงที่จัดการโดยคอมไพเลอร์อยู่ข้างใน FillChar จะทับ
   //พอยน์เตอร์ทิ้งโดยไม่ลด refcount แล้วสตริงของงานก่อนจะรั่วทุกครั้งที่กดเขียน
   CurrentSerial := Default(TSerialAllocation);
@@ -9913,6 +9963,9 @@ var
   I2C_DevAddr: byte;
 begin
   OpBegin(opkErase);
+  //ชิปกำลังจะถูกเปลี่ยนเนื้อใน ความรู้เดิมว่า "เปล่า" หรือ "มีข้อมูล"
+  //ใช้ต่อไม่ได้อีก ไม่งั้นการเขียนรอบถัดไปจะอ้างสถานะก่อนเขียนรอบนี้
+  ForgetChipContent;
 try
   ButtonCancel.Tag := 0;
   if not OpenDevice() then
@@ -10132,6 +10185,9 @@ begin
   if OperationRunning then Exit;
 try
   OpBegin(opkErase);
+  //ชิปกำลังจะถูกเปลี่ยนเนื้อใน ความรู้เดิมว่า "เปล่า" หรือ "มีข้อมูล"
+  //ใช้ต่อไม่ได้อีก ไม่งั้นการเขียนรอบถัดไปจะอ้างสถานะก่อนเขียนรอบนี้
+  ForgetChipContent;
   ButtonCancel.Tag := 0;
 
   if (not RadioSPI.Checked) or (ComboSPICMD.ItemIndex <> SPI_CMD_25) then
@@ -10224,7 +10280,7 @@ function ReadCurrentChipEEPROM(Device: TEEPROMDevice; Stream: TMemoryStream;
   ChipSize, PageSize: cardinal): boolean;
 var
   Addr: QWord;
-  Chunk: cardinal;
+  Chunk, MaxChunk: cardinal;
   Data: TBytes;
   R: TEEPROMIOResult;
 begin
@@ -10235,9 +10291,14 @@ begin
   Addr := 0;
   while Addr < ChipSize do
   begin
-    //อ่านทีละหลายหน้าเพื่อความเร็ว แต่ไม่เกิน 4KB ต่อครั้ง
+    //อ่านทีละหลายหน้าเพื่อความเร็ว แต่ต้องไม่เกินที่ทรานสปอร์ตรับไหว
+    //
+    //MicroWire บน CH341 แปลงหนึ่งไบต์เป็นแปดบิตในบัฟเฟอร์คำสั่ง ซึ่งมีเพดาน
+    //4096 ไบต์ ขอทีละ 4KB จึงกลายเป็น 32768 บิต แล้วคำสั่งล้มทั้งหมด
+    //ทางเดิม (ReadFlashMW) อ่านทีละคำเดียวด้วยเหตุผลนี้
+    if MainForm.RadioMW.Checked then MaxChunk := 64 else MaxChunk := 4096;
     Chunk := PageSize;
-    while (Chunk < 4096) and (Chunk + PageSize <= ChipSize - Addr) do
+    while (Chunk < MaxChunk) and (Chunk + PageSize <= ChipSize - Addr) do
       Inc(Chunk, PageSize);
     if QWord(Chunk) > ChipSize - Addr then Chunk := cardinal(ChipSize - Addr);
 
@@ -10456,6 +10517,9 @@ begin
   end;
 
   OpBegin(opkWrite);
+  //ชิปกำลังจะถูกเปลี่ยนเนื้อใน ความรู้เดิมว่า "เปล่า" หรือ "มีข้อมูล"
+  //ใช้ต่อไม่ได้อีก ไม่งั้นการเขียนรอบถัดไปจะอ้างสถานะก่อนเขียนรอบนี้
+  ForgetChipContent;
   //FillChar ห้ามใช้กับเรคคอร์ดที่มีสตริง (ดูคำอธิบายที่จุดเดียวกันใน
   //ButtonWriteClick)
   CurrentSerial := Default(TSerialAllocation);
@@ -11067,6 +11131,9 @@ var
 begin
   if OperationRunning then Exit;
   OpBegin(opkWrite);
+  //ชิปกำลังจะถูกเปลี่ยนเนื้อใน ความรู้เดิมว่า "เปล่า" หรือ "มีข้อมูล"
+  //ใช้ต่อไม่ได้อีก ไม่งั้นการเขียนรอบถัดไปจะอ้างสถานะก่อนเขียนรอบนี้
+  ForgetChipContent;
   CurrentSerial := Default(TSerialAllocation);
   CurrentSerialValid := False;
   CurrentSerialReserved := False;
@@ -11092,6 +11159,11 @@ begin
     IntToHex(GetTickCount64 and $FFFFFFFF, 8);
   Request.Kind := okProgram;
   Request.Chip.Name := CurrentICParam.Name;
+  //InitOperationRequest ตั้งค่านี้เป็น True มาให้ ซึ่งเหมาะกับทาง NOR ที่มี
+  //ตัวส่งหลักฐานผูกอยู่ ทางนี้ยังไม่มี ถ้าปล่อยไว้ตัวจัดการจะจบงานที่
+  //"ต้องส่งหลักฐานแต่ไม่มีตัวส่ง" แล้วชิปที่เขียนถูกทุกไบต์จะถูกรายงานว่าล้มเหลว
+  //และถูกบันทึกลงบันทึกการผลิตว่า FAIL
+  Request.Policy.RequireEvidenceCommit := False;
 
   try
   try
@@ -11174,6 +11246,22 @@ begin
     if RadioI2C.Checked and (ComboAddrType.ItemIndex < 0) then
     begin
       OpFail('the I2C address type is not selected');
+      Exit;
+    end;
+    //ชนิด 7BIT ไม่มีไบต์แอดเดรสของหน่วยความจำเลย: BuildI2CAddr เอาแอดเดรส
+    //ไปทำเป็นแอดเดรสอุปกรณ์แทน การเขียนแบบนี้จะยิงข้อมูลไปให้อุปกรณ์ตัวอื่น
+    //บนบัส และไปรอ ACK จากอีกตัวหนึ่ง
+    if RadioI2C.Checked and (ComboAddrType.ItemIndex = 0) then
+    begin
+      OpFail('Smart write needs a chip with memory address bytes; ' +
+             '7BIT addressing has none');
+      Exit;
+    end;
+    //หน้าเพจต้องไม่ข้ามขอบแบงก์ ไม่งั้นการรอ ACK จะไปรอแบงก์ก่อนหน้า
+    //ซึ่งตอบทันทีทั้งที่ก้อนสุดท้ายยังเขียนไม่เสร็จ
+    if RadioI2C.Checked and (PageSize > 256) then
+    begin
+      OpFail('I2C Smart write needs a page size of 256 bytes or less');
       Exit;
     end;
 

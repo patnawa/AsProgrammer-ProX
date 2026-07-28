@@ -183,8 +183,13 @@ must not silently re-enable a job.
 For stations without an MES, `prodstate.pas` implements step 5 locally as
 `consumed.log` in the evidence directory: an append-only log of passed units
 `(job_id, revision, run_id, uid, utc)`, each line HMAC-SHA-256-chained to the
-previous line under the station key, with the current chain head anchored in
-`consumed.log.head` via the same atomic write-through install evidence uses.
+previous line under the station key, with the current chain head anchored in `consumed.log.head` via
+the same atomic write-through install evidence uses. The anchor is itself an
+HMAC over `(entry count, chain head)` under the station key, not a bare
+digest — a bare digest would be the same value already printed as the last
+line's MAC inside the very file it protects, so truncating the log and
+copying that field into the anchor would produce a state that verifies with
+no key at all.
 Admission refuses a stale `(job_id, revision)` and a trusted time earlier
 than any recorded entry (a rolled-back clock), and recording a passed unit
 refuses duplicate run IDs and already-consumed chip UIDs. A PASS is not
