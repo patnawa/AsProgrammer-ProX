@@ -455,6 +455,25 @@ var
   //เก็บไว้ให้โหมดบรรทัดคำสั่งรายงานต่อได้ โดยไม่ต้องไปแกะข้อความจาก log
   LastImageWarning: string = '';
 
+  //--- ชิปใหม่หรือชิปเก่า: สิ่งที่โปรแกรมรู้จริงเกี่ยวกับชิปที่เสียบอยู่ ---
+  //
+  //แถบ Safe workflow เดิมมองเห็นแค่ "มีชิปถูกเลือกไหม" กับ "มีข้อมูลในบัฟเฟอร์
+  //ไหม" ซึ่งทำให้ชิปเปล่าจากโรงงานกับชิปที่มีข้อมูลชิ้นเดียวในโลกอยู่ข้างใน
+  //ได้ไฟเขียวหน้าตาเหมือนกันเป๊ะ ทั้งที่การกดเขียนบนตัวหลังคือการทำลายถาวร
+  //และค่าเริ่มต้นของ "สำรองก่อนเขียน" คือปิดอยู่
+  ChipContentKnown: (ckUnknown, ckBlank, ckHasData) = ckUnknown;
+  //ความรู้ข้างบนเป็นของชิปตัวไหน ถ้าตัวตนที่เลือกอยู่เปลี่ยนไป ความรู้เก่า
+  //เป็นโมฆะทันที ห้ามเอาไปตัดสินใจแทนชิปตัวใหม่
+  ChipContentOwner: string = '';
+  //ตัวตนของชิปได้รับการยืนยันกับซ็อกเก็ตจริงหรือยัง
+  //ChipDetected เป็นแค่ "ถูกเลือกไว้ในหน้าจอ" ซึ่งเป็นคนละเรื่องกัน
+  ChipIdentityConfirmed: boolean = False;
+
+  //บัฟเฟอร์นี้มาจากไหน การเขียนไฟล์ทับชิปเก่ากับการเขียนสิ่งที่เพิ่งอ่าน
+  //ออกมาจากชิปตัวเดียวกัน อันตรายไม่เท่ากันเลย
+  BufferSource: (bsNone, bsFile, bsChip, bsEdited) = bsNone;
+  BufferSourceName: string = '';
+
   //โหมดบรรทัดคำสั่งสั่งจำนวนรอบการอ่านมาเองได้ 0 = ใช้ค่าจากหน้าจอ
   CLIReadPasses: integer = 0;
 
@@ -1125,6 +1144,95 @@ end;
 //ตัวช่วยที่แถบ Safe workflow ต้องใช้ แต่นิยามอยู่ท้ายไฟล์
 function IsEEPROMSmartWriteTarget: boolean; forward;
 
+//กุญแจของ "ชิปตัวที่ตั้งค่าไว้ตอนนี้"
+//
+//ใช้ผูกความรู้เรื่องเนื้อในชิปกับตัวตนที่มันถูกอ่านมา พอผู้ใช้เปลี่ยนชิป
+//เปลี่ยนขนาด หรือสลับโปรโตคอล กุญแจจะเปลี่ยน ความรู้เก่าจึงถูกทิ้งเอง
+//โดยไม่ต้องไล่ล้างตามทุกจุดที่แก้ค่าได้
+function CurrentChipKey: string;
+begin
+  Result := IntToStr(Ord(MainForm.RadioSPI.Checked)) + '/' +
+            IntToStr(Ord(MainForm.RadioI2C.Checked)) + '/' +
+            IntToStr(Ord(MainForm.RadioMW.Checked)) + '/' +
+            IntToStr(MainForm.ComboSPICMD.ItemIndex) + '/' +
+            CurrentICParam.Name + '/' + LastID9F + '/' +
+            Trim(MainForm.ComboChipSize.Text);
+end;
+
+//ตัวตนของชิปถือว่าได้รับการยืนยันแล้วหรือยัง
+//
+//นอกจากธงที่ตั้งตอนตรวจสำเร็จ ยังนับกรณีที่รหัสซึ่งซ็อกเก็ตตอบมาล่าสุดตรงกับ
+//รหัสของชิปที่เลือกอยู่ด้วย ซึ่งครอบคลุมทั้งการเลือกจากรายการที่รหัสตรงหลายตัว
+//และการที่ผู้ใช้เลือกเองแล้วบังเอิญตรงกับของจริง
+//
+//ชิปที่ไม่มีรหัสให้เทียบเลย (ตารางไม่ได้ระบุ หรือมาจาก SFDP ซึ่งตั้ง ID เป็น
+//ค่าว่างโดยตั้งใจ) ไม่มีทางยืนยันด้วยวิธีนี้ได้ จึงต้องไม่ไปทวงถามผู้ใช้
+//ตลอดกาล ให้ถือว่า "ไม่มีอะไรให้ยืนยัน" แทน
+function ChipIdentityUnproven: boolean;
+var
+  Expected: string;
+begin
+  Result := False;
+  if ChipIdentityConfirmed then Exit;
+  Expected := UpperCase(Trim(CurrentICParam.ID));
+  if (Expected = '') or (Expected = '0') then Exit; //ไม่มีอะไรให้เทียบ
+  if (LastID9F <> '') and (Expected = LastID9F) then Exit;
+  Result := True;
+end;
+
+//ความรู้เรื่องเนื้อในชิปยังใช้ได้อยู่หรือไม่
+function ChipContentValid: boolean;
+begin
+  Result := (ChipContentKnown <> ckUnknown) and
+            (ChipContentOwner = CurrentChipKey);
+end;
+
+//บันทึกว่าชิปที่เพิ่งอ่านมาทั้งตัวนั้นเปล่าหรือมีข้อมูล
+//
+//FF ล้วนมีสองความหมายเสมอ: ชิปเปล่าจริง ๆ กับบัสที่ไม่มีใครขับ แยกสองอย่าง
+//นี้ได้ต่อเมื่อชิปตอบรหัส 9Fh มาแล้วเท่านั้น ถ้าตัวตนยังไม่ถูกยืนยัน ห้าม
+//ประกาศว่า "ชิปเปล่า" เพราะคำนั้นจะกลายเป็นใบอนุญาตให้เขียนทับ
+procedure RememberChipContent(Stream: TMemoryStream);
+var
+  S: TImgStats;
+begin
+  ChipContentKnown := ckUnknown;
+  ChipContentOwner := '';
+  if (Stream = nil) or (Stream.Size = 0) then Exit;
+
+  S := imgcheck.ScanImage(PByte(Stream.Memory), Stream.Size);
+  if S.FFCount = S.Size then
+  begin
+    //ต้องมีหลักฐานว่าชิปตอบจริงก่อนถึงจะพูดคำว่า "เปล่า" ได้
+    //SPI ใช้รหัสที่อ่านได้เป็นหลักฐาน ส่วน I2C ต้องมี ACK อยู่แล้วไม่งั้น
+    //อ่านไม่ผ่านตั้งแต่แรก ตระกูลอื่นพิสูจน์ไม่ได้ ให้คงสถานะ "ไม่รู้" ไว้
+    if not (ChipIdentityConfirmed or
+            (MainForm.RadioSPI.Checked and (LastID9F <> '')) or
+            MainForm.RadioI2C.Checked) then Exit;
+    ChipContentKnown := ckBlank;
+  end
+  else
+    //ข้อมูลจริงที่ไม่ใช่ FF ล้วน ออกมาจากบัสที่ตายแล้วไม่ได้ จึงเชื่อได้เลย
+    ChipContentKnown := ckHasData;
+  ChipContentOwner := CurrentChipKey;
+end;
+
+//ผู้ใช้เปลี่ยนอะไรที่ทำให้ความรู้เดิมใช้ไม่ได้ หรือถอดเครื่องโปรแกรมออก
+procedure ForgetChipKnowledge;
+begin
+  ChipContentKnown := ckUnknown;
+  ChipContentOwner := '';
+  ChipIdentityConfirmed := False;
+end;
+
+//บัฟเฟอร์มาจากไฟล์ ไม่ใช่จากชิปที่เสียบอยู่
+procedure NoteBufferFromFile(const FileName: string);
+begin
+  BufferSource := bsFile;
+  BufferSourceName := ExtractFileName(FileName);
+  MainForm.UpdateWorkflowState;
+end;
+
 procedure ApplyTheme(Dark: boolean);
 var
   i: integer;
@@ -1497,6 +1605,15 @@ begin
     StateText := STR_WORKFLOW_NO_SIZE;
     StateColor := TColor($D16E0A);
   end
+  else if RadioSPI.Checked and ChipIdentityUnproven then
+  begin
+    //ChipDetected แปลว่า "มีขนาดตั้งไว้" ไม่ใช่ "ชิปในซ็อกเก็ตตอบแล้ว"
+    //ผู้ใช้ที่เลือกชื่อจากเมนูเองยังไม่ได้พิสูจน์อะไรเลย และการเขียนด้วย
+    //หน้าเพจ/opcode ของชิปผิดรุ่นคือการทำลายข้อมูลแบบเงียบ ๆ
+    StateText := STR_WF_CHIP_PICKED;
+    StateColor := TColor($D16E0A);
+    if FWorkflowDetect.Enabled then NextStep := FWorkflowDetect;
+  end
   else if not HasBuffer then
   begin
     StateText := STR_WORKFLOW_LOAD;
@@ -1524,9 +1641,50 @@ begin
   end
   else if SmartCapable then
   begin
-    StateText := STR_WORKFLOW_READY;
-    StateColor := TColor($5B9E2E);
+    //--- ถึงตรงนี้ทุกอย่างพร้อมทางเทคนิคแล้ว คำถามที่เหลือคือคำถามเดียวที่
+    //--- สำคัญจริง: ชิปตัวนี้มีอะไรให้เสียหรือไม่ ---
     NextStep := FWorkflowSmart;
+    StateColor := TColor($5B9E2E);
+
+    if not ChipContentValid then
+    begin
+      //ยังไม่เคยอ่านชิปตัวนี้ จึงไม่มีใครรู้ว่าข้างในมีอะไร การเขียนทับ
+      //ของที่ไม่รู้ว่าคืออะไร คือความเสี่ยงที่ควรพูดออกมา ไม่ใช่ไฟเขียวเฉย ๆ
+      StateText := STR_WF_UNREAD;
+      StateColor := TColor($D16E0A);
+      if FWorkflowRead.Enabled then NextStep := FWorkflowRead;
+    end
+    else if ChipContentKnown = ckBlank then
+      StateText := STR_WF_BLANK
+    else if (BufferSource = bsChip) and (ChipContentOwner = CurrentChipKey) then
+      //เขียนสิ่งที่เพิ่งอ่านออกมาจากชิปตัวเดียวกันกลับลงไป = ไม่มีอะไรเปลี่ยน
+      StateText := STR_WF_SAME_AS_CHIP
+    else
+    begin
+      //ชิปมีข้อมูลอยู่จริง และกำลังจะถูกเขียนทับด้วยของจากที่อื่น
+      //นี่คือจุดที่ผู้ใช้เสียข้อมูลถาวรได้ ต้องบอกว่าจะมีสำเนาไว้หรือไม่
+      if not MenuAutoBackup.Checked then
+      begin
+        StateText := STR_WF_HASDATA_NOBAK;
+        StateColor := TColor($C0392B);
+      end
+      else if not (RadioSPI.Checked and
+                   (ComboSPICMD.ItemIndex = SPI_CMD_25)) then
+      begin
+        //AutoBackupChip สำรองได้เฉพาะ SPI25 ตระกูลอื่นจะข้ามไปเงียบ ๆ
+        StateText := STR_WF_HASDATA_NOBAK2;
+        StateColor := TColor($C0392B);
+      end
+      else
+        StateText := STR_WF_HASDATA_BACKUP;
+    end;
+
+    //บอกด้วยว่าของที่จะเขียนมาจากไหน คนละความเสี่ยงกันโดยสิ้นเชิง
+    if BufferSource = bsFile then
+      StateText := StateText + '  (' + Format(STR_WF_FROM_FILE,
+                                              [BufferSourceName]) + ')'
+    else if BufferSource = bsEdited then
+      StateText := StateText + '  (' + STR_WF_EDITED + ')';
   end
   else
   begin
@@ -3004,6 +3162,8 @@ begin
     if ID.Got9F and (Expected = s9F) then
     begin
       LogPrint(STR_ID_OK + Expected);
+      //ชิปในซ็อกเก็ตตอบมาและตรงกับที่เลือกไว้จริง ๆ
+      ChipIdentityConfirmed := True;
       Exit(True);
     end;
     if not ID.Got9F then
@@ -3019,6 +3179,8 @@ begin
      (ID.GotAB and (Expected = sAB)) or (ID.Got15 and (Expected = s15)) then
   begin
     LogPrint(STR_ID_OK + Expected);
+    //ชิปในซ็อกเก็ตตอบมาและตรงกับที่เลือกไว้จริง ๆ
+    ChipIdentityConfirmed := True;
     Exit;
   end;
 
@@ -6380,6 +6542,8 @@ begin
     ForgetSFDP;
     LastChipUID := '';
     LastID9F := '';
+    //ตัวตนที่เคยยืนยันไว้และความรู้เรื่องเนื้อในชิป เป็นของซ็อกเก็ตรอบก่อน
+    ForgetChipKnowledge;
   end;
 
   //พูดเฉพาะตอนสถานะเปลี่ยน ไม่งั้น log จะเต็มไปด้วยข้อความซ้ำทุกสามวินาที
@@ -6483,7 +6647,12 @@ procedure TMainForm.MPHexEditorExChange(Sender: TObject);
 begin
   StatusBar.Panels.Items[0].Text := STR_SIZE+IntToStr(MPHexEditorEx.DataSize);
   if MPHexEditorEx.Modified then
-    StatusBar.Panels.Items[1].Text := STR_CHANGED
+  begin
+    StatusBar.Panels.Items[1].Text := STR_CHANGED;
+    //ทุกทางที่โหลดบัฟเฟอร์ใหม่จะรีเซ็ต Modified เป็น False เอง ดังนั้น
+    //Modified = True ที่นี่แปลว่าถูกแก้ด้วยมือหลังโหลดแล้วจริง ๆ
+    if BufferSource in [bsFile, bsChip] then BufferSource := bsEdited;
+  end
   else
     StatusBar.Panels.Items[1].Text := '';
   UpdateWorkflowState;
@@ -7652,6 +7821,9 @@ var
   ManufSaved: byte;
 begin
   OpBegin(opkDetect);
+  //เริ่มตรวจใหม่ = ลืมของเก่าไว้ก่อน ถ้าตรวจไม่สำเร็จก็ต้องไม่เหลือสถานะ
+  //"ยืนยันตัวตนแล้ว" ค้างมาจากชิปตัวก่อนหน้า
+  ForgetChipKnowledge;
   try
     if not OpenDevice() then
     begin
@@ -7770,6 +7942,9 @@ begin
         ChipName := Copy(ChipName, 1, Pos(' (', ChipName) - 1);
         SelectChipAny(ChipName);
         LogPrint(STR_DETECT_ONE + ChipName);
+        //ชิปในซ็อกเก็ตตอบรหัสมาเอง และรหัสนั้นชี้ไปที่ชิ้นนี้ชิ้นเดียว
+        //ต่างจากการที่ผู้ใช้เลือกชื่อจากเมนูเอง ซึ่งไม่ได้พิสูจน์อะไรเลย
+        ChipIdentityConfirmed := True;
       end
       else if Matches.Count > 1 then
       begin
@@ -7822,6 +7997,7 @@ begin
   begin
     MPHexEditorEx.LoadFromFile(OpenDialog.FileName);
     StatusBar.Panels.Items[2].Text := OpenDialog.FileName;
+    NoteBufferFromFile(OpenDialog.FileName);
     Exit;
   end;
 
@@ -7848,6 +8024,7 @@ begin
     Stream.Position := 0;
     MPHexEditorEx.LoadFromStream(Stream);
     StatusBar.Panels.Items[2].Text := OpenDialog.FileName;
+    NoteBufferFromFile(OpenDialog.FileName);
     LogPrint(STR_FILE_LOADED + IntToStr(Stream.Size) + ' bytes');
   finally
     Stream.Free;
@@ -9424,6 +9601,7 @@ begin
   begin
     MPHexEditorEx.LoadFromFile(FileNames[0]);
     StatusBar.Panels.Items[2].Text := FileNames[0];
+    NoteBufferFromFile(FileNames[0]);
     LogPrint(STR_FILE_LOADED + ExtractFileName(FileNames[0]));
     Exit;
   end;
@@ -9445,6 +9623,7 @@ begin
     Stream.Position := 0;
     MPHexEditorEx.LoadFromStream(Stream);
     StatusBar.Panels.Items[2].Text := FileNames[0];
+    NoteBufferFromFile(FileNames[0]);
     LogPrint(STR_FILE_LOADED + ExtractFileName(FileNames[0]));
   finally
     Stream.Free;
@@ -9671,6 +9850,13 @@ try
 
   if not OpOK then Exit;
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+
+  //ทุกโปรโตคอลมาบรรจบที่นี่ เป็นจุดเดียวที่รู้ว่าการอ่านทั้งตัวสำเร็จแล้ว
+  //จึงเป็นที่ที่ควรจำว่าชิปตัวนี้เปล่าหรือมีข้อมูล และบัฟเฟอร์มาจากชิป
+  RememberChipContent(RomF);
+  BufferSource := bsChip;
+  BufferSourceName := CurrentICParam.Name;
+  UpdateWorkflowState;
 
   CRC32 := UpdateCRC32($FFFFFFFF, Romf.Memory, Romf.Size);
   LogPrint('CRC32 = 0x'+IntToHex(CRC32, 8));

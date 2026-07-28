@@ -484,6 +484,44 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 
 ## Changelog
 
+### 4.7.0.0 — the strip knows a new chip from an old one
+
+The strip could see whether a chip was *selected* and whether the buffer was
+*full*. It could not see the one thing that decides whether pressing Smart
+write is routine or irreversible: **does this chip already hold data?** A
+factory-blank part and a laptop's only surviving BIOS produced the identical
+green "Ready for Smart write" — and auto-backup is **off by default**.
+
+Three facts are now tracked, each tied to the chip identity it was learned
+from, so they expire the moment you change chip, size, protocol, or unplug
+the programmer:
+
+- **Chip content** — after any full read the program remembers whether the
+  chip came back blank or holding data. All-`FF` is only called *blank* when
+  there is proof the chip actually answered (a JEDEC id on SPI, an ACK on
+  I²C); otherwise it stays *unknown*, because a dead bus reads `FF` too.
+- **Buffer provenance** — from a file (named in the strip), read from this
+  chip, or edited by hand. Writing back what you just read is not the same
+  risk as writing a stranger's file.
+- **Identity proven or merely chosen** — `Detect chip` going green used to
+  mean "a size is configured", which is true the instant you pick a name from
+  a menu with nothing in the socket. The strip now says when a chip was
+  chosen by hand and never confirmed against the socket.
+
+From those it names the real situation: *chip reads blank — nothing to
+lose*, *chip HAS DATA and it will be backed up first*, *chip HAS DATA and
+auto-backup is OFF — it will be lost* (in red), *buffer was read from this
+chip — writing it back changes nothing*, or *ready, but the chip has not
+been read — you do not know what is on it*.
+
+### 4.6.2.0 — the bar stopped painting its own name
+
+A `TPanel` draws its `Caption`, and the LCL copies `Name` into `Caption`
+when the caption is empty — so the workflow bar painted the word
+"WorkflowPanel" across itself. The buttons covered all but the slivers
+falling in the gaps between them, which looked like text hidden behind
+`Read chip` and `Verify`.
+
 ### 4.6.1.0 — the Safe workflow strip tells you what is wrong
 
 - **Smart write is reachable for the EEPROM families.** The strip still gated

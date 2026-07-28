@@ -148,6 +148,16 @@ resourcestring
   STR_WORKFLOW_BAD_ADDR  = 'The start address is not a hexadecimal number';
   STR_WORKFLOW_TOO_BIG   = 'The image is %d bytes but only %d fit from 0x%s';
   STR_WORKFLOW_MW_ODD    = 'MicroWire Smart write needs an even start address and length';
+  //ชิปใหม่กับชิปเก่าต่างกันตรงที่ "มีอะไรให้เสียไหม" ซึ่งเดิมแถบนี้ไม่รู้เลย
+  STR_WF_CHIP_PICKED     = 'Chip chosen by hand, not identified - press Detect chip to confirm';
+  STR_WF_UNREAD          = 'Ready, but the chip has not been read - you do not know what is on it';
+  STR_WF_BLANK           = 'Chip reads blank - nothing to lose, ready to write';
+  STR_WF_HASDATA_BACKUP  = 'Chip HAS DATA and it will be backed up first';
+  STR_WF_HASDATA_NOBAK   = 'Chip HAS DATA and auto-backup is OFF - it will be lost';
+  STR_WF_HASDATA_NOBAK2  = 'Chip HAS DATA and this family cannot be auto-backed up';
+  STR_WF_SAME_AS_CHIP    = 'Buffer was read from this chip - writing it back changes nothing';
+  STR_WF_FROM_FILE       = 'from %s';
+  STR_WF_EDITED          = 'buffer edited by hand';
   STR_COMPARE_SEE_LOG    = 'The differing ranges are listed in the log below,'#13#10
                          + 'and highlighted in the editor.';
   STR_DIFF_IN_EDITOR     = 'The editor shows the second side, with the differing bytes highlighted';
