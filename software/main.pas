@@ -1258,11 +1258,20 @@ begin
   FWorkflowPanel := TPanel.Create(Self);
   FWorkflowPanel.Parent := Self;
   FWorkflowPanel.Name := 'WorkflowPanel';
+  //TPanel วาด Caption ของตัวเอง และการตั้ง Name ให้แผงที่ Caption ยังว่าง
+  //ทำให้ LCL คัดลอกชื่อไปเป็น Caption โดยอัตโนมัติ ผลคือคำว่า
+  //"WorkflowPanel" ถูกวาดกลางแถบ แล้วโผล่ออกมาตามช่องว่างระหว่างปุ่ม
+  FWorkflowPanel.Caption := '';
   FWorkflowPanel.BevelOuter := bvNone;
   FWorkflowPanel.Width := ClientWidth;
   FWorkflowPanel.Height := BarHeight;
   FWorkflowPanel.Top := ToolBar.Height;
   FWorkflowPanel.Align := alTop;
+  //วาดลงบัฟเฟอร์ก่อนแล้วค่อยยกลงจอ พื้นหลังจึงถูกล้างทั้งแถบทุกครั้ง
+  //ถ้าไม่ทำ ตัวอักษรของปุ่มจากตำแหน่งเดิมจะค้างอยู่ในช่องว่างระหว่างปุ่ม
+  //เมื่อ LayoutWorkflowBar ถูกเรียกรอบที่สองแล้วความกว้างขยับ
+  FWorkflowPanel.DoubleBuffered := True;
+  FWorkflowPanel.ParentColor := False;
 
   FWorkflowTitle := TLabel.Create(Self);
   FWorkflowTitle.Parent := FWorkflowPanel;
@@ -1280,6 +1289,7 @@ begin
   //"ทางที่ควรเดิน" และอะไรคือเครื่องมือประกอบ
   FWorkflowSep := TPanel.Create(Self);
   FWorkflowSep.Parent := FWorkflowPanel;
+  FWorkflowSep.Caption := '';
   FWorkflowSep.BevelOuter := bvNone;
   FWorkflowSep.SetBounds(0, ButtonTop + 4, 1, ButtonHeight - 8);
 
@@ -1313,6 +1323,7 @@ const
 var
   X: integer;
 
+
   procedure Place(B: TButton);
   var
     W: integer;
@@ -1326,28 +1337,41 @@ var
 begin
   if FWorkflowPanel = nil then Exit;
 
-  FWorkflowPanel.Canvas.Font := FWorkflowTitle.Font;
-  FWorkflowTitle.Width := FWorkflowPanel.Canvas.TextWidth(
-                            FWorkflowTitle.Caption) + 8;
-  X := FWorkflowTitle.Left + FWorkflowTitle.Width + GAP + 4;
+  FWorkflowPanel.DisableAlign;
+  try
+    FWorkflowPanel.Canvas.Font := FWorkflowTitle.Font;
+    FWorkflowTitle.Width := FWorkflowPanel.Canvas.TextWidth(
+                              FWorkflowTitle.Caption) + 8;
+    X := FWorkflowTitle.Left + FWorkflowTitle.Width + GAP + 4;
 
-  //ปุ่มใช้ฟอนต์ของตัวเอง วัดด้วยฟอนต์นั้นถึงจะได้ความกว้างจริง
-  FWorkflowPanel.Canvas.Font := FWorkflowDetect.Font;
-  Place(FWorkflowDetect);
-  Place(FWorkflowOpen);
-  Place(FWorkflowSmart);
+    //ปุ่มใช้ฟอนต์ของตัวเอง วัดด้วยฟอนต์นั้นถึงจะได้ความกว้างจริง
+    FWorkflowPanel.Canvas.Font := FWorkflowDetect.Font;
+    Place(FWorkflowDetect);
+    Place(FWorkflowOpen);
+    Place(FWorkflowSmart);
 
-  Inc(X, SEP_GAP - GAP);
-  FWorkflowSep.Left := X;
-  Inc(X, FWorkflowSep.Width + SEP_GAP);
+    Inc(X, SEP_GAP - GAP);
+    FWorkflowSep.Left := X;
+    Inc(X, FWorkflowSep.Width + SEP_GAP);
 
-  Place(FWorkflowRead);
-  Place(FWorkflowVerify);
+    Place(FWorkflowRead);
+    Place(FWorkflowVerify);
 
-  //ป้ายสถานะกินที่ว่างที่เหลือ และหดได้เมื่อหน้าต่างแคบ
-  FWorkflowState.Left := X + GAP;
-  FWorkflowState.Width := FWorkflowPanel.ClientWidth - FWorkflowState.Left - 12;
-  if FWorkflowState.Width < 40 then FWorkflowState.Width := 40;
+    //ป้ายสถานะกินที่ว่างที่เหลือ และหดได้เมื่อหน้าต่างแคบ
+    FWorkflowState.Left := X + GAP;
+    FWorkflowState.Width := FWorkflowPanel.ClientWidth -
+                            FWorkflowState.Left - 12;
+    if FWorkflowState.Width < 40 then FWorkflowState.Width := 40;
+  finally
+    FWorkflowPanel.EnableAlign;
+  end;
+
+  //ต้องล้างพื้นหลังทั้งแถบเดี๋ยวนั้น ไม่ใช่แค่ทำเครื่องหมายว่าต้องวาดใหม่
+  //
+  //ฟังก์ชันนี้ถูกเรียกมากกว่าหนึ่งครั้ง (ตอนตั้งข้อความ และตอนเปลี่ยนธีม)
+  //ถ้าความกว้างที่วัดได้ขยับแม้แต่พิกเซลเดียว ปุ่มจะย้ายที่ แต่พื้นที่เดิม
+  //ไม่ถูกวาดทับ ตัวอักษรของรอบก่อนจึงค้างอยู่ในช่องว่างระหว่างปุ่ม
+  FWorkflowPanel.Repaint;
 end;
 
 procedure TMainForm.UpdateWorkflowText;
