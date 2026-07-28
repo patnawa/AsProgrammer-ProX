@@ -1,8 +1,28 @@
 # Design: SPI NAND support with bad blocks and ECC
 
-Status: designed, not yet implemented (task 10). This is the largest open
-feature: it is the reason `SPI_NAND` entries are deliberately skipped by
-the EZP importer today.
+Status: **phase 1 built** (task 10). `nandmodel.pas` (geometry, image layout,
+block map) and `nandplanner.pas` (bad-block-aware read/erase/program plans)
+are implemented and covered by `tests/nandplanner_tests.lpr` — 49 checks
+including 500 randomised bad-block layouts, run on both toolchains.
+
+What phase 1 pins down, and why it came first: the planner can never emit a
+step that touches a block the map does not call **good**, and a block whose
+state is `unknown` is not good — an unscanned map satisfies no request at
+all. `ValidateNANDPlan` re-checks that independently of the builder, so the
+tests assert on the plan rather than trusting the code that made it. It also
+rejects programming a block that was never erased, page indices past the end
+of a block, and gaps in the image offsets.
+
+Both bad-block policies are implemented: `nbpRefuse` (exact placement — a bad
+block anywhere in the range fails the whole request rather than silently
+moving the payload) and `nbpSkip` (step over it, which is what a
+skip-block-aware bootloader expects).
+
+Still to build: `nandengine.pas` (executor with on-die ECC status checks and
+P_FAIL/E_FAIL after every program/erase), `spi25nandadapter.pas` (wire
+framing), `virtualspinand.pas` (injectable bit errors and factory markers),
+detection via the parameter page, and the chiplist `spicmd="NAND"` family.
+The order below is unchanged for those.
 
 ## What makes NAND different (and why the current code must not touch it)
 

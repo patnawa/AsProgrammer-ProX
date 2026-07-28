@@ -105,6 +105,13 @@ run_suite eepromengine_tests "$eeprom" \
   tests/eepromengine_tests.lpr tests/virtualeeprom.pas \
   software/operationmodel.pas software/eepromengine.pas
 
+# SPI NAND geometry and bad-block-aware planning. The engine and adapter are
+# not built yet; this is the arithmetic that decides whether a bad block is
+# ever touched, so it is tested first and on its own.
+nand="$tmp/nand"
+run_suite nandplanner_tests "$nand" \
+  tests/nandplanner_tests.lpr software/nandmodel.pas software/nandplanner.pas
+
 adapter="$tmp/spi25-adapter"
 run_suite spi25noradapter_tests "$adapter" \
   tests/adapter/spi25noradapter_tests.lpr \

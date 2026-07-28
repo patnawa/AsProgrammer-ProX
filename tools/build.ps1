@@ -138,6 +138,13 @@ Run-Suite "eepromengine_tests" $eepromDir @(
   "$root\tests\eepromengine_tests.lpr", "$root\tests\virtualeeprom.pas",
   "$root\software\operationmodel.pas", "$root\software\eepromengine.pas")
 
+# SPI NAND geometry and bad-block-aware planning: the arithmetic that decides
+# whether a bad block is ever touched.
+$nandDir = Join-Path $env:TEMP "aspx-tests-nand"
+Run-Suite "nandplanner_tests" $nandDir @(
+  "$root\tests\nandplanner_tests.lpr", "$root\software\nandmodel.pas",
+  "$root\software\nandplanner.pas")
+
 # Real TBaseHardware-to-NOR-service adapter framing, identity gates, exact
 # transfer counts, four-byte strategies, and exactly-once cleanup.
 $adapterDir = Join-Path $env:TEMP "aspx-tests-spi25-adapter"
