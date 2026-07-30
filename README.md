@@ -490,6 +490,23 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 
 ## Changelog
 
+### 4.19.1.0 — 42 chips learn their real supply voltage
+
+Reverse engineering the EZP2023+ ver 3.0 chip database named the record
+fields the importer had listed as unknown, and turned up something worth
+knowing: the voltage byte is the rail that programmer switches on, not the
+chip's rating. Every SPI flash in the file reads 3.3 V — including every
+part whose own name ends in `(1.8V)` — so trusting it would have labelled
+every 1.8 V part as 3.3 V, which is the mistake that destroys one. 1.8 V
+therefore still comes from the part name; the 5 V records, which match
+their datasheets, gave 42 chips in `chiplist-ezp.xml` a real `vcc`.
+
+The EZP2023+ itself remains unsupported as a programmer, and that is a
+protocol limit rather than an oversight: its firmware exposes only
+whole-chip read/write/erase, with no way to send an arbitrary SPI command,
+so SFDP, protection decoding, Smart write and the chip health tests have
+nothing to talk to.
+
 ### 4.19.0.0 — and the C5h bank-register chips too
 
 4.18 refused chips that reach their upper banks through the extended
