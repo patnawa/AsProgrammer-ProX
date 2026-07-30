@@ -109,11 +109,28 @@ var
 begin
   if FDevOpened then DevClose;
 
+  //ไดรเวอร์ที่ผูกไม่ได้ก็คืน FT_DEVICE_NOT_FOUND เหมือนตอนไม่มีอุปกรณ์เสียบ
+  //ถ้าไม่แยกกัน คนจะไปหาสาย หาบอร์ด หาซ็อกเก็ต ทั้งที่ปัญหาคือไฟล์ DLL
+  if not FTDIDriverPresent then
+  begin
+    FStrError := 'ftd2xx.dll (the FTDI D2XX driver) is not available, so ' +
+      'no FT232H can be opened. Put ftd2xx.dll next to AsProgrammer.exe ' +
+      '(the release zip ships one) or install FTDI''s D2XX driver';
+    FDevOpened := False;
+    Exit(False);
+  end;
+
   err := Open_USB_Device();
 
   if err > 0 then
   begin
-    FStrError :=  STR_CONNECTION_ERROR+ FHardwareName +'('+IntToStr(err)+')';
+    if err = FT_DEVICE_NOT_FOUND then
+      FStrError := 'no FT232H is attached: the D2XX driver answered but ' +
+        'found no FTDI device. Check the cable, and that the board is not ' +
+        'claimed by the VCP (COM port) driver instead of D2XX'
+    else
+      FStrError := STR_CONNECTION_ERROR + FHardwareName + '(' +
+                   IntToStr(err) + ')';
     FDevOpened := false;
     Exit(false);
   end;

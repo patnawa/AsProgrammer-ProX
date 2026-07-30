@@ -6,7 +6,7 @@
 
 Sector-level erase · SFDP auto-detect · checksums · responsive UI
 
-![version](https://img.shields.io/badge/version-4.19-2BB3F3?style=flat-square)
+![version](https://img.shields.io/badge/version-4.19.2-2BB3F3?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
 ![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
@@ -489,6 +489,19 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 ---
 
 ## Changelog
+
+### 4.19.2.0 — "FT_Open device not found" now says which problem it is
+
+The D2XX driver returns the same `FT_DEVICE_NOT_FOUND` whether no FTDI
+board is attached or `ftd2xx.dll` is missing entirely — and this program's
+own fail-closed stubs, which exist so a missing DLL cannot stop the exe
+from starting, return it too. One message, three causes, and the operator
+goes hunting for a cable when the real answer is a file. The FT232H
+backend now checks whether the driver actually bound, and says either
+*"ftd2xx.dll is not available — put it next to AsProgrammer.exe"* (the
+release zip ships one; a freshly built exe has no DLLs beside it) or
+*"the driver answered but found no FTDI device — check the cable, and that
+the board is not claimed by the VCP driver instead of D2XX"*.
 
 ### 4.19.1.0 — 42 chips learn their real supply voltage
 

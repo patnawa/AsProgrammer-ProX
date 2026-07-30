@@ -92,6 +92,11 @@ Function GetFTDeviceCount : FT_Result;
 Function GetFTDeviceSerialNo(DeviceIndex:DWord) : FT_Result;
 Function GetFTDeviceDescription(DeviceIndex:DWord) : FT_Result;
 Function GetFTDeviceLocation(DeviceIndex:DWord) : FT_Result;
+//ftd2xx.dll ผูกสำเร็จหรือไม่ ค่านี้แยกสองเรื่องที่ FT_DEVICE_NOT_FOUND
+//พูดรวมกันไม่ได้: "ไม่มีไดรเวอร์ D2XX ให้เรียก" กับ "เรียกได้แต่ไม่มี
+//อุปกรณ์ FTDI เสียบอยู่" คนแก้ปัญหาสองอย่างนี้ต่างกันสิ้นเชิง
+function FTDIDriverPresent: boolean;
+
 Function Open_USB_Device : FT_Result;
 Function Open_USB_Device_By_Serial_Number(Serial_Number:string) : FT_Result;
 Function Open_USB_Device_By_Device_Description(Device_Description:string) : FT_Result;
@@ -437,6 +442,12 @@ begin
   if FTLib <> 0 then Pointer(P) := GetProcAddress(FTLib, Name);
   {$ENDIF}
   if Pointer(P) = nil then Pointer(P) := Stub;
+end;
+
+function FTDIDriverPresent: boolean;
+begin
+  //ผูกได้จริงเท่านั้นถึงนับ: DLL ที่โหลดได้แต่ขาด export ที่จำเป็นก็ใช้ไม่ได้
+  Result := (FTLib <> 0) and Assigned(FT_Open) and Assigned(FT_Close);
 end;
 
 procedure FTBindAll;
