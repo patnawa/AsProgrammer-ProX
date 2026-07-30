@@ -3783,6 +3783,23 @@ begin
   if Blank then OpBegin(opkErase) else OpBegin(opkWrite);
   ForgetChipContent;
 
+  //--- ปิดทางเขียนไว้ก่อน วัดกับของจริงแล้วว่ามันทำข้อมูลเสีย ---
+  //
+  //เฟิร์มแวร์รับข้อมูลครบทั้ง 8MB โดยไม่แจ้งข้อผิดพลาดใด ๆ แล้วอ่านกลับมา
+  //ไม่ตรงตั้งแต่ไบต์แรก และเนื้อในชิปกลายเป็นข้อมูลที่ไม่ใช่ทั้งของเก่าและ
+  //ของใหม่ แปลว่าลำดับที่ใช้ (descriptor -> START -> ก้อนข้อมูลไป OUT|1 ->
+  //RESET) ยังขาดอะไรอยู่ ซึ่ง implementation อ้างอิงก็ไม่ได้ยืนยันทางเขียน
+  //ไว้เหมือนกัน (คำสั่ง erase 0102h/0Ah ในนั้นประกาศไว้แต่ไม่มีใครเรียก)
+  //
+  //ปฏิเสธไปตรง ๆ ดีกว่ามีปุ่มที่ทำชิปเสียเงียบ ๆ ทางอ่านยังใช้ได้ตามปกติ
+  OpFail('writing through the EZP2023+ is disabled: it was tested on real ' +
+         'hardware and it corrupts the chip. The firmware accepts every ' +
+         'byte without complaint, then the chip reads back as neither the ' +
+         'old nor the new image, so the write sequence is still missing ' +
+         'something. Read and identify work; use a CH347, CH341 or FT232H ' +
+         'to write, or the vendor software');
+  Exit;
+
   if AsProgrammer.Current_HW <> CHW_EZP then
   begin
     OpFail('this path is only for the EZP2023+');

@@ -6,7 +6,7 @@
 
 Sector-level erase · SFDP auto-detect · checksums · responsive UI
 
-![version](https://img.shields.io/badge/version-4.21-2BB3F3?style=flat-square)
+![version](https://img.shields.io/badge/version-4.21.1-2BB3F3?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
 ![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
@@ -76,7 +76,7 @@ programmers, while staying free and open source.
 | **AVRISP (LUFA)** | ● | | | |
 | **Arduino** | ● | | | |
 | **serprog** | ● | | | Any board speaking flashrom's serial protocol: Raspberry Pi Pico (pico-serprog), STM32, ESP32, frser-duino. Set the COM port under *Settings*. |
-| **EZP2023+** | ● | | | Identify, read, write and erase, all as whole-chip operations because that is all its firmware exposes. Every write is verified by reading the chip back and comparing all of it. SFDP, protection decoding, Smart write and the chip health tests still cannot work through it — those need raw SPI commands, which the firmware has no way to send. Needs the vendor's libusb0 driver installed once. |
+| **EZP2023+** | ◐ | | | Identify and read only. Writing was implemented and then **disabled**: tested on real hardware it corrupts the chip (see 4.21.1.0 below). SFDP, protection decoding, Smart write and the chip health tests still cannot work through it — those need raw SPI commands, which the firmware has no way to send. Needs the vendor's libusb0 driver installed once. |
 
 Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-series I²C EEPROM,
 93-series MicroWire EEPROM, KB9012 EC, and SPI NAND (W25N / GD5F / MX35 / TC58 — read and
@@ -491,7 +491,31 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 
 ## Changelog
 
-### 4.21.0.0 — the EZP2023+ writes and erases too
+### 4.21.1.0 — EZP2023+ writing is disabled: it corrupts chips
+
+4.21.0.0 shipped a whole-chip write for that programmer on the strength of
+the protocol documentation. Tested against real hardware it destroys data,
+so it is now refused outright.
+
+What happens: the firmware accepts all 8 MB without reporting anything
+wrong, and the chip then reads back as neither the old image nor the new
+one. So the sequence being used — descriptor, START, data blocks to the
+second OUT endpoint, RESET — is still missing something. Notably the
+reference implementation does not verify its write path either, and the
+erase commands it defines (`0102h`, `0Ah`) are never called by it.
+
+Two real bugs were fixed on the way and are worth keeping: data blocks
+were being sent with the one-second command timeout, though the firmware
+erases the whole chip after START and ignores the bus for tens of seconds
+first; and the automatic USB-reset recovery could fire *during* a data
+stream, which knocks the firmware out of its receiving state so every
+later block lands in the wrong place. Recovery is now forbidden mid-stream
+on principle — resetting a device that is halfway through writing a chip
+can only make things worse.
+
+Reading remains verified: a full 8 MB dump of a W25Q64JV, twice.
+
+### 4.21.0.0 — the EZP2023+ writes and erases too (withdrawn in 4.21.1.0)
 
 Verified on real hardware: a W25Q64JV read back all 8 MB through the
 programmer, Intel descriptor and all.

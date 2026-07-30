@@ -70,6 +70,13 @@ const
   EZP_ALGORITHM_SPI   = 0;
   EZP_DELAY_SPI_MS    = 1000;
 
+  TIMEOUT_MS      = 1000;   //แพ็กเก็ตคำสั่ง 64 ไบต์ ตอบทันทีหรือไม่ตอบเลย
+  TIMEOUT_READ_MS = 20000;  //ก้อนข้อมูลของการอ่านทั้งชิป รอได้นานกว่า
+  //ก้อนข้อมูลของการเขียน: หลัง START เฟิร์มแวร์ลบชิปทั้งตัวก่อน ซึ่งบนชิป
+  //8MB กินเวลาหลายสิบวินาที ระหว่างนั้นมันไม่ดูดปลายทาง OUT เลย เพดานหนึ่ง
+  //วินาทีจึงล้มที่ก้อนแรกเสมอ
+  TIMEOUT_WRITE_MS = 120000;
+
 type
   TEZPHardware = class(TBaseHardware)
   private
@@ -96,7 +103,9 @@ type
 
     function FindAndOpen: boolean;
     function Recover: boolean;
-    function BulkOut(Endpoint: longword; const Data: TBytes): boolean;
+    function BulkOut(Endpoint: longword; const Data: TBytes;
+      TimeoutMs: integer = TIMEOUT_MS;
+      MayRecover: boolean = True): boolean;
     function BulkIn(var Data: TBytes; Len, TimeoutMs: integer): boolean;
     function Command(Cmd: word; out Reply: TBytes): boolean;
     function CheckChip: boolean;
@@ -149,10 +158,6 @@ type
 implementation
 
 uses main;
-
-const
-  TIMEOUT_MS      = 1000;   //แพ็กเก็ตคำสั่ง 64 ไบต์ ตอบทันทีหรือไม่ตอบเลย
-  TIMEOUT_READ_MS = 20000;  //ก้อนข้อมูลของการอ่านทั้งชิป รอได้นานกว่า
 
 var
   UsbInited: boolean = False;
@@ -282,18 +287,23 @@ begin
 end;
 
 function TEZPHardware.BulkOut(Endpoint: longword;
-  const Data: TBytes): boolean;
+  const Data: TBytes; TimeoutMs: integer; MayRecover: boolean): boolean;
 var
   n: integer;
 begin
   Result := False;
   if (not FOpened) or (Length(Data) = 0) then Exit;
-  n := usb_bulk_write(FHandle, Endpoint, Data[0], Length(Data), TIMEOUT_MS);
+  n := usb_bulk_write(FHandle, Endpoint, Data[0], Length(Data),
+                      longword(TimeoutMs));
   if n = Length(Data) then Exit(True);
 
   //ไม่รับคำสั่ง = เฟิร์มแวร์ค้าง กู้หนึ่งครั้งแล้วลองซ้ำ ถ้ายังไม่ได้
   //ค่อยบอกว่าเครื่องไม่ตอบ ไม่ใช่รายงานเลขติดลบดิบ ๆ ให้คนไปเดาเอง
-  if not FRecovering then
+  //
+  //ห้ามกู้กลางสตรีมเด็ดขาด: การรีเซ็ตตอนที่เฟิร์มแวร์กำลังรับข้อมูลทั้งชิป
+  //ทำให้มันหลุดสถานะ ก้อนที่ส่งต่อจากนั้นลงผิดที่ทั้งหมด ผลคือชิปพัง
+  //ทั้งที่รายงานว่าเขียนต่อได้ วัดมาแล้วด้วยการทดลองที่ทำให้ชิปทดสอบเสียหาย
+  if MayRecover and (not FRecovering) then
   begin
     FRecovering := True;
     try
@@ -640,17 +650,19 @@ begin
   FillByte(Pkt[0], EZP_PACKET_LEN, 0);
   Pkt[0] := byte(EZP_CMD_START shr 8);
   Pkt[1] := byte(EZP_CMD_START and $FF);
-  if not BulkOut(EZP_EP_CMD, Pkt) then Exit;
+  if not BulkOut(EZP_EP_CMD, Pkt, TIMEOUT_MS, False) then Exit;
 
   BlockLen := Page;
   if BlockLen < EZP_BLOCK_MIN then BlockLen := EZP_BLOCK_MIN;
 
+  main.LogPrint('the firmware erases the chip before it takes data; the ' +
+                'first block can take a minute on a large part');
   SetLength(Block, BlockLen);
   Sent := 0;
   while Sent < Size do
   begin
     Move(Data[Sent], Block[0], BlockLen);
-    if not BulkOut(EZP_EP_DATA, Block) then
+    if not BulkOut(EZP_EP_DATA, Block, TIMEOUT_WRITE_MS, False) then
     begin
       //ครึ่ง ๆ กลาง ๆ คือชิปที่เนื้อในผสมกันอยู่ ต้องบอกให้ชัดว่าถึงไหน
       FStrError := FStrError + Format(' (stopped %d bytes into the write; ' +
