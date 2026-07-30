@@ -58,8 +58,10 @@ const
   EZP_CMD_CHECK_CHIP    = $0009;
   EZP_CMD_RESET         = $0108;
 
-  //รหัสที่เครื่องจริงตอบกลับท้ายแพ็กเก็ต CHECK_CHIP
-  EZP_PROGRAMMER_CODE = $9A7336BD;
+  //ท้ายแพ็กเก็ต CHECK_CHIP มีรหัสสี่ไบต์ของตัวเครื่อง ซึ่ง "ต่างกันไปตาม
+  //เครื่อง": ตัวที่ไลบรารีอ้างอิงเจอคือ 9A7336BD ตัวที่ทดสอบที่นี่คือ
+  //90381CBC จึงใช้ยืนยันรุ่นไม่ได้ เอาไว้แค่ดูว่ามีคนตอบจริงหรือไม่
+  //(ศูนย์ล้วนหรือ FF ล้วนคือไม่มีใครตอบ) แล้วบันทึกไว้ให้คนอ่าน log เทียบ
 
   //ตระกูล SPI NOR ใช้ค่าชุดเดียวกันทั้ง 341 จาก 355 รายการใน EZP2023+.Dat
   //(class 0, algorithm 0, delay 1000 ms) จึงตั้งเป็นค่าตั้งต้นได้ ที่เหลือ
@@ -88,8 +90,12 @@ type
     //การเสิร์ฟรหัส 9Fh ให้มันคือการกุคำตอบที่ชิปไม่ได้พูด
     FPendingRead: boolean;
     FPendingID: boolean;
+    FRecovering: boolean;
+    FIdentityLogged: boolean;
     FPendingAddr: cardinal;
 
+    function FindAndOpen: boolean;
+    function Recover: boolean;
     function BulkOut(Endpoint: longword; const Data: TBytes): boolean;
     function BulkIn(var Data: TBytes; Len, TimeoutMs: integer): boolean;
     function Command(Cmd: word; out Reply: TBytes): boolean;
@@ -160,10 +166,65 @@ begin
   Result := FStrError;
 end;
 
-function TEZPHardware.DevOpen: boolean;
+//หาอุปกรณ์แล้วเปิด ไม่ยุ่งกับชิปเลย ใช้ทั้งตอนเปิดครั้งแรกและตอนกู้
+function TEZPHardware.FindAndOpen: boolean;
 var
   bus: pusb_bus;
   dev: pusb_device;
+begin
+  Result := False;
+  usb_find_busses();
+  usb_find_devices();
+  bus := usb_get_busses();
+  while Assigned(bus) do
+  begin
+    dev := bus^.devices;
+    while Assigned(dev) do
+    begin
+      if (dev^.descriptor.idVendor = EZP_VID) and
+         (dev^.descriptor.idProduct = EZP_PID) then
+      begin
+        FHandle := usb_open(dev);
+        if FHandle = nil then
+        begin
+          FStrError := 'the EZP2023+ was found but could not be opened; ' +
+            'its libusb0 driver may not be installed (run the vendor''s ' +
+            'Win10_11_driver installer once)';
+          Exit;
+        end;
+        //ไม่ตั้ง configuration: บนไดรเวอร์ libusb0 ของเครื่องนี้มันไม่ช่วย
+        //อะไรและบางเครื่องค้างไปเลย claim ล้มก็ไม่ใช่เรื่องคอขาด
+        usb_claim_interface(FHandle, 0);
+        FOpened := True;
+        Exit(True);
+      end;
+      dev := dev^.next;
+    end;
+    bus := bus^.next;
+  end;
+  FStrError := 'no EZP2023+ found on the USB bus';
+end;
+
+//เครื่องนี้ค้างได้จริงและค้างบ่อย: เฟิร์มแวร์ CH552 ที่ถูกทิ้งคาไว้กลาง
+//คำสั่งจะไม่รับ bulk อะไรอีกเลย ทั้งจากโปรแกรมนี้และจากซอฟต์แวร์ของผู้ผลิต
+//วัดแล้วว่า set_configuration กับ clear_halt ไม่ช่วย แต่ usb_reset แล้ว
+//เปิดใหม่ช่วยได้ จึงทำให้เป็นขั้นกู้อัตโนมัติ ไม่ใช่ให้คนไปถอดสายเอง
+function TEZPHardware.Recover: boolean;
+begin
+  Result := False;
+  if FHandle = nil then Exit;
+  usb_reset(FHandle);
+  usb_close(FHandle);
+  FHandle := nil;
+  FOpened := False;
+  //ตัวเครื่องหายไปจากบัสชั่วครู่หลังรีเซ็ต ต้องรอให้มันกลับมา
+  Sleep(1500);
+  FImageValid := False;
+  FIdentityChecked := False;
+  Result := FindAndOpen;
+end;
+
+function TEZPHardware.DevOpen: boolean;
 begin
   Result := False;
   if FOpened then DevClose;
@@ -182,47 +243,15 @@ begin
     usb_init();
     UsbInited := True;
   end;
-  usb_find_busses();
-  usb_find_devices();
 
-  bus := usb_get_busses();
-  while Assigned(bus) do
-  begin
-    dev := bus^.devices;
-    while Assigned(dev) do
-    begin
-      if (dev^.descriptor.idVendor = EZP_VID) and
-         (dev^.descriptor.idProduct = EZP_PID) then
-      begin
-        FHandle := usb_open(dev);
-        if FHandle = nil then
-        begin
-          FStrError := 'the EZP2023+ was found but could not be opened; ' +
-            'its libusb0 driver may not be installed (run the vendor''s ' +
-            'Win10_11_driver installer once)';
-          Exit;
-        end;
-        //ไม่ตั้ง configuration และไม่ถือว่า claim ล้มเหลวเป็นเรื่องคอขาด:
-        //ไดรเวอร์ libusb0 ของเครื่องนี้ตั้งค่ามาให้แล้ว การสั่งซ้ำบางเครื่อง
-        //ค้างไปเลย และตัวที่ใช้งานได้จริงในโลกก็ไม่ได้เรียกทั้งสองอย่าง
-        usb_claim_interface(FHandle, 0);
-        FOpened := True;
-        FImageValid := False;
-        FHaveID := False;
-        FIdentityChecked := False;
-        FPendingRead := False;
-        FPendingID := False;
-        //ไม่คุยกับชิปตอนเปิด: ตัวตรวจว่ามีเครื่องเสียบอยู่เรียก DevOpen ทุก
-        //สามวินาที ถ้าเปิดแล้วยิงคำสั่งด้วย หน้าต่างจะค้างเป็นจังหวะ
-        //การยืนยันตัวเครื่องและอ่านรหัสชิปเลื่อนไปตอนที่มีคนขอจริง
-        Exit(True);
-      end;
-      dev := dev^.next;
-    end;
-    bus := bus^.next;
-  end;
-
-  FStrError := 'no EZP2023+ found on the USB bus';
+  FImageValid := False;
+  FHaveID := False;
+  FIdentityChecked := False;
+  FPendingRead := False;
+  FPendingID := False;
+  //ไม่คุยกับชิปตอนเปิด: ตัวตรวจว่ามีเครื่องเสียบอยู่เรียก DevOpen ทุก
+  //สามวินาที ถ้าเปิดแล้วยิงคำสั่งด้วย หน้าต่างจะค้างเป็นจังหวะ
+  Result := FindAndOpen;
 end;
 
 procedure TEZPHardware.DevClose;
@@ -250,10 +279,31 @@ begin
   Result := False;
   if (not FOpened) or (Length(Data) = 0) then Exit;
   n := usb_bulk_write(FHandle, Endpoint, Data[0], Length(Data), TIMEOUT_MS);
-  Result := n = Length(Data);
-  if not Result then
-    FStrError := Format('the EZP2023+ accepted %d of %d bytes',
-                        [n, Length(Data)]);
+  if n = Length(Data) then Exit(True);
+
+  //ไม่รับคำสั่ง = เฟิร์มแวร์ค้าง กู้หนึ่งครั้งแล้วลองซ้ำ ถ้ายังไม่ได้
+  //ค่อยบอกว่าเครื่องไม่ตอบ ไม่ใช่รายงานเลขติดลบดิบ ๆ ให้คนไปเดาเอง
+  if not FRecovering then
+  begin
+    FRecovering := True;
+    try
+      if Recover then
+      begin
+        main.LogPrint('the EZP2023+ was not answering; a USB reset ' +
+                      'brought it back');
+        n := usb_bulk_write(FHandle, Endpoint, Data[0], Length(Data),
+                            TIMEOUT_MS);
+        if n = Length(Data) then Exit(True);
+      end;
+    finally
+      FRecovering := False;
+    end;
+  end;
+
+  FStrError := Format('the EZP2023+ would not accept a command even after ' +
+    'a USB reset (%d of %d bytes). Unplug it, wait a few seconds and plug ' +
+    'it back in: that power-cycles the CH552, which is what clears one ' +
+    'that is truly stuck', [n, Length(Data)]);
 end;
 
 function TEZPHardware.BulkIn(var Data: TBytes; Len,
@@ -297,11 +347,19 @@ begin
 
   Code := (cardinal(Reply[60]) shl 24) or (cardinal(Reply[61]) shl 16) or
           (cardinal(Reply[62]) shl 8) or cardinal(Reply[63]);
-  if Code <> EZP_PROGRAMMER_CODE then
+  //รหัสนี้ต่างกันไปตามเครื่อง (เห็นมาแล้ว 9A7336BD และ 90381CBC) เอามา
+  //ตัดสินรุ่นไม่ได้ ที่ตัดสินได้คือ "มีคนตอบไหม": ศูนย์ล้วนหรือ FF ล้วน
+  //คือไม่มี
+  if (Code = 0) or (Code = $FFFFFFFF) then
   begin
-    FStrError := Format('this device answered 1FC8:310B but its identity ' +
-      'code is %.8x, not an EZP2023+', [Code]);
+    FStrError := 'the device at 1FC8:310B answered with no identity code ' +
+      'at all, so it is not an EZP2023+ that this backend understands';
     Exit;
+  end;
+  if not FIdentityLogged then
+  begin
+    FIdentityLogged := True;
+    main.LogPrint(Format('EZP2023+ identity code %.8x', [Code]));
   end;
 
   //ไบต์ 0 คือชนิดตระกูล (บวกหนึ่ง) สามไบต์ถัดไปคือรหัส 9Fh ของชิป

@@ -6,7 +6,7 @@
 
 Sector-level erase · SFDP auto-detect · checksums · responsive UI
 
-![version](https://img.shields.io/badge/version-4.20.1-2BB3F3?style=flat-square)
+![version](https://img.shields.io/badge/version-4.20.2-2BB3F3?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
 ![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
@@ -490,6 +490,26 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 ---
 
 ## Changelog
+
+### 4.20.2.0 — the EZP2023+ un-wedges itself
+
+Measured against real hardware with a new standalone diagnostic
+(`tools/ezpsmoke.lpr`, read-only), which is what finally separated "our
+code is wrong" from "the board is not answering". The device enumerated
+perfectly — bound to libusb0, `Status: OK`, endpoints exactly `0x82` in
+and `0x02`/`0x01` out, all bulk — and still refused every 64-byte command
+packet with a timeout, in this program *and* in the vendor's own software.
+`set_configuration` did not help, nor did `clear_halt`; `usb_reset`
+followed by reopening did, every time. A stuck CH552 is now recovered
+automatically on the first refused command instead of being reported as a
+dead programmer, and the log says when that happened.
+
+The other fix that diagnostic found: the four-byte identity code at the
+end of the CHECK_CHIP reply is per-device, not a model constant. The
+reference implementation's `9A7336BD` and the `90381CBC` on the unit here
+are both valid, so requiring one of them rejected a perfectly good
+programmer. The code is now logged for reference and only an all-zero or
+all-FF answer counts as "nothing there".
 
 ### 4.20.1.0 — the EZP2023+ no longer freezes the window
 
