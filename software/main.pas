@@ -350,7 +350,8 @@ type
   //ใช้จากโหมดบรรทัดคำสั่ง
   procedure SelectHW(programmer: THardwareList);
   procedure SetHardwareMenuCheck(HW: THardwareList);
-  procedure PollProgrammer(Announce: boolean);
+  procedure PollProgrammer(Announce: boolean;
+    StartupScan: boolean = False);
   function SelectChipAny(const AName: string): boolean;
 
   //หมอตรวจชิป (ไม่ทำลายข้อมูล) กับเครื่องพิสูจน์ความจุจริง (เขียนจริง
@@ -7521,12 +7522,11 @@ end;
 
 //ไล่เปิดอุปกรณ์ทีละตัว เพื่อดูว่ามีเครื่องโปรแกรมตัวไหนเสียบอยู่จริง
 //ข้ามพวกที่ใช้พอร์ตอนุกรม เพราะการไล่เปิดพอร์ตมั่ว ๆ จะไปกวนอุปกรณ์อื่น
+//EZP ใช้แค่ enumerate VID/PID ไม่เปิด handle จึงไม่รบกวนงานของโปรแกรมอื่น
 function ProbeProgrammer(out Found: THardwareList): boolean;
 const
-  //ไม่รวม EZP2023+: มันเปิดได้เร็วก็จริง แต่การไปเปิดของคนอื่นทุกสามวินาที
-  //ระหว่างที่เครื่องอาจกำลังสตรีมชิปอยู่ ไม่คุ้มกับความสะดวกที่ได้
-  Candidates: array[0..4] of THardwareList =
-    (CHW_CH341, CHW_CH347, CHW_FT232H, CHW_USBASP, CHW_AVRISP);
+  Candidates: array[0..5] of THardwareList =
+    (CHW_CH341, CHW_CH347, CHW_FT232H, CHW_USBASP, CHW_AVRISP, CHW_EZP);
 var
   i: integer;
   Saved: THardwareList;
@@ -7538,7 +7538,14 @@ begin
   for i := Low(Candidates) to High(Candidates) do
   begin
     AsProgrammer.Current_HW := Candidates[i];
-    if AsProgrammer.Programmer.DevOpen then
+    if (Candidates[i] = CHW_EZP) and EZPDevicePresent then
+    begin
+      Found := Candidates[i];
+      AsProgrammer.Current_HW := Saved;
+      Exit(True);
+    end
+    else if (Candidates[i] <> CHW_EZP) and
+            AsProgrammer.Programmer.DevOpen then
     begin
       AsProgrammer.Programmer.DevClose;
       Found := Candidates[i];
@@ -7566,7 +7573,7 @@ end;
 
 //เช็คว่ามีเครื่องโปรแกรมต่ออยู่ไหม ถ้าตัวที่เลือกไว้หายไปและเปิดโหมดค้นหาอัตโนมัติ
 //ก็สลับไปใช้ตัวที่เจอแทน
-procedure PollProgrammer(Announce: boolean);
+procedure PollProgrammer(Announce: boolean; StartupScan: boolean);
 var
   Present, Was: boolean;
   Found: THardwareList;
@@ -7575,18 +7582,28 @@ begin
 
   Was := ProgrammerPresent;
 
-  //อุปกรณ์ที่ใช้พอร์ตอนุกรมไม่เอามาวนเช็ค เพราะจะไปจับพอร์ตทิ้งขว้างตลอดเวลา
-  if AsProgrammer.Current_HW in [CHW_ARDUINO, CHW_BUZZPIRAT, CHW_SERPROG,
-                                 CHW_EZP] then
+  //ตอนเริ่มโปรแกรมต้องค้นจริงแม้ค่าที่จำไว้เป็น serial backend มิฉะนั้น
+  //ค่าปริยาย Buzzpirat จะถูกนับว่า "มีอยู่" และตัดทาง auto-detect ทั้งหมด
+  if StartupScan and MainForm.MenuAutoDetectHW.Checked and
+     ProbeProgrammer(Found) then
   begin
-    ProgrammerPresent := True;
-    MainForm.ChipView.Invalidate;
-    MainForm.UpdateWorkflowState;
-    Exit;
+    SelectHW(Found);
+    SetHardwareMenuCheck(Found);
+    Present := True;
+    LogPrint(STR_HW_SWITCHED + AsProgrammer.Programmer.HardwareName);
+  end
+  //อุปกรณ์ serial ไม่เอามาวนเช็ค เพราะจะไปจับพอร์ตทิ้งขว้างตลอดเวลา
+  else if AsProgrammer.Current_HW in
+          [CHW_ARDUINO, CHW_BUZZPIRAT, CHW_SERPROG] then
+    Present := True
+  //EZP ตรวจ presence จากรายการ USB เท่านั้น ไม่เปิดหรือ claim ตัวเครื่อง
+  else if AsProgrammer.Current_HW = CHW_EZP then
+    Present := EZPDevicePresent
+  else
+  begin
+    Present := AsProgrammer.Programmer.DevOpen;
+    if Present then AsProgrammer.Programmer.DevClose;
   end;
-
-  Present := AsProgrammer.Programmer.DevOpen;
-  if Present then AsProgrammer.Programmer.DevClose;
 
   if (not Present) and MainForm.MenuAutoDetectHW.Checked then
     if ProbeProgrammer(Found) then
@@ -10699,7 +10716,7 @@ begin
 
   //ค้นหาเครื่องโปรแกรมที่เสียบอยู่ตั้งแต่เปิดโปรแกรม แล้วเฝ้าดูต่อเป็นระยะ
   SetHardwareMenuCheck(AsProgrammer.Current_HW);
-  PollProgrammer(True);
+  PollProgrammer(True, True);
   HwTimer.Enabled := True;
 end;
 

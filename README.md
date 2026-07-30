@@ -505,6 +505,15 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 
 ## Changelog
 
+### 4.22.0.1 — EZP2023+ is detected safely at startup
+
+Automatic programmer detection now finds an attached EZP2023+ even when the
+saved/default backend is a serial programmer. Detection only enumerates the
+USB descriptor for `1FC8:310B`: it does not open or claim the programmer,
+reset it, or send a chip command. The same non-invasive check tracks EZP
+disconnect/reconnect events without bringing back the old three-second window
+freeze or disturbing a whole-chip transfer.
+
 ### 4.22.0.0 — EZP2023+ write fixed and verified on the real programmer
 
 Whole-chip Write and Erase are enabled again. The missing protocol state was
