@@ -3783,21 +3783,21 @@ begin
   if Blank then OpBegin(opkErase) else OpBegin(opkWrite);
   ForgetChipContent;
 
-  //--- ปิดทางเขียนไว้ก่อน วัดกับของจริงแล้วว่ามันทำข้อมูลเสีย ---
+  //--- ทางเขียนยังปิดอยู่: วัดกับของจริงแล้วมันไม่ลง ---
   //
-  //เฟิร์มแวร์รับข้อมูลครบทั้ง 8MB โดยไม่แจ้งข้อผิดพลาดใด ๆ แล้วอ่านกลับมา
-  //ไม่ตรงตั้งแต่ไบต์แรก และเนื้อในชิปกลายเป็นข้อมูลที่ไม่ใช่ทั้งของเก่าและ
-  //ของใหม่ แปลว่าลำดับที่ใช้ (descriptor -> START -> ก้อนข้อมูลไป OUT|1 ->
-  //RESET) ยังขาดอะไรอยู่ ซึ่ง implementation อ้างอิงก็ไม่ได้ยืนยันทางเขียน
-  //ไว้เหมือนกัน (คำสั่ง erase 0102h/0Ah ในนั้นประกาศไว้แต่ไม่มีใครเรียก)
+  //ลำดับที่ส่งตรงกับซอฟต์แวร์ของผู้ผลิตทุกไบต์แล้ว (จับ USB เทียบกันด้วย
+  //tools/ezpspy): descriptor 0007 เหมือนกันเป๊ะรวมรหัสชิป, อ่าน string
+  //descriptor ก่อน claim เหมือนกัน, 0005 ไม่อ่านคำตอบ, ก้อน 256 ไบต์ไป
+  //OUT|1, ปิดด้วย 0108, ไม่เรียก set_configuration, เพดานเวลา 5 วินาที
+  //เท่ากัน แต่ชิปไม่เปลี่ยน และคำตอบของ 0007 ฝั่งเราเป็นเนื้อชิปเก่าซ้ำ ๆ
+  //ขณะที่ของเขาเป็นแพ็กเก็ตสถานะ (01 EF 40 17)
   //
-  //ปฏิเสธไปตรง ๆ ดีกว่ามีปุ่มที่ทำชิปเสียเงียบ ๆ ทางอ่านยังใช้ได้ตามปกติ
-  OpFail('writing through the EZP2023+ is disabled: it was tested on real ' +
-         'hardware and it corrupts the chip. The firmware accepts every ' +
-         'byte without complaint, then the chip reads back as neither the ' +
-         'old nor the new image, so the write sequence is still missing ' +
-         'something. Read and identify work; use a CH347, CH341 or FT232H ' +
-         'to write, or the vendor software');
+  //ยังไม่รู้ว่าเหลืออะไร จึงไม่เปิดให้ใช้ ปุ่มที่ทำชิปเสียเงียบ ๆ แย่กว่า
+  //ปุ่มที่บอกว่ายังทำไม่ได้ ทางอ่านใช้ได้ตามปกติ
+  OpFail('writing through the EZP2023+ is still disabled: the byte sequence ' +
+         'now matches the vendor software exactly and the chip still does ' +
+         'not change, so something outside the captured traffic is missing. ' +
+         'Read and identify work; write with a CH347, CH341 or FT232H');
   Exit;
 
   if AsProgrammer.Current_HW <> CHW_EZP then

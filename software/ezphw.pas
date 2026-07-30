@@ -70,12 +70,13 @@ const
   EZP_ALGORITHM_SPI   = 0;
   EZP_DELAY_SPI_MS    = 1000;
 
-  TIMEOUT_MS      = 1000;   //แพ็กเก็ตคำสั่ง 64 ไบต์ ตอบทันทีหรือไม่ตอบเลย
-  TIMEOUT_READ_MS = 20000;  //ก้อนข้อมูลของการอ่านทั้งชิป รอได้นานกว่า
-  //ก้อนข้อมูลของการเขียน: หลัง START เฟิร์มแวร์ลบชิปทั้งตัวก่อน ซึ่งบนชิป
-  //8MB กินเวลาหลายสิบวินาที ระหว่างนั้นมันไม่ดูดปลายทาง OUT เลย เพดานหนึ่ง
-  //วินาทีจึงล้มที่ก้อนแรกเสมอ
-  TIMEOUT_WRITE_MS = 120000;
+  //เพดานเวลาที่วัดมาจากซอฟต์แวร์ของผู้ผลิตเอง (จับ USB ด้วย tools/ezpspy):
+  //มันใช้ 5000 ms กับทุกทรานสเฟอร์ ทั้งแพ็กเก็ตคำสั่ง คำตอบ และก้อนข้อมูล
+  //หนึ่งวินาทีที่เคยใช้สั้นเกินไปสำหรับคำตอบของ 0007 ที่เฟิร์มแวร์ต้องไป
+  //คุยกับชิปก่อน
+  TIMEOUT_MS       = 5000;
+  TIMEOUT_READ_MS  = 20000;  //ก้อนข้อมูลของการอ่านทั้งชิป เผื่อไว้มากกว่า
+  TIMEOUT_WRITE_MS = 20000;  //ก้อนข้อมูลของการเขียน เผื่อจากของผู้ผลิต
 
 type
   TEZPHardware = class(TBaseHardware)
@@ -99,6 +100,7 @@ type
     FPendingID: boolean;
     FRecovering: boolean;
     FIdentityLogged: boolean;
+    FInWriteSession: boolean;
     FPendingAddr: cardinal;
 
     function FindAndOpen: boolean;
@@ -107,8 +109,12 @@ type
       TimeoutMs: integer = TIMEOUT_MS;
       MayRecover: boolean = True): boolean;
     function BulkIn(var Data: TBytes; Len, TimeoutMs: integer): boolean;
+    function DrainIn(MaxRounds: integer): integer;
+    procedure CleanSession;
     function Command(Cmd: word; out Reply: TBytes): boolean;
     function CheckChip: boolean;
+    //รหัส 9Fh จากตารางชิปที่ผู้ใช้เลือก ใส่ลง FChipID ถ้าอ่านได้
+    function ChipIDFromTable: boolean;
     function ReadWholeChip: boolean;
     function SendChipDescriptor: boolean;
   public
@@ -209,8 +215,10 @@ begin
         end;
         //ไม่ตั้ง configuration: บนไดรเวอร์ libusb0 ของเครื่องนี้มันไม่ช่วย
         //อะไรและบางเครื่องค้างไปเลย claim ล้มก็ไม่ใช่เรื่องคอขาด
-        usb_claim_interface(FHandle, 0);
+        //ลำดับตามของผู้ผลิต: เปิด -> อ่าน string descriptor -> claim
         FOpened := True;
+        CleanSession;
+        usb_claim_interface(FHandle, 0);
         Exit(True);
       end;
       dev := dev^.next;
@@ -340,6 +348,61 @@ begin
     FStrError := Format('the EZP2023+ returned %d of %d bytes', [n, Len]);
 end;
 
+//ล้างท่อ IN ให้ว่างก่อนเริ่มงาน
+//
+//นี่คือต้นเหตุของเรื่องทั้งหมด: งานที่ล้มกลางทาง (อ่านไม่จบ, timeout) ทิ้ง
+//ข้อมูลค้างอยู่ในคิวของอุปกรณ์ รอบถัดไปที่เราคิดว่าอ่าน "คำตอบของ 0007"
+//จะได้ข้อมูลชิปเก่านั่นแทน แล้วทุกอย่างเลื่อนเฟสไปหมด เฟิร์มแวร์อยู่คนละ
+//สถานะกับที่เราคิด การเขียนจึงรับข้อมูลครบแล้วทิ้งทั้งหมดโดยไม่บ่นอะไร
+//วัดเห็นได้จาก log ของ tools/ezpspy: คำตอบของ 0007 เป็น BA F8 0C EF...
+//ซึ่งเป็นเนื้อชิป ไม่ใช่แพ็กเก็ตสถานะแบบที่ซอฟต์แวร์ผู้ผลิตได้ (01 EF 40 17)
+function TEZPHardware.DrainIn(MaxRounds: integer): integer;
+var
+  Junk: TBytes;
+  n: integer;
+begin
+  Result := 0;
+  if not FOpened then Exit;
+  //ต้องอ่านทีละ 64 ไบต์ ซึ่งเท่า max packet ของปลายทางนี้พอดี
+  //อ่านทีละมากกว่านั้น (ลอง 4096 มาแล้ว) libusb0 บนอุปกรณ์นี้คืน "สำเร็จ"
+  //พร้อมบัฟเฟอร์เป็นศูนย์ทั้งก้อน แม้ไม่มีอะไรให้อ่าน ตัวนับจึงไม่มีความหมาย
+  //และครั้งก่อนมันพาไปสั่ง usb_reset ทับ ซึ่งทำให้เฟิร์มแวร์หาชิปไม่เจอ
+  SetLength(Junk, 64);
+  repeat
+    n := usb_bulk_read(FHandle, EZP_EP_IN, Junk[0], 64, 50);
+    if n > 0 then Inc(Result);
+  until (n <= 0) or (Result >= MaxRounds);
+end;
+
+//เริ่ม session ให้สะอาด: สั่งเลิกงานเก่าก่อน แล้วดูดของค้างออกให้หมด
+//
+//งานอ่านที่เลิกกลางทางทำให้เฟิร์มแวร์สตรีมชิปต่อไปเรื่อย ๆ ข้อมูลค้างอยู่ใน
+//คิวข้าม process ได้ด้วย รอบถัดไปที่อ่าน "คำตอบของ 0007" จึงได้เนื้อชิปเก่า
+//แทนแพ็กเก็ตสถานะ (วัดเทียบกับของผู้ผลิตแล้ว: เขาได้ 01 EF 40 17 เราได้
+//BA F8 0C EF) แล้วทุกอย่างเลื่อนเฟส การเขียนรับครบแล้วทิ้งทั้งหมดเงียบ ๆ
+procedure TEZPHardware.CleanSession;
+var
+  Buf: TBytes;
+begin
+  if not FOpened then Exit;
+
+  //ทำตามซอฟต์แวร์ของผู้ผลิตทุกขั้น รวมขั้นที่ดูเหมือนไม่จำเป็น
+  //
+  //มันอ่าน string descriptor สองอันทุกครั้งที่เปิดอุปกรณ์ ก่อน claim ด้วย
+  //(จับมาได้: CTRL rt=80 req=06 val=0301 idx=1033, แล้ว val=0302)
+  //ทางเราไม่เคยอ่าน แล้วผลต่างที่เหลืออยู่ก็คือ: ของเขาได้คำตอบสถานะจริง
+  //(01 EF 40 17) ของเราได้เนื้อชิปเก่าซ้ำ ๆ ไม่จบ
+  //
+  //การล้างท่อด้วยการอ่านทิ้งใช้ไม่ได้บนสแต็กนี้: usb_bulk_read คืนบัฟเฟอร์
+  //เดิมซ้ำไม่รู้จบ (ลอง 300000 รอบแล้วได้ 64 ไบต์เดียวกันทุกครั้ง) จึงแยก
+  //"ท่อว่าง" กับ "ของค้าง" ไม่ออกเลย เลิกใช้วิธีนั้น
+  SetLength(Buf, 256);
+  usb_control_msg(FHandle, USB_ENDPOINT_IN, USB_REQ_GET_DESCRIPTOR,
+                  (USB_DT_STRING shl 8) or 1, 1033, Buf[0], 256, 1000);
+  usb_control_msg(FHandle, USB_ENDPOINT_IN, USB_REQ_GET_DESCRIPTOR,
+                  (USB_DT_STRING shl 8) or 2, 1033, Buf[0], 256, 1000);
+end;
+
 //แพ็กเก็ตคำสั่งเปล่า ๆ หนึ่งชุดแล้วรอคำตอบหนึ่งชุด
 function TEZPHardware.Command(Cmd: word; out Reply: TBytes): boolean;
 var
@@ -355,15 +418,58 @@ begin
             BulkIn(Reply, EZP_PACKET_LEN, TIMEOUT_MS);
 end;
 
+//รหัสจากตารางชิป: CurrentICParam.ID เก็บเป็นสตริงเลขฐานสิบหกหกตัว
+function TEZPHardware.ChipIDFromTable: boolean;
+var
+  Hex: string;
+  V: longint;
+begin
+  Result := False;
+  Hex := UpperCase(Trim(main.CurrentICParam.ID));
+  if Length(Hex) <> 6 then Exit;
+  if not TryStrToInt('$' + Hex, V) then Exit;
+  FChipID[0] := byte(V shr 16);
+  FChipID[1] := byte(V shr 8);
+  FChipID[2] := byte(V);
+  FHaveID := True;
+  Result := True;
+end;
+
 //CHECK_CHIP: ยืนยันตัวเครื่อง และคายรหัส JEDEC ของชิปในซ็อกเก็ตมาให้ด้วย
 //เรียกครั้งแรกที่มีคนต้องใช้ ไม่ใช่ตอนเปิดอุปกรณ์
 function TEZPHardware.CheckChip: boolean;
 var
-  Reply, Dummy: TBytes;
+  Reply, Dummy, Pkt: TBytes;
   Code: cardinal;
+  Size, Page: cardinal;
 begin
   Result := False;
-  if not Command(EZP_CMD_CHECK_CHIP, Reply) then Exit;
+
+  //ของผู้ผลิตส่ง descriptor เต็มไปพร้อมคำสั่ง 0009 ไม่ใช่แพ็กเก็ตเปล่า
+  //(จับมาได้: 00 09 00 00 01 00 03 E8 00 80 00 00 00 EF 40 17)
+  //ตอนกด Read ID อาจยังไม่ได้เลือกชิป ช่องที่ไม่รู้ก็ปล่อยศูนย์ไว้
+  SetLength(Pkt, EZP_PACKET_LEN);
+  FillByte(Pkt[0], EZP_PACKET_LEN, 0);
+  Pkt[0] := byte(EZP_CMD_CHECK_CHIP shr 8);
+  Pkt[1] := byte(EZP_CMD_CHECK_CHIP and $FF);
+  Size := main.CurrentICParam.Size;
+  Page := main.CurrentICParam.Page;
+  if (Size > 0) and (Page > 0) then
+  begin
+    Pkt[2] := EZP_CLASS_SPI_FLASH;
+    Pkt[3] := EZP_ALGORITHM_SPI;
+    Pkt[4] := byte(Page shr 8);
+    Pkt[5] := byte(Page);
+    Pkt[6] := byte(EZP_DELAY_SPI_MS shr 8);
+    Pkt[7] := byte(EZP_DELAY_SPI_MS and $FF);
+    Pkt[8] := byte(Size shr 24);
+    Pkt[9] := byte(Size shr 16);
+    Pkt[10] := byte(Size shr 8);
+    Pkt[11] := byte(Size);
+  end;
+  Pkt[16] := FSpeed;
+  if not BulkOut(EZP_EP_CMD, Pkt) then Exit;
+  if not BulkIn(Reply, EZP_PACKET_LEN, TIMEOUT_MS) then Exit;
 
   Code := (cardinal(Reply[60]) shl 24) or (cardinal(Reply[61]) shl 16) or
           (cardinal(Reply[62]) shl 8) or cardinal(Reply[63]);
@@ -416,11 +522,27 @@ begin
     Exit;
   end;
 
-  //เฟิร์มแวร์เทียบรหัสชิปในแพ็กเก็ตกับของจริงก่อนลงมือ ทุกงานเปิด session
-  //ใหม่ (ตัวเรียกเปิด-ปิดอุปกรณ์ต่อหนึ่งงาน) รหัสที่ได้จากตอนกด Read ID
-  //จึงไม่อยู่แล้ว ถ้าส่งศูนย์ไปมันเงียบและงานล้มที่ไบต์แรก
-  if not FIdentityChecked then
-    if not CheckChip then Exit;
+  //รหัสชิปเอาจากตารางชิปที่เลือกไว้ ไม่ใช่ไปถามเครื่อง
+  //
+  //เคยเรียก CheckChip ตรงนี้เพื่อขอรหัส แล้วมันพัง: CheckChip ส่ง 0009 และ
+  //ปิดท้ายด้วย RESET (0108) การมี RESET คาอยู่ก่อน 0007 ทำให้เฟิร์มแวร์รับ
+  //ข้อมูลทั้ง 8MB แล้วทิ้งทั้งหมด ชิปไม่เปลี่ยนแม้แต่ไบต์เดียวและไม่มีอะไร
+  //แจ้งเลย ซอฟต์แวร์ของผู้ผลิตไม่ส่ง 0009 ในรอบเขียนเลย (จับ USB มาแล้ว)
+  //มันเอารหัสจากฐานข้อมูลของตัวเอง เราก็ทำแบบเดียวกัน
+  if not ChipIDFromTable then
+  begin
+    //ไม่มีรหัสในตาราง (เช่นชิปที่มาจาก SFDP) ก็ยังถามเครื่องได้ แต่ต้อง
+    //ไม่ใช่ระหว่างรอบเขียน
+    if FInWriteSession then
+    begin
+      FStrError := 'the EZP2023+ needs the chip''s JEDEC id and the ' +
+        'selected chip does not carry one: pick the part from the chip ' +
+        'list (its id comes with it) rather than an SFDP-detected entry';
+      Exit;
+    end;
+    if not FIdentityChecked then
+      if not CheckChip then Exit;
+  end;
   SetLength(Pkt, EZP_PACKET_LEN);
   FillByte(Pkt[0], EZP_PACKET_LEN, 0);
   Pkt[0] := byte(EZP_CMD_SET_CHIP_DATA shr 8);
@@ -471,6 +593,10 @@ begin
   begin
     if not BulkIn(Block, integer(BlockLen), TIMEOUT_READ_MS) then
     begin
+      //เลิกเฉย ๆ ไม่ได้: เฟิร์มแวร์จะสตรีมต่อจนจบชิป แล้วงานหน้าจะไปเจอ
+      //ข้อมูลค้างเต็มท่อ ซึ่งเป็นที่มาของบั๊กเฟสทั้งหมดที่ตามหากันมา
+      Command(EZP_CMD_RESET, Reply);
+      DrainIn(64);
       FImage := nil;
       Exit;
     end;
@@ -634,6 +760,7 @@ begin
     FStrError := 'the EZP2023+ is not open';
     Exit;
   end;
+  FInWriteSession := True;
   Size := main.CurrentICParam.Size;
   Page := main.CurrentICParam.Page;
   if cardinal(Length(Data)) <> Size then
@@ -693,6 +820,7 @@ begin
 
   //สิ่งที่อยู่บนชิปเปลี่ยนไปแล้ว ภาพที่แคชไว้ใช้ไม่ได้อีก
   ForgetImage;
+  FInWriteSession := False;
   Result := True;
 end;
 
