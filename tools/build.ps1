@@ -237,6 +237,33 @@ New-Item -ItemType Directory -Force "$out\drivers","$out\tools" | Out-Null
 Copy-Item "$root\drivers\EZP2023Plus" "$out\drivers" -Recurse
 Copy-Item "$root\tools\update_ezp_libusb1402.ps1" "$out\tools"
 
+# The bundle checksum file covers the untouched vendor/upstream payload.
+# Validate after copying so a Git checkout line-ending conversion, damaged
+# source file, or packaging mistake cannot reach a GitHub release.
+$driverRoot = "$out\drivers\EZP2023Plus"
+$driverSums = Join-Path $driverRoot "SHA256SUMS.txt"
+$driverHashCount = 0
+foreach ($line in Get-Content -LiteralPath $driverSums) {
+  if ([string]::IsNullOrWhiteSpace($line)) { continue }
+  if ($line -notmatch '^([0-9a-fA-F]{64})  (.+)$') {
+    Die "malformed EZP driver checksum line: $line"
+  }
+  $expectedHash = $Matches[1].ToUpperInvariant()
+  $relativeDriverPath = $Matches[2].Replace(
+    '/', [IO.Path]::DirectorySeparatorChar)
+  $driverFile = Join-Path $driverRoot $relativeDriverPath
+  if (-not (Test-Path -LiteralPath $driverFile -PathType Leaf)) {
+    Die "EZP driver checksum names a missing file: $relativeDriverPath"
+  }
+  $actualHash = (Get-FileHash -LiteralPath $driverFile -Algorithm SHA256).Hash
+  if ($actualHash -ne $expectedHash) {
+    Die "EZP driver checksum mismatch: $relativeDriverPath"
+  }
+  $driverHashCount++
+}
+if ($driverHashCount -eq 0) { Die "the EZP driver checksum file is empty" }
+Write-Host "    $driverHashCount EZP driver payload hashes verified"
+
 # The EZP transport uses the signed libusb-win32 1.4.0.2 runtime kept in this
 # repository. Do not replace it with the older libusb0.dll in the upstream
 # release while assembling the ZIP.
