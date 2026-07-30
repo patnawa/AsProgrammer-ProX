@@ -409,6 +409,60 @@ begin
         UsbAsp45_WaitReady(100, Status) and (Status = $80));
 end;
 
+procedure TestDataFlashGeometry;
+var
+  Geo: TAT45Geometry;
+  PowerOf2, Known: boolean;
+  PageSize: word;
+  Total: cardinal;
+  Err: string;
+begin
+  WriteLn('AT45 DataFlash geometry from the status register');
+
+  Check('density 0111 is an AT45DB041',
+        AT45GeometryFromStatus(%10011100, Geo) and
+        (Geo.Family = 'AT45DB041') and (Geo.Pages = 2048) and
+        (Geo.StdPageSize = 264) and (Geo.BinPageSize = 256));
+  Check('density 1111 is an AT45DB642, not a dead bus',
+        AT45GeometryFromStatus(%10111100, Geo) and
+        (Geo.Family = 'AT45DB642') and (Geo.Pages = 8192) and
+        (Geo.StdPageSize = 1056) and (Geo.BinPageSize = 1024));
+  Check('reserved density code is refused',
+        not AT45GeometryFromStatus(%10000100, Geo));
+
+  Fresh;
+  Mock.SetSPIReply([$AD]); //AT45DB161 ready, binary page mode
+  Check('161 in binary mode reports 512-byte pages',
+        UsbAsp45_DetectGeometry(Geo, PowerOf2, PageSize, Total, Known, Err) and
+        Known and PowerOf2 and (PageSize = 512) and
+        (Total = cardinal(4096) * 512));
+
+  Fresh;
+  Mock.SetSPIReply([$AC]); //AT45DB161 ready, standard DataFlash page mode
+  Check('161 in standard mode reports 528-byte pages',
+        UsbAsp45_DetectGeometry(Geo, PowerOf2, PageSize, Total, Known, Err) and
+        Known and (not PowerOf2) and (PageSize = 528) and
+        (Total = cardinal(4096) * 528));
+
+  Fresh;
+  Mock.SetSPIReply([$84]); //answers, but the density code is reserved
+  Check('unknown density answers but is not trusted',
+        UsbAsp45_DetectGeometry(Geo, PowerOf2, PageSize, Total, Known, Err) and
+        (not Known) and (PageSize = 0) and (Total = 0));
+
+  Fresh;
+  Mock.SetSPIReply([$FF]); //nobody driving the bus
+  Check('a dead FF bus is not a geometry',
+        (not UsbAsp45_DetectGeometry(Geo, PowerOf2, PageSize, Total,
+                                     Known, Err)) and (Err <> ''));
+
+  Fresh;
+  Mock.FailSPIReads := True;
+  Check('a failed status read is not a geometry',
+        not UsbAsp45_DetectGeometry(Geo, PowerOf2, PageSize, Total,
+                                    Known, Err));
+end;
+
 begin
   WriteLn('AsProgrammer legacy protocol hardening tests');
   WriteLn;
@@ -420,6 +474,7 @@ begin
   TestSPI25ExactTransfers;
   TestMicrowire;
   TestDataFlash;
+  TestDataFlashGeometry;
 
   WriteLn;
   if Failures = 0 then

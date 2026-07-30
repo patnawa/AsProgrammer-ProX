@@ -1,6 +1,6 @@
 unit spi45;
 
-{$mode objfpc}
+{$mode objfpc}{$H+}
 
 interface
 
@@ -24,6 +24,26 @@ function UsbAsp45_ReadEx(PageAddr: cardinal; PageSize, ByteOffset: word;
 function AT45PageSizeValid(PageSize: word): boolean;
 function AT45BuildAddress(PageAddr: cardinal; PageSize, ByteOffset: word;
   out AddrBytes: array of byte): boolean;
+
+type
+  //geometry ของตระกูล AT45 ถอดจากบิต density (5:2) ของ status register
+  TAT45Geometry = record
+    DensityCode: byte;   //บิต 5:2 ของ D7h
+    Family: string[12];  //'AT45DB161' ฯลฯ
+    Pages: cardinal;
+    StdPageSize: word;   //เพจ DataFlash มาตรฐาน (264/528/1056)
+    BinPageSize: word;   //เพจโหมด power-of-2 (256/512/1024)
+  end;
+
+function AT45GeometryFromStatus(sreg: byte; out Geo: TAT45Geometry): boolean;
+
+//อ่าน status แล้วสรุปว่าชิปตัวจริงใช้เพจขนาดเท่าไรอยู่ตอนนี้
+//คืน False = คุยกับชิปไม่ได้ (ErrMsg บอกเหตุ)
+//คืน True, Known=False = ชิปตอบแต่รหัสความจุไม่อยู่ในตาราง ตรวจต่อไม่ได้
+//คืน True, Known=True = PageSize/TotalBytes คือของจริงจากชิป
+function UsbAsp45_DetectGeometry(out Geo: TAT45Geometry; out PowerOf2: boolean;
+  out PageSize: word; out TotalBytes: cardinal;
+  out Known: boolean; out ErrMsg: string): boolean;
 
 //
 function UsbAsp45_ChipErase(): integer;
@@ -97,6 +117,68 @@ begin
   Result := True;
 end;
 
+function AT45GeometryFromStatus(sreg: byte; out Geo: TAT45Geometry): boolean;
+begin
+  Geo.DensityCode := (sreg shr 2) and $0F;
+  Geo.Family := '';
+  Geo.Pages := 0;
+  Geo.StdPageSize := 0;
+  Geo.BinPageSize := 0;
+  Result := True;
+  case Geo.DensityCode of
+    %0011: begin Geo.Family := 'AT45DB011'; Geo.Pages := 512;  Geo.StdPageSize := 264;  Geo.BinPageSize := 256;  end;
+    %0101: begin Geo.Family := 'AT45DB021'; Geo.Pages := 1024; Geo.StdPageSize := 264;  Geo.BinPageSize := 256;  end;
+    %0111: begin Geo.Family := 'AT45DB041'; Geo.Pages := 2048; Geo.StdPageSize := 264;  Geo.BinPageSize := 256;  end;
+    %1001: begin Geo.Family := 'AT45DB081'; Geo.Pages := 4096; Geo.StdPageSize := 264;  Geo.BinPageSize := 256;  end;
+    %1011: begin Geo.Family := 'AT45DB161'; Geo.Pages := 4096; Geo.StdPageSize := 528;  Geo.BinPageSize := 512;  end;
+    %1101: begin Geo.Family := 'AT45DB321'; Geo.Pages := 8192; Geo.StdPageSize := 528;  Geo.BinPageSize := 512;  end;
+    %1111: begin Geo.Family := 'AT45DB642'; Geo.Pages := 8192; Geo.StdPageSize := 1056; Geo.BinPageSize := 1024; end;
+  else
+    Result := False;
+  end;
+end;
+
+function UsbAsp45_DetectGeometry(out Geo: TAT45Geometry; out PowerOf2: boolean;
+  out PageSize: word; out TotalBytes: cardinal;
+  out Known: boolean; out ErrMsg: string): boolean;
+var
+  sreg: byte;
+begin
+  Result := False;
+  PowerOf2 := False;
+  PageSize := 0;
+  TotalBytes := 0;
+  Known := False;
+  ErrMsg := '';
+  Geo.DensityCode := 0;
+  Geo.Family := '';
+  Geo.Pages := 0;
+  Geo.StdPageSize := 0;
+  Geo.BinPageSize := 0;
+
+  if UsbAsp45_ReadSR(sreg) <> 1 then
+  begin
+    ErrMsg := 'the DataFlash status register could not be read';
+    Exit;
+  end;
+  //FF ล้วนคือบัสที่ไม่มีใครขับ: ต้องเกิด RDY+COMP+density 1111+PROTECT+
+  //binary page พร้อมกันหมดถึงจะเป็นชิปจริง ซึ่งเทียบกับคลิปหลุดแล้ว
+  //โอกาสน้อยกว่ามาก จึงตัดเป็นบัสเงียบ
+  if sreg = $FF then
+  begin
+    ErrMsg := 'the DataFlash status bus reads FF; no chip is answering';
+    Exit;
+  end;
+
+  Result := True;
+  PowerOf2 := (sreg and 1) <> 0;
+  if not AT45GeometryFromStatus(sreg, Geo) then Exit;
+
+  Known := True;
+  if PowerOf2 then PageSize := Geo.BinPageSize else PageSize := Geo.StdPageSize;
+  TotalBytes := Geo.Pages * cardinal(PageSize);
+end;
+
 //รอจนกว่าชิปจะพร้อม
 function UsbAsp45_Busy(): boolean;
 var
@@ -105,9 +187,10 @@ begin
   //อ่านสถานะไม่สำเร็จต้อง fail closed ไม่ใช่ตีความ opcode D7h ที่ค้างอยู่
   //เป็น ready เพราะบิต 7 ของ D7h ติดอยู่
   if UsbAsp45_ReadSR(sreg) <> 1 then Exit(True);
-  //FF ล้วนคือบัสที่ไม่มีใครขับ ไม่ใช่ชิปที่พร้อม: density code 1111 ไม่มีจริง
-  //บน AT45 ตัวไหนเลย ถ้าปล่อยผ่าน คลิปที่หลุดกลางงานเขียนจะ "พร้อม" ทันที
-  //ทุกหน้า แล้วงานจบแบบสำเร็จทั้งที่ชิปไม่ได้รับอะไรเลย
+  //FF ล้วนคือบัสที่ไม่มีใครขับ ไม่ใช่ชิปที่พร้อม: ชิปจริงจะอ่านได้ FF ต้องเป็น
+  //AT45DB642 (density 1111) ที่ RDY+COMP+PROTECT+binary page พร้อมกันหมด
+  //ซึ่งเทียบกับคลิปหลุดแล้วโอกาสน้อยกว่ามาก ถ้าปล่อยผ่าน คลิปที่หลุดกลางงาน
+  //เขียนจะ "พร้อม" ทันทีทุกหน้า แล้วงานจบแบบสำเร็จทั้งที่ชิปไม่ได้รับอะไรเลย
   if sreg = $FF then Exit(True);
   Result := not IsBitSet(Sreg, 7);
 end;
@@ -242,8 +325,9 @@ begin
 
   repeat
     if UsbAsp45_ReadSR(LastStatus) <> 1 then Exit(False);
-    //FF ล้วนคือบัสตาย ไม่ใช่ ready แม้บิต 7 จะติด: density code 1111 ไม่มีบน
-    //AT45 ตัวไหน spi95 ก็ตัดจบทันทีแบบเดียวกัน คืน False พร้อม LastStatus = FF
+    //FF ล้วนคือบัสตาย ไม่ใช่ ready แม้บิต 7 จะติด: ชิปจริงต้องเป็น AT45DB642
+    //ที่ทุกบิตติดพร้อมกัน ซึ่งโอกาสน้อยกว่าคลิปหลุดมาก
+    //spi95 ก็ตัดจบทันทีแบบเดียวกัน คืน False พร้อม LastStatus = FF
     //ให้ผู้เรียกรายงานว่าบัสเงียบ แทนที่จะรอครบ timeout หรือแกล้งสำเร็จ
     if LastStatus = $FF then Exit(False);
     if IsBitSet(LastStatus, 7) then Exit(True);

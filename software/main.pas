@@ -1,9 +1,5 @@
 unit main;
 
-//TODO: at45 กำหนดขนาดเพจ
-//TODO: at45 ตรวจขนาดเพจก่อนเริ่มทำงาน
-
-
 {$mode objfpc}{$H+}
 {$modeswitch nestedprocvars}
 
@@ -2196,7 +2192,8 @@ begin
       OpFail('the DataFlash status register could not be read exactly');
       Exit;
     end;
-    //FF ล้วนคือบัสที่ไม่มีใครขับ ไม่ใช่ชิปที่พร้อม (density code 1111 ไม่มีจริง)
+    //FF ล้วนคือบัสที่ไม่มีใครขับ ไม่ใช่ชิปที่พร้อม (ชิปจริงต้องเป็น AT45DB642
+    //ที่ทุกบิตติดพร้อมกัน ซึ่งโอกาสน้อยกว่าคลิปหลุดมาก)
     //ถ้าเชื่อบิต 7 ของค่านั้น คลิปที่หลุดกลางงานเขียนจะ "พร้อม" ทันทีทุกหน้า
     if Status = $FF then
     begin
@@ -2223,6 +2220,71 @@ begin
     CancelSeen := True;
   end;
   Result := not CancelSeen;
+end;
+
+//ตรวจ geometry ของ DataFlash กับชิปตัวจริงก่อนเริ่มงาน ขนาดเพจที่เลือกต้องตรง
+//กับโหมดเพจปัจจุบันของชิป (บิต 0 ของ status register) และช่วงงานต้องไม่เกิน
+//ความจุจริง ไม่งั้นทุกแอดเดรสในงานจะเพี้ยนพร้อมกันหมดโดยไม่มีอะไรฟ้อง
+//จนกว่าจะ verify ไม่ผ่าน หรือแย่กว่านั้นคือเขียนทับข้อมูลผิดตำแหน่ง
+function Check45Geometry(SelectedPageSize: cardinal; RangeBytes: QWord): boolean;
+var
+  Geo: TAT45Geometry;
+  PowerOf2, Known: boolean;
+  ChipPage: word;
+  TotalBytes: cardinal;
+  ErrMsg, ModeStr: string;
+  OtherModePage: word;
+begin
+  Result := False;
+
+  if not UsbAsp45_DetectGeometry(Geo, PowerOf2, ChipPage, TotalBytes,
+                                 Known, ErrMsg) then
+  begin
+    OpFail(ErrMsg);
+    Exit;
+  end;
+
+  if not Known then
+  begin
+    //ชิปตอบแต่รหัสความจุไม่อยู่ในตาราง AT45 ตรวจไม่ได้ก็บอกตรง ๆ แล้วทำต่อ
+    //การหยุดงานทั้งที่ชิปคุยรู้เรื่องจะขวางชิปแปลกที่ผู้ใช้ตั้งค่าเองถูกแล้ว
+    LogPrint(Format('DataFlash density code %s is not recognised; ' +
+                    'the selected page size cannot be cross-checked',
+                    [IntToBin(Geo.DensityCode, 4)]));
+    Exit(True);
+  end;
+
+  if PowerOf2 then ModeStr := 'binary (power-of-2)'
+  else ModeStr := 'standard DataFlash';
+
+  if SelectedPageSize <> ChipPage then
+  begin
+    if PowerOf2 then OtherModePage := Geo.StdPageSize
+    else OtherModePage := Geo.BinPageSize;
+    if SelectedPageSize = OtherModePage then
+      //ผู้ใช้เลือกขนาดของอีกโหมด บอกให้ชัดว่าชิปอยู่โหมดไหนและต้องตั้งเท่าไร
+      OpFail(Format('the %s is in %s page mode: its pages are %d bytes, ' +
+                    'not %d. Set the page size to %d and the chip size to %d',
+                    [Geo.Family, ModeStr, ChipPage, SelectedPageSize,
+                     ChipPage, TotalBytes]))
+    else
+      OpFail(Format('the selected %d-byte page size does not match the %s, ' +
+                    'whose pages are %d bytes in its current %s mode',
+                    [SelectedPageSize, Geo.Family, ChipPage, ModeStr]));
+    Exit;
+  end;
+
+  if RangeBytes > QWord(TotalBytes) then
+  begin
+    OpFail(Format('the requested %d bytes exceed the %s''s %d bytes ' +
+                  '(%d pages of %d)',
+                  [RangeBytes, Geo.Family, TotalBytes, Geo.Pages, ChipPage]));
+    Exit;
+  end;
+
+  LogPrint(Format('%s: %d pages of %d bytes (%s page mode)',
+                  [Geo.Family, Geo.Pages, ChipPage, ModeStr]));
+  Result := True;
 end;
 
 function WaitNotBusyMW(TimeoutMs: integer): boolean;
@@ -5302,6 +5364,10 @@ var
     Exit;
   end;
 
+  //ขนาดเพจที่เลือกต้องตรงกับโหมดจริงของชิปก่อนจะเขียนไบต์แรก
+  if not Check45Geometry(PageSize, QWord(StartAddress) + QWord(ChipSize)) then
+    Exit;
+
   PageAddress := StartAddress div PageSize;
   ProgressReset(ChipSize div PageSize);
 
@@ -5555,6 +5621,9 @@ var
     OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
+
+  //ขนาดเพจที่เลือกต้องตรงกับโหมดจริงของชิป ไม่งั้นทั้ง dump จะเลื่อนตำแหน่ง
+  if not Check45Geometry(PageSize, QWord(ChipSize)) then Exit;
 
   ChunkSize := PageSize;
   if ChunkSize > ChipSize then ChunkSize := ChipSize;
@@ -5880,6 +5949,9 @@ var
     OpFail('the chip size, the page size or the range is not usable');
     exit;
   end;
+
+  //ขนาดเพจที่เลือกต้องตรงกับโหมดจริงของชิป ไม่งั้น verify เทียบผิดตำแหน่งหมด
+  if not Check45Geometry(PageSize, QWord(ChipSize)) then Exit;
 
   ChunkSize := PageSize;
   if ChunkSize > ChipSize then ChunkSize := ChipSize;
@@ -7869,6 +7941,11 @@ var
   Info: TSFDPInfo;
   SfdpOK: boolean;
   ManufSaved: byte;
+  Geo45: TAT45Geometry;
+  P2_45, AT45Known: boolean;
+  Page45: word;
+  Total45: cardinal;
+  Err45, Mode45: string;
 begin
   OpBegin(opkDetect);
   //เริ่มตรวจใหม่ = ลืมของเก่าไว้ก่อน ถ้าตรวจไม่สำเร็จก็ต้องไม่เหลือสถานะ
@@ -7905,6 +7982,16 @@ begin
 
     //อ่าน SFDP ตอนที่ยังอยู่ในโหมดโปรแกรม เผื่อชิปไม่มีในฐานข้อมูล
     SfdpOK := SFDPDetect(Info);
+
+    //DataFlash บอกขนาดเพจกับโหมดปัจจุบันของตัวเองผ่าน status register
+    //อ่านตอนนี้ที่ยังอยู่ในโหมดโปรแกรม แล้วค่อยเอาไปเติมช่องหลังเลือกชิปเสร็จ
+    AT45Known := False;
+    if ComboSPICMD.ItemIndex = SPI_CMD_45 then
+    begin
+      if (not UsbAsp45_DetectGeometry(Geo45, P2_45, Page45, Total45,
+                                      AT45Known, Err45)) and (Err45 <> '') then
+        LogPrint(Err45);
+    end;
 
     //การเลือกชิปจากรายการจะล้างสิ่งที่รู้เกี่ยวกับชิปตัวเก่าทิ้ง
     //ซึ่งรวมถึงสิ่งที่เพิ่งอ่านมาจากชิปตัวจริงเมื่อครู่นี้ด้วย
@@ -8016,6 +8103,25 @@ begin
       end;
     finally
       Matches.Free;
+    end;
+
+    //เพจของ DataFlash เอาจากชิปตัวจริง ไม่ใช่จากตาราง: ชิปเดียวกันอาจถูกสลับ
+    //เป็นโหมด binary ถาวรไปแล้ว ซึ่งตาราง XML ไม่มีทางรู้
+    if AT45Known then
+    begin
+      if P2_45 then Mode45 := 'binary (power-of-2)'
+      else Mode45 := 'standard DataFlash';
+      LogPrint(Format('%s: %d pages of %d bytes (%s page mode), %d bytes',
+                      [Geo45.Family, Geo45.Pages, Page45, Mode45, Total45]));
+      if ComboPageSize.Text <> IntToStr(Page45) then
+      begin
+        if IsNumber(ComboPageSize.Text) then
+          LogPrint(Format('page size %s does not match the chip; set to %d',
+                          [ComboPageSize.Text, Page45]));
+        ComboPageSize.Text := IntToStr(Page45);
+      end;
+      if ComboChipSize.Text <> IntToStr(Total45) then
+        ComboChipSize.Text := IntToStr(Total45);
     end;
 
     //ใส่สิ่งที่อ่านมาจากชิปตัวจริงกลับเข้าไป การเลือกรายการอาจล้างมันไปแล้ว
