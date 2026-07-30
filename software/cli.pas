@@ -49,9 +49,10 @@ const
   );
 
   //สวิตช์ที่เป็นธงเปล่า ๆ
-  FlagSwitches: array[0..11] of string = (
+  FlagSwitches: array[0..13] of string = (
     'erase', 'detect', 'sfdp', 'help', 'force', 'json', 'verify',
-    'no-fast-read', 'smart', 'plan-only', 'nand-info', 'nand-raw'
+    'no-fast-read', 'smart', 'plan-only', 'nand-info', 'nand-raw',
+    'chip-test', 'capacity-test'
   );
 
   //The secret source is station policy, not an arbitrary caller-selected
@@ -203,6 +204,14 @@ begin
   Say('  --help');
   Say('');
   Say('  Checking:');
+  Say('  --chip-test     non-destructive health check: id stability, id');
+  Say('                  opcode cross-check, WEL command execution, SFDP');
+  Say('                  size consistency, and a fast-vs-slow clock read');
+  Say('  --capacity-test prove the chip''s real capacity (counterfeit');
+  Say('                  check). Erases and rewrites up to 13 sectors,');
+  Say('                  backed up first and restored with verification;');
+  Say('                  needs --force because a power loss mid-test');
+  Say('                  loses those sectors. Exit 1 on a remarked fake');
   Say('  --read-passes N read the chip N times and fail if the reads disagree.');
   Say('                  The only way to catch a clip that is making a bad');
   Say('                  contact: the dump looks perfectly valid otherwise');
@@ -531,7 +540,8 @@ begin
      (SwitchValue('save-chip') <> '') or
      (SwitchValue('export-chip') <> '') or
      (SwitchValue('read-passes') <> '') or
-     HasSwitch('nand-info') or (SwitchValue('nand-read') <> '') then
+     HasSwitch('nand-info') or (SwitchValue('nand-read') <> '') or
+     HasSwitch('chip-test') or HasSwitch('capacity-test') then
     Exit(Reject('authenticated production cannot be combined with read, ' +
       'write, erase, verify, force, legacy-job/log, detection, NAND, or ' +
       'offline inspection switches', EXIT_USAGE));
@@ -1250,6 +1260,33 @@ begin
   //SPI NAND เดินคนละเส้นทั้งสาย: ไม่ใช้ตารางชิป ไม่ใช้ปุ่มของหน้าต่างหลัก
   if HasSwitch('nand-info') or (SwitchValue('nand-read') <> '') then
     Exit(RunNANDCLI(Json));
+
+  if HasSwitch('chip-test') then
+  begin
+    Action := 'chip-test';
+    LogShown := MainForm.Log.Lines.Count;
+    RunChipDoctor;
+    DumpLog;
+    if Json then SayJson(Action);
+    Exit(ResultCode);
+  end;
+
+  if HasSwitch('capacity-test') then
+  begin
+    Action := 'capacity-test';
+    //เขียนจริง แม้จะสำรอง-กู้คืนให้ ก็ต้องให้คนยืนยันความตั้งใจมาในคำสั่ง
+    if not CLIForce then
+    begin
+      Say('--capacity-test really erases and rewrites up to 13 sectors ' +
+          '(backed up and restored, byte-verified). Add --force to run it');
+      Exit(EXIT_USAGE);
+    end;
+    LogShown := MainForm.Log.Lines.Count;
+    RunChipCapacityTest;
+    DumpLog;
+    if Json then SayJson(Action);
+    Exit(ResultCode);
+  end;
 
   if CurrentICParam.Size = 0 then
   begin

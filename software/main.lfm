@@ -805,6 +805,14 @@ object MainForm: TMainForm
         Caption = 'Write or erase a security register...'
         OnClick = MenuSecRegWriteClick
       end
+      object MenuChipDoctor: TMenuItem
+        Caption = 'Chip health check'
+        OnClick = MenuChipDoctorClick
+      end
+      object MenuCapacityTest: TMenuItem
+        Caption = 'True capacity test (counterfeit check)...'
+        OnClick = MenuCapacityTestClick
+      end
     end
     object MenuOptions: TMenuItem
       Caption = 'Настройки'

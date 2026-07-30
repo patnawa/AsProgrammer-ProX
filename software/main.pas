@@ -12,7 +12,7 @@ uses
   XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
   utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, serialnum, jedec, protbits,
-  opresult, prodlog, chipsave, flashops, imgcheck, ifd,
+  opresult, prodlog, chipsave, flashops, imgcheck, ifd, chiptest,
   operationmodel, norplanner, norengine, spi25noradapter, prodcrypto,
   prodevidence, eepromengine, eepromadapters,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
@@ -113,6 +113,8 @@ type
     MenuBuzzpiratCOMPort: TMenuItem;
     MenuSerprogCOMPort: TMenuItem;
     MenuHWSERPROG: TMenuItem;
+    MenuChipDoctor: TMenuItem;
+    MenuCapacityTest: TMenuItem;
     MenuSkipFF: TMenuItem;
     //ตัวเลือกที่เพิ่มมาในรุ่น 4.4
     MenuFastRead: TMenuItem;
@@ -274,6 +276,8 @@ type
     procedure MenuBuzzpiratCOMPortClick(Sender: TObject);
     procedure MenuSerprogCOMPortClick(Sender: TObject);
     procedure MenuHWSERPROGClick(Sender: TObject);
+    procedure MenuChipDoctorClick(Sender: TObject);
+    procedure MenuCapacityTestClick(Sender: TObject);
     procedure MenuHWARDUINOClick(Sender: TObject);
     procedure MenuHWBUZZPIRATClick(Sender: TObject);
     procedure MenuHWAVRISPClick(Sender: TObject);
@@ -344,6 +348,11 @@ type
   procedure SetHardwareMenuCheck(HW: THardwareList);
   procedure PollProgrammer(Announce: boolean);
   function SelectChipAny(const AName: string): boolean;
+
+  //หมอตรวจชิป (ไม่ทำลายข้อมูล) กับเครื่องพิสูจน์ความจุจริง (เขียนจริง
+  //พร้อมสำรอง-กู้คืน) ใช้ร่วมกันทั้งเมนูและโหมดบรรทัดคำสั่ง
+  procedure RunChipDoctor;
+  procedure RunChipCapacityTest;
 
   //อ่านเลขประจำตัวของชิปที่เสียบอยู่ ต้องเรียกตอนอยู่ในโหมดโปรแกรม
   //คืนสตริงว่างเมื่อชิปไม่มีเลขประจำตัว
@@ -3323,6 +3332,334 @@ end;
 function EnterProgModeSPI25: boolean;
 begin
   Result := EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+end;
+
+//---------------------------------------------------------------- chip tests
+//
+//callback ของเครื่องทดสอบใน chiptest.pas: อ่าน/ลบ/เขียนด้วย primitive ของ
+//ตระกูล 25 ตรง ๆ ตัวลบใช้ opcode ของชิปที่เลือกอยู่ (ค่าปริยาย 20h/4KB)
+
+var
+  CapEraseOpcode: byte = $20;
+
+procedure ChipTestLogSink(const Msg: string);
+begin
+  LogPrint(Msg);
+end;
+
+function CapTestRead(Address: QWord; Len: cardinal; out Data: TBytes;
+  out ErrorText: string): boolean;
+var
+  Tmp: TBytes;
+  Off: cardinal;
+  Chunk, Got: integer;
+begin
+  Result := False;
+  ErrorText := '';
+  Data := nil;
+  SetLength(Data, Len);
+  Off := 0;
+  while Off < Len do
+  begin
+    Chunk := AsProgrammer.Programmer.SPIMaxTransfer;
+    if cardinal(Chunk) > Len - Off then Chunk := integer(Len - Off);
+    Tmp := nil;
+    SetLength(Tmp, Chunk);
+    Got := UsbAsp25_Read($03, longword(Address + Off), Tmp, Chunk);
+    if Got <> Chunk then
+    begin
+      ErrorText := Format('read at 0x%.8x moved %d of %d bytes',
+                          [Address + Off, Got, Chunk]);
+      Exit;
+    end;
+    Move(Tmp[0], Data[Off], Chunk);
+    Inc(Off, cardinal(Chunk));
+    OpProcessMessages;
+  end;
+  Result := True;
+end;
+
+function CapTestErase(Address: QWord; out ErrorText: string): boolean;
+var
+  WEL: boolean;
+begin
+  Result := False;
+  ErrorText := '';
+  if not UsbAsp25_WrenChecked(WEL) then
+  begin
+    ErrorText := 'the chip did not accept write enable';
+    Exit;
+  end;
+  if UsbAsp25_EraseSector(CapEraseOpcode, longword(Address), False) < 0 then
+  begin
+    ErrorText := 'the erase command was not transferred exactly';
+    Exit;
+  end;
+  if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then
+  begin
+    ErrorText := 'the chip stayed busy after the erase';
+    Exit;
+  end;
+  Result := True;
+end;
+
+function CapTestProgram(Address: QWord; const Data: TBytes;
+  out ErrorText: string): boolean;
+var
+  WEL: boolean;
+begin
+  Result := False;
+  ErrorText := '';
+  if (Length(Data) = 0) or (Length(Data) > 256) then
+  begin
+    ErrorText := 'a program chunk must be 1..256 bytes';
+    Exit;
+  end;
+  if not UsbAsp25_WrenChecked(WEL) then
+  begin
+    ErrorText := 'the chip did not accept write enable';
+    Exit;
+  end;
+  if UsbAsp25_Write($02, longword(Address), Data, Length(Data)) <>
+     Length(Data) then
+  begin
+    ErrorText := 'the program command was not transferred exactly';
+    Exit;
+  end;
+  if not WaitNotBusy25(BUSY_TIMEOUT_PAGE) then
+  begin
+    ErrorText := 'the chip stayed busy after the page program';
+    Exit;
+  end;
+  Result := True;
+end;
+
+procedure RunChipCapacityTest;
+var
+  R: TCapacityResult;
+  ClaimedSize: QWord;
+  SectorSz: cardinal;
+begin
+  OpBegin(opkWrite);
+
+  if not (MainForm.RadioSPI.Checked and
+          (MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25)) then
+  begin
+    OpFail('the capacity test works on 25-series SPI NOR only');
+    Exit;
+  end;
+  if CurrentICParam.Size = 0 then
+  begin
+    OpFail('select a chip (or detect via SFDP) so the claimed size is known');
+    Exit;
+  end;
+  ClaimedSize := CurrentICParam.Size;
+  SectorSz := CurrentICParam.Sector;
+  if SectorSz = 0 then SectorSz := 4096;
+  CapEraseOpcode := CurrentICParam.SectorOpcode;
+  if CapEraseOpcode = 0 then
+    case SectorSz of
+      4096:  CapEraseOpcode := $20;
+      32768: CapEraseOpcode := $52;
+      65536: CapEraseOpcode := $D8;
+    else
+      CapEraseOpcode := $20;
+    end;
+
+  if not OpenDevice then
+  begin
+    OpFail('the programmer could not be opened');
+    Exit;
+  end;
+  try
+    if not EnterProgModeSPI25 then
+    begin
+      OpFail('the programmer could not initialize the SPI bus');
+      Exit;
+    end;
+    if not ContactIsStable then Exit;
+    //ชิปที่ล็อกอยู่รับคำสั่งลบแล้วเมินเงียบ ๆ ผลจะออกมาเป็น "เก็บข้อมูล
+    //ไม่อยู่" ทั้งที่ความจริงคือยังไม่ได้ปลดล็อก กันไว้ก่อนตรงนี้
+    if not ProtectionGuardOK(0, cardinal(ClaimedSize)) then Exit;
+
+    LogPrint(Format('True capacity test: claimed %d KB, %d KB sectors ' +
+                    '(opcode %.2xh)',
+                    [ClaimedSize div 1024, SectorSz div 1024,
+                     CapEraseOpcode]));
+    if RunCapacityTest(ClaimedSize, SectorSz, @CapTestRead, @CapTestErase,
+                       @CapTestProgram, @ChipTestLogSink, R) then
+    begin
+      if R.Genuine then
+        LogPrint(Format('PASS: the chip really holds %d KB; the original ' +
+                        'content was restored and verified',
+                        [R.DetectedSize div 1024]))
+      else
+        OpFail(Format('FAKE: the chip claims %d KB but its addresses wrap ' +
+                      'at %d KB -- that is the real capacity. The original ' +
+                      'content of the real die was restored and verified',
+                      [ClaimedSize div 1024, R.DetectedSize div 1024]));
+    end
+    else
+    begin
+      OpFail(R.ErrorText);
+      if not R.RestoredOK then
+        LogPrint('WARNING: not every touched sector could be restored; ' +
+                 'the sectors named above may hold FF or marker data');
+    end;
+  finally
+    ExitProgMode25;
+    AsProgrammer.Programmer.DevClose;
+  end;
+end;
+
+procedure RunChipDoctor;
+var
+  ID: MEMORY_ID;
+  Detail: string;
+  WEL, ok, SavedContact: boolean;
+  sreg: byte;
+  Passed, Total: integer;
+  Info: TSFDPInfo;
+  Ladder: array[0..9] of TMenuItem;
+  LCount: integer;
+  BufA, BufB: TBytes;
+  N: cardinal;
+  Err: string;
+  i: integer;
+
+  procedure Verdict(const Name: string; Passed_: boolean;
+    const FailDetail: string);
+  begin
+    Inc(Total);
+    if Passed_ then
+    begin
+      Inc(Passed);
+      LogPrint('  [PASS] ' + Name);
+    end
+    else
+    begin
+      LogPrint('  [FAIL] ' + Name + ': ' + FailDetail);
+      OpFail(Name + ': ' + FailDetail);
+    end;
+  end;
+
+begin
+  OpBegin(opkDetect);
+  Passed := 0;
+  Total := 0;
+
+  if not (MainForm.RadioSPI.Checked and
+          (MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25)) then
+  begin
+    OpFail('the chip health check works on 25-series SPI NOR only');
+    Exit;
+  end;
+  if not OpenDevice then
+  begin
+    OpFail('the programmer could not be opened');
+    Exit;
+  end;
+  try
+    if not EnterProgModeSPI25 then
+    begin
+      OpFail('the programmer could not initialize the SPI bus');
+      Exit;
+    end;
+
+    LogPrint('Chip health check (nothing is written)');
+
+    //1 ความนิ่งของรหัส: อ่านแปดครั้งต้องได้ค่าเดิม บังคับเปิดการตรวจ
+    //ชั่วคราวแม้ผู้ใช้ปิดเมนูไว้ เพราะทั้งงานนี้คือการตรวจนั่นเอง
+    SavedContact := MainForm.MenuCheckContact.Checked;
+    MainForm.MenuCheckContact.Checked := True;
+    ok := ContactIsStable;
+    MainForm.MenuCheckContact.Checked := SavedContact;
+    Verdict('id stable over eight reads', ok,
+            'the id changed between reads; reseat the clip');
+    if not ok then Exit; //บัสที่สั่นอ่านต่อไปก็ได้แต่คำตอบที่เชื่อไม่ได้
+
+    //2 รหัสจากโอปโค้ดต่างยุคต้องเล่าเรื่องเดียวกัน
+    FillChar(ID, SizeOf(ID), 0);
+    UsbAsp25_ReadID(ID);
+    ok := CrossCheckIDs(ID.ID9FH, ID.Got9F, ID.ID90H, ID.Got90,
+                        ID.IDABH, ID.GotAB, ID.ID15H, ID.Got15, Detail);
+    Verdict('id opcodes agree (9F/90/AB/15)', ok, Detail);
+
+    //3 WEL ต้องติดตาม WREN และดับตาม WRDI: พิสูจน์ว่าชิปทำตามคำสั่ง
+    //ไม่ใช่แค่ตอบรหัสได้ ไม่มีการเขียนใด ๆ เกิดขึ้น
+    ok := UsbAsp25_WrenChecked(WEL) and WEL;
+    if ok then
+    begin
+      UsbAsp25_Wrdi();
+      ok := (UsbAsp25_ReadSR(sreg) = 1) and ((sreg and $02) = 0);
+    end;
+    Verdict('write-enable latch sets and clears on command', ok,
+            'WEL did not follow WREN/WRDI; WP# may be held low, or the ' +
+            'chip does not execute commands');
+
+    //4 SFDP: มี/ไม่มีไม่ใช่ผิด แต่ถ้ามีแล้วขนาดไม่ตรงกับชิปที่เลือก
+    //แปลว่าเลือกผิดเบอร์หรือชิปโกหก
+    if SFDPDetect(Info) and Info.Valid then
+    begin
+      if (CurrentICParam.Size > 0) and (Info.Density > 0) and
+         (QWord(Info.Density) <> QWord(CurrentICParam.Size)) then
+        Verdict('SFDP size matches the selected chip', False,
+                Format('the chip''s own SFDP declares %d KB but the ' +
+                       'selected chip says %d KB',
+                       [Info.Density div 1024, CurrentICParam.Size div 1024]))
+      else
+        Verdict('SFDP present and consistent', True, '');
+    end
+    else
+      LogPrint('  [    ] no SFDP table (normal for older parts); size ' +
+               'cross-check skipped');
+
+    //5 อ่านช่วงต้นชิปที่คล็อกเร็วสุดและช้าสุดแล้วเทียบ ต่างกันเมื่อไร
+    //คือหน้าสัมผัสหรือสายที่ชายขอบ ไม่ใช่ข้อมูล
+    for i := 0 to High(Ladder) do Ladder[i] := nil;
+    LCount := SPISpeedMenuLadder(Ladder);
+    if LCount >= 2 then
+    begin
+      N := 262144;
+      if (CurrentICParam.Size > 0) and (CurrentICParam.Size < N) then
+        N := CurrentICParam.Size;
+      ok := EnterProgMode25(Ladder[0].Tag, MainForm.MenuSendAB.Checked) and
+            CapTestRead(0, N, BufA, Err) and
+            EnterProgMode25(Ladder[LCount - 1].Tag,
+                            MainForm.MenuSendAB.Checked) and
+            CapTestRead(0, N, BufB, Err);
+      EnterProgModeSPI25; //กลับไปที่ความเร็วที่ผู้ใช้เลือกเสมอ
+      if ok then
+      begin
+        ok := True;
+        for i := 0 to integer(N) - 1 do
+          if BufA[i] <> BufB[i] then
+          begin
+            ok := False;
+            Break;
+          end;
+        Verdict(Format('same %d KB at %s and %s', [N div 1024,
+                Trim(StringReplace(Ladder[0].Caption, '&', '', [rfReplaceAll])),
+                Trim(StringReplace(Ladder[LCount - 1].Caption, '&', '',
+                     [rfReplaceAll]))]), ok,
+                'the fast and slow reads disagree; the contact or wiring ' +
+                'is marginal at speed');
+      end
+      else
+        Verdict('dual-clock read', False, Err);
+    end
+    else
+      LogPrint('  [    ] this programmer has one fixed clock; dual-clock ' +
+               'read skipped');
+
+    LogPrint(Format('%d of %d checks passed', [Passed, Total]));
+    if Passed = Total then
+      LogPrint('the chip looks healthy. For the capacity/counterfeit ' +
+               'test, run Chip -> True capacity test');
+  finally
+    ExitProgMode25;
+    AsProgrammer.Programmer.DevClose;
+  end;
 end;
 
 //ดัมป์ตาราง SFDP ดิบ ๆ ลงไฟล์
@@ -7096,6 +7433,24 @@ end;
 procedure TMainForm.MenuHWSERPROGClick(Sender: TObject);
 begin
   SelectHW(CHW_SERPROG);
+end;
+
+procedure TMainForm.MenuChipDoctorClick(Sender: TObject);
+begin
+  RunChipDoctor;
+end;
+
+procedure TMainForm.MenuCapacityTestClick(Sender: TObject);
+begin
+  //เขียนจริง (สำรองและกู้คืนให้) แต่ไฟดับกลางคันคือข้อมูลบางเซกเตอร์หาย
+  //ให้ผู้ใช้ตัดสินใจเองก่อนเสมอ
+  if MessageDlg('True capacity test',
+       'This test really erases and rewrites up to 13 sectors (they are ' +
+       'backed up first and restored afterwards, byte-verified). ' +
+       'If power is lost mid-test, those sectors are lost. ' + LineEnding +
+       LineEnding + 'Run the test?',
+       mtWarning, [mbYes, mbNo], 0) <> mrYes then Exit;
+  RunChipCapacityTest;
 end;
 
 procedure TMainForm.MenuItemBenchmarkClick(Sender: TObject);

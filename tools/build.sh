@@ -120,6 +120,11 @@ run_suite nandengine_tests "$nand_engine" \
   software/nandmodel.pas software/nandplanner.pas \
   software/nandengine.pas software/nandcatalog.pas
 
+# The capacity/counterfeit test engine against fake chips of every stripe.
+chip_test="$tmp/chiptest"
+run_suite chiptest_tests "$chip_test" \
+  tests/chiptest_tests.lpr software/chiptest.pas
+
 # CH347 bulk-protocol packet layout: byte-exact, platform-free.
 ch347="$tmp/ch347proto"
 run_suite ch347proto_tests "$ch347" \

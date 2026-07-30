@@ -154,6 +154,12 @@ Run-Suite "nandengine_tests" $nandEngineDir @(
   "$root\software\nandmodel.pas", "$root\software\nandplanner.pas",
   "$root\software\nandengine.pas", "$root\software\nandcatalog.pas")
 
+# The capacity/counterfeit test engine against fake chips of every stripe;
+# the invariant is that original content is always restored and verified.
+$chipTestDir = Join-Path $env:TEMP "aspx-tests-chiptest"
+Run-Suite "chiptest_tests" $chipTestDir @(
+  "$root\tests\chiptest_tests.lpr", "$root\software\chiptest.pas")
+
 # CH347 bulk-protocol packet layout: the bytes three projects had to
 # reverse engineer, pinned so they can never drift.
 $ch347Dir = Join-Path $env:TEMP "aspx-tests-ch347proto"
