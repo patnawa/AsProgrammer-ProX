@@ -6,7 +6,7 @@
 
 Sector-level erase · SFDP auto-detect · checksums · responsive UI
 
-![version](https://img.shields.io/badge/version-4.14-2BB3F3?style=flat-square)
+![version](https://img.shields.io/badge/version-4.17-2BB3F3?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
 ![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
@@ -34,6 +34,7 @@ programmers, while staying free and open source.
 | **Read twice and compare** | A SOIC clip with one marginal contact returns a dump that is the right size, reads every byte, raises nothing, and is wrong. Reading the chip twice and diffing is the only thing that catches it. When the passes disagree, the SPI clock steps down the programmer's own speed menu and both passes are reread — a marginal contact is usually fine one step slower — and the dump is refused only when the slowest clock still disagrees. One that stabilised below the selected clock says so, naming the speed that worked. |
 | **Intel flash descriptor regions** | A dump holding an Intel descriptor logs its region map — where the BIOS starts, where the ME ends, and whether a region runs off the end of the image (the signature of a too-small chip selection). On the command line, `--region bios` reads, writes or verifies just that region; with `--smart` it reflashes a BIOS without touching the ME. |
 | **SPI NAND (read, CLI)** | `--nand-info` identifies the chip and scans the factory bad-block markers; `--nand-read` dumps every good block in order with the chip's own ECC verdict checked after every page — an uncorrectable page fails the dump by block and page instead of returning plausible garbage. W25N512GV/01GV/02KV, GD5F1GQ4UA/UB, MX35LF1GE4AB, TC58CVG0S3. Erase/write land after live hardware validation. |
+| **Chip health checks** | A non-destructive *chip doctor* (id stability, id opcode cross-check, WREN/WRDI execution proof, SFDP size consistency, fast-vs-slow clock read). A *true capacity test* that catches remarked fakes the way h2testw catches fake USB sticks — markers at power-of-two boundaries, with every touched sector backed up, restored and byte-verified. A destructive *surface scan* (badblocks for SPI NOR): erase/55/AA/address-stamp per block with a bad-block map. Erase jobs warn when blocks erase five times slower than the median — flash slows down before it fails. |
 | **AT45 geometry from the chip** | A DataFlash declares its family, capacity and page mode in its status register, so the selected page size is checked against the real chip before every operation — a 161 in power-of-2 mode has 512-byte pages, and driving it as 528 would shift every address in the job. Read ID fills both size fields from the chip itself. |
 | **The connection is checked before anything is touched** | The JEDEC id is read eight times before every read, write and erase. If it is not identical every time, the job stops before a single byte moves. |
 | **Write enable is confirmed, not assumed** | `WREN` is followed by a status register read to confirm `WEL` actually latched. A chip with `WP#` held low accepts `WREN`, ignores it, and then silently ignores everything after it. That used to surface as "verify failed at every address" after the whole write; now it is *"the chip did not accept write enable"* before the first page. |
@@ -488,6 +489,41 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 ---
 
 ## Changelog
+
+### 4.17.0.0 — surface scan: badblocks for SPI NOR
+
+Per block: erase and confirm blank, program 55h and confirm, AAh and
+confirm, then a pattern where every dword holds its own address — the one
+pattern a broken address line cannot survive — and erase again. Bad blocks
+are mapped rather than aborting at the first one; the chip ends fully
+erased and both UIs say so loudly before starting (`--surface-scan` needs
+`--force`). First-round erase timings feed the wear detector.
+
+### 4.16.0.0 — wear telemetry, and a verify that cannot be echoed
+
+Erase jobs now keep the per-block durations the BUSY polls already
+produced: blocks erasing five times slower than the median get a wear
+warning naming the worst offender, because flash slows down before it
+fails. NAND dumps report corrected-ECC counts per block — a cluster in one
+block is a block dying, not noise. And the verify pass reads the array,
+not the device's recent memory: a JEDEC 66h/99h reset precedes the final
+compare, and chunks are checked in deterministically shuffled order, which
+a device echoing recently transferred data cannot pass.
+
+### 4.15.0.0 — the counterfeit test and the chip doctor
+
+The commonest bad chip is remarked, not broken: a 4 MB die sold as a
+W25Q128 that wraps every address above its real size and verifies every
+write through the same wrap. The capacity test writes distinct markers at
+every power-of-two boundary and looks where they landed — the first
+address holding somebody else's marker is the real capacity. Every sector
+the test can touch is backed up first, restored afterwards, byte-verified;
+a chip that simply loses markers is reported as failing writes, not fake.
+Chip menu or `--capacity-test --force`; a detected fake exits 1. The chip
+doctor (`--chip-test`) is the non-destructive sibling: id stability, the
+9F/90/AB/15 opcodes telling one story, WREN/WRDI as proof the chip
+executes commands, SFDP-vs-selected size, and the same quarter megabyte
+read at the fastest and slowest clock.
 
 ### 4.14.0.0 — serprog: every DIY programmer at once
 
