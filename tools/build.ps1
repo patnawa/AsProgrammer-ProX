@@ -153,6 +153,12 @@ Run-Suite "nandengine_tests" $nandEngineDir @(
   "$root\software\nandmodel.pas", "$root\software\nandplanner.pas",
   "$root\software\nandengine.pas", "$root\software\nandcatalog.pas")
 
+# CH347 bulk-protocol packet layout: the bytes three projects had to
+# reverse engineer, pinned so they can never drift.
+$ch347Dir = Join-Path $env:TEMP "aspx-tests-ch347proto"
+Run-Suite "ch347proto_tests" $ch347Dir @(
+  "$root\tests\ch347proto_tests.lpr", "$root\software\ch347proto.pas")
+
 # Real TBaseHardware-to-NOR-service adapter framing, identity gates, exact
 # transfer counts, four-byte strategies, and exactly-once cleanup.
 $adapterDir = Join-Path $env:TEMP "aspx-tests-spi25-adapter"

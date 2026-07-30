@@ -120,6 +120,22 @@ run_suite nandengine_tests "$nand_engine" \
   software/nandmodel.pas software/nandplanner.pas \
   software/nandengine.pas software/nandcatalog.pas
 
+# CH347 bulk-protocol packet layout: byte-exact, platform-free.
+ch347="$tmp/ch347proto"
+run_suite ch347proto_tests "$ch347" \
+  tests/ch347proto_tests.lpr software/ch347proto.pas
+
+# The libusb transport and its smoke tool only make sense on a machine with
+# libusb, so this is a compile check: the smoke run itself needs a CH347
+# plugged into this box (see docs/design-cross-platform.md).
+step "compiling the CH347 libusb backend and smoke tool"
+smoke="$tmp/ch347smoke"
+rm -rf "$smoke" && mkdir -p "$smoke"
+cp tools/ch347smoke.lpr software/ch347proto.pas software/ch347usb.pas \
+   software/basehw.pas software/electricalpreflight.pas "$smoke/"
+(cd "$smoke" && fpc -Mobjfpc -Sh ch347smoke.lpr >/dev/null) \
+  || die "the CH347 smoke tool did not compile"
+
 adapter="$tmp/spi25-adapter"
 run_suite spi25noradapter_tests "$adapter" \
   tests/adapter/spi25noradapter_tests.lpr \
