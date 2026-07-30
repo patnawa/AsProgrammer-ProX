@@ -180,7 +180,9 @@ begin
   Say('');
   Say('  --chip NAME     pick a chip from the chip list');
   Say('  --sfdp          take the chip parameters from SFDP instead of the list');
-  Say('  --hw NAME       ch341, ch347, ft232h, usbasp, avrisp, arduino, buzzpirat');
+  Say('  --hw NAME       ch341, ch347, ft232h, usbasp, avrisp, arduino,');
+  Say('                  buzzpirat, serprog (Pico/STM32/ESP32 flashrom-style');
+  Say('                  serial programmers; set the port in the GUI once)');
   Say('  --erase         erase before writing');
   Say('  --smart         SPI NOR transactional differential write: two-pass');
   Say('                  backup, neighbour preservation and full-block verify');
@@ -256,6 +258,7 @@ begin
   else if SameText(S, 'avrisp') then HW := CHW_AVRISP
   else if SameText(S, 'arduino') then HW := CHW_ARDUINO
   else if SameText(S, 'buzzpirat') then HW := CHW_BUZZPIRAT
+  else if SameText(S, 'serprog') then HW := CHW_SERPROG
   else
   begin
     HW := CHW_NONE;

@@ -71,6 +71,7 @@ programmers, while staying free and open source.
 | **Buzzpirat / Bus Pirate** | ● | ● | | Slow but flexible; open-drain and pull-ups for 1.8 V parts. |
 | **AVRISP (LUFA)** | ● | | | |
 | **Arduino** | ● | | | |
+| **serprog** | ● | | | Any board speaking flashrom's serial protocol: Raspberry Pi Pico (pico-serprog), STM32, ESP32, frser-duino. Set the COM port under *Settings*. |
 
 Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-series I²C EEPROM,
 93-series MicroWire EEPROM, KB9012 EC.

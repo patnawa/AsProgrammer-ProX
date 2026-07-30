@@ -1109,6 +1109,10 @@ object MainForm: TMainForm
         Caption = 'Arduino COMPort:'
         OnClick = MenuArduinoCOMPortClick
       end
+      object MenuSerprogCOMPort: TMenuItem
+        Caption = 'Serprog COMPort:'
+        OnClick = MenuSerprogCOMPortClick
+      end
     end
     object MenuItemHardware: TMenuItem
 	  Caption = 'Программатор'
@@ -1154,6 +1158,12 @@ object MainForm: TMainForm
         Caption = 'FT232H'
         RadioItem = True
         OnClick = MenuHWFT232HClick
+      end
+      object MenuHWSERPROG: TMenuItem
+        AutoCheck = True
+        Caption = 'serprog (Pico / STM32 / ESP32 / frser-duino)'
+        RadioItem = True
+        OnClick = MenuHWSERPROGClick
       end
     end
     object ScriptsMenuItem: TMenuItem

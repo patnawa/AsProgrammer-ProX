@@ -16,7 +16,8 @@ uses
   operationmodel, norplanner, norengine, spi25noradapter, prodcrypto,
   prodevidence, eepromengine, eepromadapters,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
-  baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
+  baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw,
+  serproghw;
 
 type
 
@@ -110,6 +111,8 @@ type
     MenuArduinoISP1MHz: TMenuItem;
     MenuArduinoCOMPort: TMenuItem;
     MenuBuzzpiratCOMPort: TMenuItem;
+    MenuSerprogCOMPort: TMenuItem;
+    MenuHWSERPROG: TMenuItem;
     MenuSkipFF: TMenuItem;
     //ตัวเลือกที่เพิ่มมาในรุ่น 4.4
     MenuFastRead: TMenuItem;
@@ -269,6 +272,8 @@ type
     procedure ComboItem1Click(Sender: TObject);
     procedure MenuArduinoCOMPortClick(Sender: TObject);
     procedure MenuBuzzpiratCOMPortClick(Sender: TObject);
+    procedure MenuSerprogCOMPortClick(Sender: TObject);
+    procedure MenuHWSERPROGClick(Sender: TObject);
     procedure MenuHWARDUINOClick(Sender: TObject);
     procedure MenuHWBUZZPIRATClick(Sender: TObject);
     procedure MenuHWAVRISPClick(Sender: TObject);
@@ -430,6 +435,9 @@ var
   Arduino_COMPort: string;
   Arduino_BaudRate: integer = 1000000;
   Buzzpirat_COMPort: string;
+  //serprog วิ่งบน USB-CDC เป็นหลัก ค่า baud จึงเป็นพิธี แต่ UART จริงก็มี
+  Serprog_COMPort: string;
+  Serprog_BaudRate: integer = 115200;
 
   //สถานะที่วาดเป็นไฟบอกสถานะในแผงด้านซ้าย
   ProgrammerPresent: boolean = False;
@@ -6661,7 +6669,8 @@ begin
   //เมนู Buzzpirat กับรายการพอร์ต COM ใช้เฉพาะกับเครื่องที่คุยผ่านพอร์ตอนุกรม
   //ถ้าใช้ CH341/CH347/FT232H อยู่ก็ไม่ต้องมีให้เกะกะ
   MainForm.MenuBuzzpirat.Visible := programmer = CHW_BUZZPIRAT;
-  MainForm.ListcomportsMenuItem.Visible := programmer in [CHW_BUZZPIRAT, CHW_ARDUINO];
+  MainForm.ListcomportsMenuItem.Visible :=
+    programmer in [CHW_BUZZPIRAT, CHW_ARDUINO, CHW_SERPROG];
 
   if programmer = CHW_USBASP then
   begin
@@ -6716,6 +6725,18 @@ begin
     MainForm.MenuFT232SPIClock.Visible:= false;
     MainForm.MenuMicrowire.Enabled:= false;
     AsProgrammer.Current_HW := CHW_ARDUINO;
+  end;
+
+  if programmer = CHW_SERPROG then
+  begin
+    //ความถี่อยู่ในมือเฟิร์มแวร์ของบอร์ด ไม่มีเมนูให้เลือกฝั่งนี้
+    MainForm.MenuSPIClock.Visible:= false;
+    MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuAVRISPSPIClock.Visible:= false;
+    MainForm.MenuArduinoSPIClock.Visible:= false;
+    MainForm.MenuFT232SPIClock.Visible:= false;
+    MainForm.MenuMicrowire.Enabled:= false;
+    AsProgrammer.Current_HW := CHW_SERPROG;
   end;
 
   if programmer = CHW_BUZZPIRAT then
@@ -6780,6 +6801,7 @@ begin
   MainForm.MenuHWARDUINO.Checked   := HW = CHW_ARDUINO;
   MainForm.MenuHWBUZZPIRAT.Checked := HW = CHW_BUZZPIRAT;
   MainForm.MenuHWFT232H.Checked    := HW = CHW_FT232H;
+  MainForm.MenuHWSERPROG.Checked   := HW = CHW_SERPROG;
 end;
 
 //เช็คว่ามีเครื่องโปรแกรมต่ออยู่ไหม ถ้าตัวที่เลือกไว้หายไปและเปิดโหมดค้นหาอัตโนมัติ
@@ -6794,7 +6816,7 @@ begin
   Was := ProgrammerPresent;
 
   //อุปกรณ์ที่ใช้พอร์ตอนุกรมไม่เอามาวนเช็ค เพราะจะไปจับพอร์ตทิ้งขว้างตลอดเวลา
-  if AsProgrammer.Current_HW in [CHW_ARDUINO, CHW_BUZZPIRAT] then
+  if AsProgrammer.Current_HW in [CHW_ARDUINO, CHW_BUZZPIRAT, CHW_SERPROG] then
   begin
     ProgrammerPresent := True;
     MainForm.ChipView.Invalidate;
@@ -6987,6 +7009,12 @@ begin
   MainForm.MenuArduinoCOMPort.Caption := 'Arduino COMPort: '+Arduino_COMPort;
 end;
 
+procedure TMainForm.MenuSerprogCOMPortClick(Sender: TObject);
+begin
+  Serprog_COMPort := InputBox('Serprog COMPort','',Serprog_COMPort);
+  MainForm.MenuSerprogCOMPort.Caption := 'Serprog COMPort: '+Serprog_COMPort;
+end;
+
 procedure TMainForm.MenuBuzzpiratCOMPortClick(Sender: TObject);
 begin
   Buzzpirat_COMPort := InputBox('Buzzpirat / Buspirate COMPort','',Buzzpirat_COMPort);
@@ -7063,6 +7091,11 @@ end;
 procedure TMainForm.MenuHWBUZZPIRATClick(Sender: TObject);
 begin
   SelectHW(CHW_BUZZPIRAT);
+end;
+
+procedure TMainForm.MenuHWSERPROGClick(Sender: TObject);
+begin
+  SelectHW(CHW_SERPROG);
 end;
 
 procedure TMainForm.MenuItemBenchmarkClick(Sender: TObject);
@@ -9816,6 +9849,7 @@ begin
   AsProgrammer.AddHW(TBuzzpiratHardware.Create);
   AsProgrammer.AddHW(TFT232HHardware.Create);
   AsProgrammer.AddHW(TCH347Hardware.Create);
+  AsProgrammer.AddHW(TSerprogHardware.Create);
 
   SelectHW(CHW_BUZZPIRAT); // ทางลัดแบบหยาบ ๆ ของ dreg
 
@@ -11977,6 +12011,8 @@ begin
       TDOMElement(ParentNode).SetAttribute('hw', 'buzzpirat');
     if MainForm.MenuHWFT232H.Checked then
       TDOMElement(ParentNode).SetAttribute('hw', 'ft232h');
+    if MainForm.MenuHWSERPROG.Checked then
+      TDOMElement(ParentNode).SetAttribute('hw', 'serprog');
 
     //เลขรันนิ่งและการผลิตเป็นชุด
     TDOMElement(ParentNode).SetAttribute('sn_enabled', BoolToStr(ProdSettings.SNEnabled, '1', '0'));
@@ -12007,6 +12043,8 @@ begin
 
     TDOMElement(ParentNode).SetAttribute('arduino_comport', Arduino_COMPort);
     TDOMElement(ParentNode).SetAttribute('arduino_baudrate', IntToStr(Arduino_BaudRate));
+    TDOMElement(ParentNode).SetAttribute('serprog_comport', Serprog_COMPort);
+    TDOMElement(ParentNode).SetAttribute('serprog_baudrate', IntToStr(Serprog_BaudRate));
 
     Node.Appendchild(parentNode);
 
@@ -12246,6 +12284,12 @@ begin
           SelectHW(CHW_FT232H);
         end;
 
+        if OptVal = 'serprog' then
+        begin
+          MainForm.MenuHWSERPROG.Checked := true;
+          SelectHW(CHW_SERPROG);
+        end;
+
 
       end;
 
@@ -12255,6 +12299,19 @@ begin
 
         Arduino_COMPort := OptVal;
         MainForm.MenuArduinoCOMPort.Caption := 'Arduino COMPort: '+ Arduino_COMPort;
+      end;
+
+      if  Node.Attributes.GetNamedItem('serprog_comport') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('serprog_comport').NodeValue);
+        Serprog_COMPort := OptVal;
+        MainForm.MenuSerprogCOMPort.Caption := 'Serprog COMPort: '+ Serprog_COMPort;
+      end;
+
+      if  Node.Attributes.GetNamedItem('serprog_baudrate') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('serprog_baudrate').NodeValue);
+        Serprog_BaudRate := StrToIntDef(OptVal, 115200);
       end;
 
       if  Node.Attributes.GetNamedItem('arduino_baudrate') <> nil then
