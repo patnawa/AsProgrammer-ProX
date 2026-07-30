@@ -40,6 +40,7 @@ var
   EraseCalls, ProgramCalls, ReadCalls: integer;
   FailEraseAt: QWord = High(QWord);   //ลบที่แอดเดรสนี้ (หลัง alias) ให้ล้ม
   DropWritesAbove: QWord = High(QWord); //การเขียนที่แอดเดรสจริง >= นี้หายเงียบ
+  StuckZeroAddr: QWord = High(QWord);   //ไบต์ที่บิต 0 ค้างศูนย์หลังลบ
 
 procedure FakeReset(ARealSize: QWord);
 var
@@ -55,6 +56,7 @@ begin
   ReadCalls := 0;
   FailEraseAt := High(QWord);
   DropWritesAbove := High(QWord);
+  StuckZeroAddr := High(QWord);
 end;
 
 function FakeRead(Address: QWord; Len: cardinal; out Data: TBytes;
@@ -85,6 +87,9 @@ begin
     Exit(False);
   end;
   for i := 0 to SECTOR - 1 do FakeMem[Phys + i] := $FF;
+  //เซลล์ที่บิตค้างศูนย์: ลบยังไงก็อ่านได้ FE ไม่ใช่ FF
+  if (StuckZeroAddr >= Phys) and (StuckZeroAddr < Phys + SECTOR) then
+    FakeMem[StuckZeroAddr] := $FE;
   Result := True;
 end;
 
@@ -231,6 +236,63 @@ begin
   Check('the reason is addressing', Pos('4-byte', R.ErrorText) > 0);
 end;
 
+var
+  StopAfterBlocks: integer = -1; //-1 = ไม่หยุด
+
+function SurfaceStop: boolean;
+begin
+  Result := StopAfterBlocks = 0;
+  if StopAfterBlocks > 0 then Dec(StopAfterBlocks);
+end;
+
+procedure TestSurfaceScan;
+var
+  R: TSurfaceScanResult;
+  i: SizeInt;
+  AllFF: boolean;
+begin
+  WriteLn('Surface scan: pattern walk per block');
+  FakeReset(64 * 1024);
+  StopAfterBlocks := -1;
+  Check('a clean chip scans clean',
+        RunSurfaceScan(64 * 1024, SECTOR, @FakeRead, @FakeErase,
+                       @FakeProgram, @QuietLog, nil, @SurfaceStop, R) and
+        R.Completed and (R.BlocksTested = 16) and (R.BlocksBad = 0));
+  AllFF := True;
+  for i := 0 to High(FakeMem) do
+    if FakeMem[i] <> $FF then AllFF := False;
+  Check('the chip is left fully erased', AllFF);
+
+  FakeReset(64 * 1024);
+  StuckZeroAddr := 5 * SECTOR + 123; //บิตค้างศูนย์กลางบล็อกที่ห้า
+  Check('a stuck bit does not stop the scan',
+        RunSurfaceScan(64 * 1024, SECTOR, @FakeRead, @FakeErase,
+                       @FakeProgram, @QuietLog, nil, @SurfaceStop, R) and
+        R.Completed);
+  Check('exactly one block is bad and it is named',
+        (R.BlocksBad = 1) and R.HasFirstBad and
+        (R.FirstBadAddr = 5 * SECTOR));
+  Check('the other blocks still passed', R.BlocksTested = 16);
+
+  FakeReset(64 * 1024);
+  StopAfterBlocks := 3;
+  Check('cancellation stops at a block boundary',
+        not RunSurfaceScan(64 * 1024, SECTOR, @FakeRead, @FakeErase,
+                           @FakeProgram, @QuietLog, nil, @SurfaceStop, R));
+  Check('the run says cancelled after three blocks',
+        R.Cancelled and (R.BlocksTested = 3));
+  StopAfterBlocks := -1;
+
+  FakeReset(64 * 1024);
+  FailEraseAt := 2 * SECTOR;
+  Check('a transport-level failure aborts the whole scan',
+        not RunSurfaceScan(64 * 1024, SECTOR, @FakeRead, @FakeErase,
+                           @FakeProgram, @QuietLog, nil, @SurfaceStop, R));
+  Check('and is not blamed on the chip surface',
+        (not R.Completed) and (R.BlocksBad = 0) and
+        (Pos('erase at', R.ErrorText) > 0));
+end;
+
 procedure TestTiming;
 var
   Median, Worst: cardinal;
@@ -285,6 +347,7 @@ begin
   TestFailingWrites;
   TestEraseDiesMidway;
   TestRefusals;
+  TestSurfaceScan;
   TestTiming;
   TestCrossCheck;
 

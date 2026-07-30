@@ -115,6 +115,7 @@ type
     MenuHWSERPROG: TMenuItem;
     MenuChipDoctor: TMenuItem;
     MenuCapacityTest: TMenuItem;
+    MenuSurfaceScan: TMenuItem;
     MenuSkipFF: TMenuItem;
     //ตัวเลือกที่เพิ่มมาในรุ่น 4.4
     MenuFastRead: TMenuItem;
@@ -278,6 +279,7 @@ type
     procedure MenuHWSERPROGClick(Sender: TObject);
     procedure MenuChipDoctorClick(Sender: TObject);
     procedure MenuCapacityTestClick(Sender: TObject);
+    procedure MenuSurfaceScanClick(Sender: TObject);
     procedure MenuHWARDUINOClick(Sender: TObject);
     procedure MenuHWBUZZPIRATClick(Sender: TObject);
     procedure MenuHWAVRISPClick(Sender: TObject);
@@ -353,6 +355,8 @@ type
   //พร้อมสำรอง-กู้คืน) ใช้ร่วมกันทั้งเมนูและโหมดบรรทัดคำสั่ง
   procedure RunChipDoctor;
   procedure RunChipCapacityTest;
+  //สแกนผิวทั้งชิป ทำลายข้อมูล: จบงานแล้วชิปว่างทั้งตัว
+  procedure RunChipSurfaceScan;
 
   //อ่านเลขประจำตัวของชิปที่เสียบอยู่ ต้องเรียกตอนอยู่ในโหมดโปรแกรม
   //คืนสตริงว่างเมื่อชิปไม่มีเลขประจำตัว
@@ -3532,6 +3536,87 @@ begin
   finally
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
+  end;
+end;
+
+procedure SurfaceProgressSink(BlocksDone, BlocksTotal: cardinal);
+begin
+  SetProgressMax(integer(BlocksTotal));
+  SetProgressPos(integer(BlocksDone));
+  OpProcessMessages;
+end;
+
+procedure RunChipSurfaceScan;
+var
+  R: TSurfaceScanResult;
+  ChipSize: QWord;
+  SectorSz: cardinal;
+begin
+  OpBegin(opkErase);
+
+  if not (MainForm.RadioSPI.Checked and
+          (MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25)) then
+  begin
+    OpFail('the surface scan works on 25-series SPI NOR only');
+    Exit;
+  end;
+  if CurrentICParam.Size = 0 then
+  begin
+    OpFail('select a chip (or detect via SFDP) so the size is known');
+    Exit;
+  end;
+  ChipSize := CurrentICParam.Size;
+  SectorSz := CurrentICParam.Sector;
+  if SectorSz = 0 then SectorSz := 4096;
+  CapEraseOpcode := CurrentICParam.SectorOpcode;
+  if CapEraseOpcode = 0 then
+    case SectorSz of
+      4096:  CapEraseOpcode := $20;
+      32768: CapEraseOpcode := $52;
+      65536: CapEraseOpcode := $D8;
+    else
+      CapEraseOpcode := $20;
+    end;
+
+  if not OpenDevice then
+  begin
+    OpFail('the programmer could not be opened');
+    Exit;
+  end;
+  try
+    if not EnterProgModeSPI25 then
+    begin
+      OpFail('the programmer could not initialize the SPI bus');
+      Exit;
+    end;
+    if not ContactIsStable then Exit;
+    if not ProtectionGuardOK(0, cardinal(ChipSize)) then Exit;
+
+    if RunSurfaceScan(ChipSize, SectorSz, @CapTestRead, @CapTestErase,
+                      @CapTestProgram, @ChipTestLogSink,
+                      @SurfaceProgressSink, @UserCancel, R) then
+    begin
+      if (R.SlowBlocks > 0) and (R.SlowMedianMs >= 10) then
+        LogPrint(Format(STR_ERASE_WEAR_WARNING,
+          [R.SlowBlocks, R.SlowWorstMs, cardinal(R.SlowWorstAddr),
+           R.SlowMedianMs]));
+      if R.BlocksBad = 0 then
+        LogPrint(Format('PASS: all %d blocks held FF, 55, AA and their ' +
+                        'own address', [R.BlocksTested]))
+      else
+        OpFail(Format('%d of %d blocks failed the pattern walk; the ' +
+                      'first bad block is at 0x%.8x. This chip should ' +
+                      'not carry data anyone cares about',
+                      [R.BlocksBad, R.BlocksTested,
+                       cardinal(R.FirstBadAddr)]));
+      LogPrint('the chip is now fully erased');
+    end
+    else
+      OpFail(R.ErrorText);
+  finally
+    ExitProgMode25;
+    AsProgrammer.Programmer.DevClose;
+    SetProgressPos(0);
   end;
 end;
 
@@ -7506,6 +7591,17 @@ begin
        LineEnding + 'Run the test?',
        mtWarning, [mbYes, mbNo], 0) <> mrYes then Exit;
   RunChipCapacityTest;
+end;
+
+procedure TMainForm.MenuSurfaceScanClick(Sender: TObject);
+begin
+  if MessageDlg('Surface scan',
+       'This scan ERASES THE ENTIRE CHIP and leaves it blank. Every ' +
+       'block is erased and rewritten several times with test patterns ' +
+       'to certify the cells and the addressing. Nothing is backed up.' +
+       LineEnding + LineEnding + 'Erase everything and scan?',
+       mtWarning, [mbYes, mbNo], 0) <> mrYes then Exit;
+  RunChipSurfaceScan;
 end;
 
 procedure TMainForm.MenuItemBenchmarkClick(Sender: TObject);

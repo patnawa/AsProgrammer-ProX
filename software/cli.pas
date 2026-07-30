@@ -49,10 +49,10 @@ const
   );
 
   //สวิตช์ที่เป็นธงเปล่า ๆ
-  FlagSwitches: array[0..13] of string = (
+  FlagSwitches: array[0..14] of string = (
     'erase', 'detect', 'sfdp', 'help', 'force', 'json', 'verify',
     'no-fast-read', 'smart', 'plan-only', 'nand-info', 'nand-raw',
-    'chip-test', 'capacity-test'
+    'chip-test', 'capacity-test', 'surface-scan'
   );
 
   //The secret source is station policy, not an arbitrary caller-selected
@@ -212,6 +212,10 @@ begin
   Say('                  backed up first and restored with verification;');
   Say('                  needs --force because a power loss mid-test');
   Say('                  loses those sectors. Exit 1 on a remarked fake');
+  Say('  --surface-scan  badblocks for SPI NOR: erase/55/AA/address-stamp');
+  Say('                  every block and verify each step. ERASES THE');
+  Say('                  WHOLE CHIP, nothing is backed up; needs --force.');
+  Say('                  Reports a bad-block map and slow-erase wear');
   Say('  --read-passes N read the chip N times and fail if the reads disagree.');
   Say('                  The only way to catch a clip that is making a bad');
   Say('                  contact: the dump looks perfectly valid otherwise');
@@ -541,7 +545,8 @@ begin
      (SwitchValue('export-chip') <> '') or
      (SwitchValue('read-passes') <> '') or
      HasSwitch('nand-info') or (SwitchValue('nand-read') <> '') or
-     HasSwitch('chip-test') or HasSwitch('capacity-test') then
+     HasSwitch('chip-test') or HasSwitch('capacity-test') or
+     HasSwitch('surface-scan') then
     Exit(Reject('authenticated production cannot be combined with read, ' +
       'write, erase, verify, force, legacy-job/log, detection, NAND, or ' +
       'offline inspection switches', EXIT_USAGE));
@@ -1301,6 +1306,22 @@ begin
     end;
     LogShown := MainForm.Log.Lines.Count;
     RunChipCapacityTest;
+    DumpLog;
+    if Json then SayJson(Action);
+    Exit(ResultCode);
+  end;
+
+  if HasSwitch('surface-scan') then
+  begin
+    Action := 'surface-scan';
+    if not CLIForce then
+    begin
+      Say('--surface-scan ERASES THE WHOLE CHIP and leaves it blank; ' +
+          'nothing is backed up. Add --force if that is what you want');
+      Exit(EXIT_USAGE);
+    end;
+    LogShown := MainForm.Log.Lines.Count;
+    RunChipSurfaceScan;
     DumpLog;
     if Json then SayJson(Action);
     Exit(ResultCode);

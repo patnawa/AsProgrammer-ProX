@@ -813,6 +813,10 @@ object MainForm: TMainForm
         Caption = 'True capacity test (counterfeit check)...'
         OnClick = MenuCapacityTestClick
       end
+      object MenuSurfaceScan: TMenuItem
+        Caption = 'Surface scan (ERASES the whole chip)...'
+        OnClick = MenuSurfaceScanClick
+      end
     end
     object MenuOptions: TMenuItem
       Caption = 'Настройки'

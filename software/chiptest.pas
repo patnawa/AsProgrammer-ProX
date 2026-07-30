@@ -67,6 +67,37 @@ function RunCapacityTest(ClaimedSize: QWord; SectorSize: cardinal;
 //เครื่องหมายประจำแอดเดรส เปิดเป็น public เพื่อให้เทสต์ตรวจแยกแยะได้
 function CapacityMarker(Address: QWord): TBytes;
 
+type
+  //ผลสแกนผิวทั้งชิป (ทำลายข้อมูล: จบงานแล้วชิปว่างทั้งตัว)
+  TSurfaceScanResult = record
+    BlocksTested: cardinal;
+    BlocksBad: cardinal;
+    FirstBadAddr: QWord;
+    HasFirstBad: boolean;
+    Completed: boolean;
+    Cancelled: boolean;
+    ErrorText: string;
+    //บล็อกที่ลบช้าผิดฝูง (เกินห้าเท่าของมัธยฐาน) จากรอบลบแรก
+    SlowBlocks: integer;
+    SlowWorstMs, SlowMedianMs: cardinal;
+    SlowWorstAddr: QWord;
+  end;
+
+  TSurfaceProgress = procedure(BlocksDone, BlocksTotal: cardinal);
+  TSurfaceShouldStop = function: boolean;
+
+//สแกนผิวแบบ badblocks: ต่อบล็อก ลบแล้วตรวจว่าว่างจริง เขียน 55h ตรวจ
+//เขียน AAh ตรวจ เขียนลาย "แอดเดรสประทับในตัวเอง" ตรวจ แล้วลบทิ้ง
+//บล็อกที่ผิดลายถูกนับและตั้งชื่อ แล้วสแกนต่อ (แผนที่ความเสียหายมีค่า
+//กว่าการหยุดที่ศพแรก) ปัญหาระดับสายส่งถึงยกเลิกทั้งงาน
+//
+//สิ่งที่สแกนนี้ตั้งใจไม่ทำ: จับชิปปลอมย้อมความจุ (ตรวจทันทีต่อบล็อก
+//มองไม่เห็นการวนแอดเดรส) นั่นคืองานของ RunCapacityTest
+function RunSurfaceScan(ChipSize: QWord; SectorSize: cardinal;
+  ReadFn: TChipIORead; EraseFn: TChipIOErase; ProgramFn: TChipIOProgram;
+  Log: TChipTestLog; Progress: TSurfaceProgress;
+  ShouldStop: TSurfaceShouldStop; out R: TSurfaceScanResult): boolean;
+
 //แฟลชตายแบบช้าลงก่อนแล้วค่อยพัง: บล็อกที่ใช้เวลาลบ/เขียนนานผิดฝูงคือ
 //บล็อกที่กำลังหมดอายุ ก่อนที่ verify จะเริ่มจับได้เสียอีก ตัวเลขพวกนี้
 //ได้มาฟรีจากการรอ BUSY อยู่แล้ว เหลือแค่ดูให้เป็น
@@ -330,6 +361,200 @@ begin
 
   R.Completed := True;
   R.Genuine := R.DetectedSize = ClaimedSize;
+  Result := True;
+end;
+
+function RunSurfaceScan(ChipSize: QWord; SectorSize: cardinal;
+  ReadFn: TChipIORead; EraseFn: TChipIOErase; ProgramFn: TChipIOProgram;
+  Log: TChipTestLog; Progress: TSurfaceProgress;
+  ShouldStop: TSurfaceShouldStop; out R: TSurfaceScanResult): boolean;
+var
+  Blocks, B: cardinal;
+  Base: QWord;
+  Err: string;
+  EraseMs: array of cardinal;
+  T0: QWord;
+  WorstIdx: integer;
+  BlockBad: boolean;
+
+  procedure Say(const Msg: string);
+  begin
+    if Assigned(Log) then Log(Msg);
+  end;
+
+  //ลายประจำรอบ: Fill = ค่าคงที่, ประทับแอดเดรส = ทุก dword เก็บแอดเดรส
+  //ของตัวเอง (จับสายแอดเดรสพัง/ลัดที่ลายทึบมองไม่เห็น)
+  function PatternByte(UseStamp: boolean; Fill: byte; Addr: QWord): byte;
+  begin
+    if not UseStamp then Exit(Fill);
+    Result := byte((Addr and (not QWord(3))) shr ((Addr and 3) * 8));
+  end;
+
+  //เขียนทั้งบล็อกด้วยลายที่ขอ แล้วอ่านกลับเทียบทุกไบต์
+  //คืน False เฉพาะปัญหาระดับสายส่ง ผลลายผิดรายงานผ่าน BadOut
+  function WriteAndCheck(UseStamp: boolean; Fill: byte;
+    out BadOut: boolean): boolean;
+  var
+    Off, i: cardinal;
+    Chunk, Back: TBytes;
+  begin
+    Result := False;
+    BadOut := False;
+    Chunk := nil;
+    SetLength(Chunk, 256);
+    Off := 0;
+    while Off < SectorSize do
+    begin
+      for i := 0 to 255 do
+        Chunk[i] := PatternByte(UseStamp, Fill, Base + Off + i);
+      if not ProgramFn(Base + Off, Chunk, Err) then
+      begin
+        R.ErrorText := Format('program at 0x%.8x failed: %s',
+                              [Base + Off, Err]);
+        Exit;
+      end;
+      Inc(Off, 256);
+    end;
+    if not ReadFn(Base, SectorSize, Back, Err) then
+    begin
+      R.ErrorText := Format('readback at 0x%.8x failed: %s', [Base, Err]);
+      Exit;
+    end;
+    for i := 0 to SectorSize - 1 do
+      if Back[i] <> PatternByte(UseStamp, Fill, Base + i) then
+      begin
+        BadOut := True;
+        Break;
+      end;
+    Result := True;
+  end;
+
+  function EraseAndCheckBlank(TimeIt: boolean; out BadOut: boolean): boolean;
+  var
+    i: cardinal;
+    Back: TBytes;
+  begin
+    Result := False;
+    BadOut := False;
+    T0 := GetTickCount64;
+    if not EraseFn(Base, Err) then
+    begin
+      R.ErrorText := Format('erase at 0x%.8x failed: %s', [Base, Err]);
+      Exit;
+    end;
+    if TimeIt then EraseMs[B] := cardinal(GetTickCount64 - T0);
+    if not ReadFn(Base, SectorSize, Back, Err) then
+    begin
+      R.ErrorText := Format('blank readback at 0x%.8x failed: %s',
+                            [Base, Err]);
+      Exit;
+    end;
+    for i := 0 to SectorSize - 1 do
+      if Back[i] <> $FF then
+      begin
+        BadOut := True;
+        Break;
+      end;
+    Result := True;
+  end;
+
+  //หนึ่งบล็อกเต็มรอบ: ว่างจริง, 55h, AAh, ลายประทับแอดเดรส, แล้วลบทิ้ง
+  function TestOneBlock(out BadOut: boolean): boolean;
+  var
+    Bad1: boolean;
+  begin
+    Result := False;
+    BadOut := False;
+    if not EraseAndCheckBlank(True, Bad1) then Exit;
+    BadOut := BadOut or Bad1;
+    if not WriteAndCheck(False, $55, Bad1) then Exit;
+    BadOut := BadOut or Bad1;
+    if not EraseAndCheckBlank(False, Bad1) then Exit;
+    BadOut := BadOut or Bad1;
+    if not WriteAndCheck(False, $AA, Bad1) then Exit;
+    BadOut := BadOut or Bad1;
+    if not EraseAndCheckBlank(False, Bad1) then Exit;
+    BadOut := BadOut or Bad1;
+    if not WriteAndCheck(True, 0, Bad1) then Exit;
+    BadOut := BadOut or Bad1;
+    if not EraseAndCheckBlank(False, Bad1) then Exit;
+    BadOut := BadOut or Bad1;
+    Result := True;
+  end;
+
+begin
+  Result := False;
+  R.BlocksTested := 0;
+  R.BlocksBad := 0;
+  R.FirstBadAddr := 0;
+  R.HasFirstBad := False;
+  R.Completed := False;
+  R.Cancelled := False;
+  R.ErrorText := '';
+  R.SlowBlocks := 0;
+  R.SlowWorstMs := 0;
+  R.SlowMedianMs := 0;
+  R.SlowWorstAddr := 0;
+
+  if (not Assigned(ReadFn)) or (not Assigned(EraseFn)) or
+     (not Assigned(ProgramFn)) then
+  begin
+    R.ErrorText := 'no device callbacks';
+    Exit;
+  end;
+  if (SectorSize = 0) or ((SectorSize mod 256) <> 0) or
+     (ChipSize = 0) or ((ChipSize mod SectorSize) <> 0) then
+  begin
+    R.ErrorText := 'the chip/sector geometry does not fit this scan';
+    Exit;
+  end;
+  if ChipSize > CAPTEST_MAX_SIZE then
+  begin
+    R.ErrorText := 'chips above 16 MB need 4-byte addressing, which this ' +
+                   'scan does not drive yet';
+    Exit;
+  end;
+
+  Blocks := cardinal(ChipSize div SectorSize);
+  EraseMs := nil;
+  SetLength(EraseMs, Blocks);
+  Say(Format('surface scan: %d blocks of %d bytes; every cell will be ' +
+             'exercised and the chip ends fully erased', [Blocks,
+             SectorSize]));
+
+  B := 0;
+  while B < Blocks do
+  begin
+    if Assigned(ShouldStop) and ShouldStop() then
+    begin
+      R.Cancelled := True;
+      R.ErrorText := 'cancelled';
+      Exit;
+    end;
+
+    Base := QWord(B) * SectorSize;
+    if not TestOneBlock(BlockBad) then Exit; //ปัญหาสายส่ง: เลิกทั้งงาน
+    Inc(R.BlocksTested);
+    if BlockBad then
+    begin
+      Inc(R.BlocksBad);
+      if not R.HasFirstBad then
+      begin
+        R.HasFirstBad := True;
+        R.FirstBadAddr := Base;
+      end;
+      Say(Format('  BAD block at 0x%.8x', [Base]));
+    end;
+    if Assigned(Progress) then Progress(B + 1, Blocks);
+    Inc(B);
+  end;
+
+  R.SlowBlocks := CountTimingOutliers(EraseMs, 5, R.SlowMedianMs,
+                                      R.SlowWorstMs, WorstIdx);
+  if WorstIdx >= 0 then
+    R.SlowWorstAddr := QWord(WorstIdx) * SectorSize;
+
+  R.Completed := True;
   Result := True;
 end;
 
