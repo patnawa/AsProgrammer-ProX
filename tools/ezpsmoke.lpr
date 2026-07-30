@@ -259,6 +259,53 @@ begin
   usb_bulk_write(h, EP_CMD, Pkt[0], PACKET, 1000);
   usb_bulk_read(h, EP_IN, Reply[0], PACKET, 1000);
 
+  //ทดลองอ่านจริงหนึ่งก้อน ถ้ามีชิปอยู่: นี่คือขั้นที่ล้มในโปรแกรมหลัก
+  //(descriptor -> START -> ก้อนแรก) จึงต้องพิสูจน์ที่นี่ ไม่ใช่เดา
+  if Reply[0] <> 0 then
+  begin
+    WriteLn;
+    WriteLn('a chip is present; trying a real read of the first block');
+    FillChar(Pkt, SizeOf(Pkt), 0);
+    Pkt[0] := $00; Pkt[1] := $07;         //SET_CHIP_DATA
+    Pkt[2] := 0;                          //class: SPI flash
+    Pkt[3] := 0;                          //algorithm
+    Pkt[4] := $01; Pkt[5] := $00;         //page size 256, big endian
+    Pkt[6] := $03; Pkt[7] := $E8;         //delay 1000 ms
+    Pkt[8] := $00; Pkt[9] := $80;         //size 8 MB = 00800000
+    Pkt[10] := $00; Pkt[11] := $00;
+    Pkt[12] := 0;                         //chip id from the check above
+    Pkt[13] := Reply[1]; Pkt[14] := Reply[2]; Pkt[15] := Reply[3];
+    Pkt[16] := 0;                         //speed index 0
+    WriteLn(Format('  descriptor carries chip id %.2x %.2x %.2x',
+                   [Pkt[13], Pkt[14], Pkt[15]]));
+    n := usb_bulk_write(h, EP_CMD, Pkt[0], PACKET, 1000);
+    WriteLn('  set chip data -> ', n);
+    if n = PACKET then
+    begin
+      n := usb_bulk_read(h, EP_IN, Cfg[0], PACKET, 2000);
+      WriteLn('  its reply     -> ', n);
+      FillChar(Pkt, SizeOf(Pkt), 0);
+      Pkt[0] := $00; Pkt[1] := $05;       //START
+      n := usb_bulk_write(h, EP_CMD, Pkt[0], PACKET, 1000);
+      WriteLn('  start         -> ', n);
+      n := usb_bulk_read(h, EP_IN, Cfg[0], PACKET, 2000);
+      WriteLn('  its reply     -> ', n);
+      n := usb_bulk_read(h, EP_IN, Cfg[0], 256, 5000);
+      WriteLn('  first 256 data bytes -> ', n);
+      if n = 256 then
+      begin
+        Hex('  data', Cfg, 32);
+        WriteLn('  READ PATH WORKS');
+      end
+      else
+        WriteLn('  READ PATH FAILED: ', usb_strerror);
+    end;
+    FillChar(Pkt, SizeOf(Pkt), 0);
+    Pkt[0] := $01; Pkt[1] := $08;         //RESET
+    usb_bulk_write(h, EP_CMD, Pkt[0], PACKET, 1000);
+    usb_bulk_read(h, EP_IN, Cfg[0], PACKET, 1000);
+  end;
+
   usb_release_interface(h, 0);
   usb_close(h);
 

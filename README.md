@@ -6,7 +6,7 @@
 
 Sector-level erase · SFDP auto-detect · checksums · responsive UI
 
-![version](https://img.shields.io/badge/version-4.20.2-2BB3F3?style=flat-square)
+![version](https://img.shields.io/badge/version-4.21-2BB3F3?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
 ![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
@@ -76,7 +76,7 @@ programmers, while staying free and open source.
 | **AVRISP (LUFA)** | ● | | | |
 | **Arduino** | ● | | | |
 | **serprog** | ● | | | Any board speaking flashrom's serial protocol: Raspberry Pi Pico (pico-serprog), STM32, ESP32, frser-duino. Set the COM port under *Settings*. |
-| **EZP2023+** | ◐ | | | Identify and read only. Its firmware performs whole-chip operations itself and exposes no way to send an SPI command, so SFDP, protection decoding, Smart write, erase and the chip tests cannot work through it. Needs the vendor's libusb0 driver installed once. |
+| **EZP2023+** | ● | | | Identify, read, write and erase, all as whole-chip operations because that is all its firmware exposes. Every write is verified by reading the chip back and comparing all of it. SFDP, protection decoding, Smart write and the chip health tests still cannot work through it — those need raw SPI commands, which the firmware has no way to send. Needs the vendor's libusb0 driver installed once. |
 
 Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-series I²C EEPROM,
 93-series MicroWire EEPROM, KB9012 EC, and SPI NAND (W25N / GD5F / MX35 / TC58 — read and
@@ -490,6 +490,31 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 ---
 
 ## Changelog
+
+### 4.21.0.0 — the EZP2023+ writes and erases too
+
+Verified on real hardware: a W25Q64JV read back all 8 MB through the
+programmer, Intel descriptor and all.
+
+The firmware cannot accept a page-at-a-time write, but it writes a whole
+chip perfectly well, so the ordinary Write and Erase buttons now route to
+that when the EZP2023+ is selected — no separate menu to learn. Because
+the same programmer can also read, every write is followed by a full
+read-back and a byte-for-byte compare, which is a stronger check than the
+page-level verify the other backends do. Erase is a whole-chip write of
+FF, which is the only erase this firmware offers and lands in the same
+verified state. A buffer shorter than the chip is allowed and says so
+first: the remainder becomes FF, because a whole-chip write cannot leave
+it alone. A write interrupted midway reports exactly how far it got and
+that the chip now holds part of each image.
+
+The bug behind "read: FAILED, received -1 of 2048 bytes": each operation
+opens its own session, so the chip id captured when you pressed Read ID
+was gone by the time the read described the chip to the firmware, and a
+descriptor carrying id zero is silently refused. The id is now fetched
+whenever the descriptor is built. The backend's own explanation also
+reaches the log now instead of being replaced by the caller's generic
+"short read" line.
 
 ### 4.20.2.0 — the EZP2023+ un-wedges itself
 

@@ -39,7 +39,7 @@ unit ezphw;
 interface
 
 uses
-  Classes, SysUtils, basehw, LibUSB, utilfunc, opthread;
+  Classes, SysUtils, basehw, LibUSB, utilfunc, opthread, opresult;
 
 const
   EZP_VID = $1FC8;
@@ -101,9 +101,19 @@ type
     function Command(Cmd: word; out Reply: TBytes): boolean;
     function CheckChip: boolean;
     function ReadWholeChip: boolean;
+    function SendChipDescriptor: boolean;
   public
     constructor Create;
     destructor Destroy; override;
+
+    //งานทั้งชิปที่เฟิร์มแวร์ทำได้เอง เรียกจากเส้นทางของตัวเองใน main
+    //ไม่ใช่ผ่าน SPIWrite ทีละเพจ ซึ่งโปรโตคอลนี้ทำไม่ได้
+    //ผู้เรียกต้องเปิดอุปกรณ์ไว้แล้ว และ Data ต้องยาวเท่าขนาดชิปพอดี
+    function WriteWholeChip(const Data: TBytes): boolean;
+    //อ่านทั้งชิปเข้า Data (ยาวเท่าขนาดชิป) ใช้ตรวจหลังเขียน
+    function ReadBackWholeChip(out Data: TBytes): boolean;
+    //ทิ้งภาพที่แคชไว้ บังคับให้การอ่านครั้งถัดไปไปเอาจากชิปจริง
+    procedure ForgetImage;
 
     function GetLastError: string; override;
     function DevOpen: boolean; override;
@@ -374,28 +384,33 @@ begin
   Result := True;
 end;
 
-//อ่านทั้งชิปเข้าหน่วยความจำครั้งเดียวต่อรอบ ขนาดกับเพจมาจากชิปที่เลือกไว้
-function TEZPHardware.ReadWholeChip: boolean;
+//แพ็กเก็ตบอกชิป ใช้เหมือนกันทั้งอ่านและเขียน: class/algorithm/delay เป็น
+//ค่าของตระกูล SPI NOR ขนาดกับเพจมาจากชิปที่เลือกไว้
+function TEZPHardware.SendChipDescriptor: boolean;
 var
-  Pkt, Reply, Block: TBytes;
-  Size, Page, BlockLen, Got: cardinal;
+  Pkt, Reply: TBytes;
+  Size, Page: cardinal;
 begin
   Result := False;
   Size := main.CurrentICParam.Size;
   Page := main.CurrentICParam.Page;
   if (Size = 0) or (Page = 0) then
   begin
-    FStrError := 'the EZP2023+ needs the chip size and page size before it ' +
-      'can read: pick the chip (Read ID, or choose it from the list) first';
+    FStrError := 'the EZP2023+ needs the chip size and page size first: ' +
+      'press Read ID, or pick the chip from the list';
     Exit;
   end;
   if (Size mod Page) <> 0 then
   begin
-    FStrError := 'the EZP2023+ can only read a whole number of pages';
+    FStrError := 'the EZP2023+ works in whole pages only';
     Exit;
   end;
 
-  //แพ็กเก็ตบอกชิป: class/algorithm/delay เป็นค่าของตระกูล SPI NOR
+  //เฟิร์มแวร์เทียบรหัสชิปในแพ็กเก็ตกับของจริงก่อนลงมือ ทุกงานเปิด session
+  //ใหม่ (ตัวเรียกเปิด-ปิดอุปกรณ์ต่อหนึ่งงาน) รหัสที่ได้จากตอนกด Read ID
+  //จึงไม่อยู่แล้ว ถ้าส่งศูนย์ไปมันเงียบและงานล้มที่ไบต์แรก
+  if not FIdentityChecked then
+    if not CheckChip then Exit;
   SetLength(Pkt, EZP_PACKET_LEN);
   FillByte(Pkt[0], EZP_PACKET_LEN, 0);
   Pkt[0] := byte(EZP_CMD_SET_CHIP_DATA shr 8);
@@ -421,7 +436,19 @@ begin
   //Pkt[28] คือ voltage: ศูนย์ = ราง 3.3 V ซึ่งเป็นค่าของ SPI NOR ทั้งวงศ์
 
   if not BulkOut(EZP_EP_CMD, Pkt) then Exit;
-  if not BulkIn(Reply, EZP_PACKET_LEN, TIMEOUT_MS) then Exit;
+  Result := BulkIn(Reply, EZP_PACKET_LEN, TIMEOUT_MS);
+end;
+
+//อ่านทั้งชิปเข้าหน่วยความจำครั้งเดียวต่อรอบ
+function TEZPHardware.ReadWholeChip: boolean;
+var
+  Reply, Block: TBytes;
+  Size, Page, BlockLen, Got: cardinal;
+begin
+  Result := False;
+  Size := main.CurrentICParam.Size;
+  Page := main.CurrentICParam.Page;
+  if not SendChipDescriptor then Exit;
 
   if not Command(EZP_CMD_START, Reply) then Exit;
 
@@ -546,7 +573,13 @@ begin
 
   //คำตอบของ 03h: เสิร์ฟจากภาพทั้งชิป อ่านจากตัวชิปครั้งเดียวต่อรอบ
   if not FImageValid then
-    if not ReadWholeChip then Exit;
+    if not ReadWholeChip then
+    begin
+      //ผู้เรียกจะพิมพ์ข้อความกลาง ๆ ของตัวเอง ("short read: -1 of 2048")
+      //ซึ่งไม่ได้บอกอะไรเลย เหตุผลจริงอยู่ที่นี่ ต้องพ่นออกไปด้วย
+      if FStrError <> '' then main.LogPrint('EZP2023+: ' + FStrError);
+      Exit;
+    end;
 
   if QWord(FPendingAddr) + QWord(BufferLen) > QWord(Length(FImage)) then
   begin
@@ -559,6 +592,96 @@ begin
   Move(FImage[FPendingAddr], buffer[0], BufferLen);
   FPendingRead := False;
   Result := BufferLen;
+end;
+
+procedure TEZPHardware.ForgetImage;
+begin
+  FImageValid := False;
+  FImage := nil;
+end;
+
+function TEZPHardware.ReadBackWholeChip(out Data: TBytes): boolean;
+begin
+  Data := nil;
+  //บังคับอ่านจากชิปจริง ไม่ใช่ภาพที่ค้างอยู่ก่อนเขียน
+  ForgetImage;
+  Result := ReadWholeChip;
+  if Result then Data := Copy(FImage, 0, Length(FImage));
+end;
+
+//เขียนทั้งชิป: เฟิร์มแวร์จัดการลบและเขียนตามอัลกอริทึมของมันเอง เราแค่
+//ป้อนภาพให้ครบ ลำดับต่างจากทางอ่านสองจุด และทั้งสองจุดสำคัญ: หลัง START
+//ไม่มีคำตอบกลับ (รออยู่ก็ค้าง) และก้อนข้อมูลไปที่ปลายทาง OUT|1 ไม่ใช่ OUT|2
+function TEZPHardware.WriteWholeChip(const Data: TBytes): boolean;
+var
+  Reply, Block: TBytes;
+  Size, Page, BlockLen, Sent: cardinal;
+  Pkt: TBytes;
+begin
+  Result := False;
+  if not FOpened then
+  begin
+    FStrError := 'the EZP2023+ is not open';
+    Exit;
+  end;
+  Size := main.CurrentICParam.Size;
+  Page := main.CurrentICParam.Page;
+  if cardinal(Length(Data)) <> Size then
+  begin
+    FStrError := Format('the EZP2023+ writes the whole chip at once, so the ' +
+      'image must be exactly %d bytes; this one is %d',
+      [Size, Length(Data)]);
+    Exit;
+  end;
+  if not SendChipDescriptor then Exit;
+
+  //START ของทางเขียนไม่มีคำตอบ อ่านรอจะค้างจนหมดเวลา
+  SetLength(Pkt, EZP_PACKET_LEN);
+  FillByte(Pkt[0], EZP_PACKET_LEN, 0);
+  Pkt[0] := byte(EZP_CMD_START shr 8);
+  Pkt[1] := byte(EZP_CMD_START and $FF);
+  if not BulkOut(EZP_EP_CMD, Pkt) then Exit;
+
+  BlockLen := Page;
+  if BlockLen < EZP_BLOCK_MIN then BlockLen := EZP_BLOCK_MIN;
+
+  SetLength(Block, BlockLen);
+  Sent := 0;
+  while Sent < Size do
+  begin
+    Move(Data[Sent], Block[0], BlockLen);
+    if not BulkOut(EZP_EP_DATA, Block) then
+    begin
+      //ครึ่ง ๆ กลาง ๆ คือชิปที่เนื้อในผสมกันอยู่ ต้องบอกให้ชัดว่าถึงไหน
+      FStrError := FStrError + Format(' (stopped %d bytes into the write; ' +
+        'the chip now holds part of the new image and part of the old)',
+        [Sent]);
+      Command(EZP_CMD_RESET, Reply);
+      ForgetImage;
+      Exit;
+    end;
+    Inc(Sent, BlockLen);
+    OpProgress(Sent, Size);
+    OpProcessMessages;
+    if main.UserCancel then
+    begin
+      FStrError := Format('cancelled %d bytes into the write; the chip now ' +
+        'holds part of the new image and part of the old', [Sent]);
+      Command(EZP_CMD_RESET, Reply);
+      ForgetImage;
+      Exit;
+    end;
+  end;
+
+  //RESET ของทางเขียนก็ไม่มีคำตอบกลับเช่นกัน
+  FillByte(Pkt[0], EZP_PACKET_LEN, 0);
+  Pkt[0] := byte(EZP_CMD_RESET shr 8);
+  Pkt[1] := byte(EZP_CMD_RESET and $FF);
+  BulkOut(EZP_EP_CMD, Pkt);
+
+  //สิ่งที่อยู่บนชิปเปลี่ยนไปแล้ว ภาพที่แคชไว้ใช้ไม่ได้อีก
+  ForgetImage;
+  Result := True;
 end;
 
 //I2C กับ MicroWire: เฟิร์มแวร์ทำได้ แต่ผ่านเส้นทางเดียวกับ SPI คือทั้งชิป

@@ -360,6 +360,10 @@ type
   //สแกนผิวทั้งชิป ทำลายข้อมูล: จบงานแล้วชิปว่างทั้งตัว
   procedure RunChipSurfaceScan;
 
+  //งานทั้งชิปของ EZP2023+ เฟิร์มแวร์ตัวนั้นทำงานเป็นชิปทั้งตัว ไม่ใช่เพจ
+  //Blank = True คือเขียน FF ทั้งชิป ซึ่งเทียบเท่าการลบ
+  procedure RunEZPWholeChipWrite(Blank: boolean);
+
   //อ่านเลขประจำตัวของชิปที่เสียบอยู่ ต้องเรียกตอนอยู่ในโหมดโปรแกรม
   //คืนสตริงว่างเมื่อชิปไม่มีเลขประจำตัว
   function ReadChipUID: string;
@@ -3758,6 +3762,123 @@ begin
   finally
     ChipTestEnd4B;
     ExitProgMode25;
+    AsProgrammer.Programmer.DevClose;
+    SetProgressPos(0);
+  end;
+end;
+
+//เขียนทั้งชิปผ่าน EZP2023+ แล้วอ่านกลับมาเทียบทุกไบต์
+//
+//เฟิร์มแวร์ของเครื่องนี้ไม่รับคำสั่ง SPI ดิบ ๆ จึงเขียนทีละเพจแบบเส้นทาง
+//ปกติไม่ได้ แต่การเขียนทั้งชิปมันทำได้เอง และเพราะมันอ่านได้ด้วย เราจึง
+//ตรวจผลได้เต็มร้อย ซึ่งดีกว่าเชื่อคำว่า "สำเร็จ" ของเฟิร์มแวร์
+procedure RunEZPWholeChipWrite(Blank: boolean);
+var
+  Dev: TEZPHardware;
+  Image, Back: TBytes;
+  Size: cardinal;
+  i: SizeInt;
+  Stream: TMemoryStream;
+begin
+  if Blank then OpBegin(opkErase) else OpBegin(opkWrite);
+  ForgetChipContent;
+
+  if AsProgrammer.Current_HW <> CHW_EZP then
+  begin
+    OpFail('this path is only for the EZP2023+');
+    Exit;
+  end;
+  if not (MainForm.RadioSPI.Checked and
+          (MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25)) then
+  begin
+    OpFail('the EZP2023+ backend drives 25-series SPI NOR only');
+    Exit;
+  end;
+
+  Size := CurrentICParam.Size;
+  if Size = 0 then
+  begin
+    OpFail('pick the chip first (Read ID, or choose it from the list)');
+    Exit;
+  end;
+
+  //ภาพที่จะเขียนต้องเท่าขนาดชิปพอดี เพราะเครื่องเขียนทั้งตัวเสมอ
+  //บัฟเฟอร์ที่สั้นกว่าจะถูกเติม FF ท้าย ซึ่งก็คือ "ลบส่วนที่เหลือ"
+  //และต้องบอกผู้ใช้ตรง ๆ ไม่ใช่ทำเงียบ ๆ
+  SetLength(Image, Size);
+  if Blank then
+    FillByte(Image[0], Size, $FF)
+  else
+  begin
+    FillByte(Image[0], Size, $FF);
+    Stream := TMemoryStream.Create;
+    try
+      MainForm.MPHexEditorEx.SaveToStream(Stream);
+      Stream.Position := 0;
+      if Stream.Size > int64(Size) then
+      begin
+        OpFail(Format('the buffer holds %d bytes but the chip is %d',
+                      [Stream.Size, Size]));
+        Exit;
+      end;
+      if Stream.Size < int64(Size) then
+        LogPrint(Format('the buffer is %d bytes and the chip is %d: the ' +
+          'EZP2023+ writes whole chips, so everything past the buffer will ' +
+          'be erased to FF', [Stream.Size, Size]));
+      Stream.ReadBuffer(Image[0], Stream.Size);
+    finally
+      Stream.Free;
+    end;
+  end;
+
+  if not OpenDevice then
+  begin
+    OpFail('the programmer could not be opened');
+    Exit;
+  end;
+  try
+    Dev := TEZPHardware(AsProgrammer.Programmer);
+    if Blank then
+      LogPrint(Format('EZP2023+: erasing the whole chip by writing FF to ' +
+                      'all %d bytes', [Size]))
+    else
+      LogPrint(Format('EZP2023+: writing all %d bytes (the firmware erases ' +
+                      'as it goes)', [Size]));
+    SetProgressMax(integer(Size));
+
+    if not Dev.WriteWholeChip(Image) then
+    begin
+      OpFail(Dev.GetLastError);
+      Exit;
+    end;
+
+    //อ่านกลับทั้งชิปแล้วเทียบ: เครื่องนี้อ่านได้ จึงไม่มีเหตุผลจะไม่ตรวจ
+    LogPrint('reading the chip back to check every byte');
+    if not Dev.ReadBackWholeChip(Back) then
+    begin
+      OpFail('the write finished but the read-back failed: ' +
+             Dev.GetLastError);
+      Exit;
+    end;
+    if cardinal(Length(Back)) <> Size then
+    begin
+      OpFail(Format('the read-back returned %d bytes, expected %d',
+                    [Length(Back), Size]));
+      Exit;
+    end;
+    for i := 0 to SizeInt(Size) - 1 do
+      if Back[i] <> Image[i] then
+      begin
+        LogPrint(STR_VERIFY_ERROR + IntToHex(cardinal(i), 8));
+        OpFail(Format('the chip does not match what was written: at ' +
+          '0x%.8x it holds %.2x, not %.2x', [cardinal(i), Back[i], Image[i]]),
+          i);
+        Exit;
+      end;
+
+    if Blank then LogPrint('the chip is erased and verified blank')
+    else LogPrint('the whole chip was written and verified byte for byte');
+  finally
     AsProgrammer.Programmer.DevClose;
     SetProgressPos(0);
   end;
@@ -8040,6 +8161,27 @@ begin
   //All normal SPI NOR writes share the transactional planner/executor.  This
   //removes the legacy raw page-program path from GUI, batch, and CLI entry
   //points while leaving protocol-specific EEPROM/DataFlash writers intact.
+  //EZP2023+ ไม่มีคำสั่ง SPI ดิบให้ตัววางแผนใช้ แต่เขียนทั้งชิปได้เอง
+  //ปุ่มเดิมจึงพาไปเส้นทางนั้น ผู้ใช้ไม่ต้องรู้ว่าข้างในต่างกัน
+  if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) and
+     (AsProgrammer.Current_HW = CHW_EZP) then
+  begin
+    if Sender <> ComboItem1 then
+      if MessageDlg('AsProgrammer',
+           'The EZP2023+ writes the whole chip in one operation: ' +
+           'everything on it is replaced by the buffer, and anything past ' +
+           'the end of the buffer becomes FF.' + LineEnding + LineEnding +
+           'Write the whole chip?',
+           mtWarning, [mbYes, mbNo], 0) <> mrYes then
+      begin
+        OpBegin(opkWrite);
+        OpCancel;
+        Exit;
+      end;
+    RunEZPWholeChipWrite(False);
+    Exit;
+  end;
+
   if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) then
   begin
     MenuSmartWriteClick(Sender);
@@ -10954,6 +11096,23 @@ procedure TMainForm.ButtonEraseClick(Sender: TObject);
 var
   I2C_DevAddr: byte;
 begin
+  //EZP2023+ ลบด้วยการเขียน FF ทั้งชิป ซึ่งเป็นสิ่งเดียวที่เฟิร์มแวร์ทำได้
+  //และผลลัพธ์เหมือนกันทุกไบต์ อ่านกลับตรวจให้ด้วย
+  if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) and
+     (AsProgrammer.Current_HW = CHW_EZP) then
+  begin
+    if Sender <> ComboItem1 then
+      if MessageDlg('AsProgrammer', STR_START_ERASE, mtConfirmation,
+           [mbYes, mbNo], 0) <> mrYes then
+      begin
+        OpBegin(opkErase);
+        OpCancel;
+        Exit;
+      end;
+    RunEZPWholeChipWrite(True);
+    Exit;
+  end;
+
   OpBegin(opkErase);
   //ชิปกำลังจะถูกเปลี่ยนเนื้อใน ความรู้เดิมว่า "เปล่า" หรือ "มีข้อมูล"
   //ใช้ต่อไม่ได้อีก ไม่งั้นการเขียนรอบถัดไปจะอ้างสถานะก่อนเขียนรอบนี้
