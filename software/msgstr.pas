@@ -223,6 +223,11 @@ resourcestring
                          + '0x%.8x. One of them is wrong and there is no way to tell which. '
                          + 'Reseat the clip and lower the clock';
   STR_READ_STABLE        = 'Both reads agree, so the dump can be trusted';
+  STR_READ_RETRY_SLOWER  = 'Dropping the SPI clock to %s and reading again '
+                         + 'before giving up';
+  STR_READ_STABLE_SLOWER = 'The dump only became stable at %s, below the '
+                         + 'selected clock. Reseat the clip, or keep the '
+                         + 'clock at this speed';
   STR_IMG_STATS          = 'Dump: %s';
   STR_IMG_KIND           = 'The dump looks like a %s';
   STR_IMG_SUSPECT        = 'Suspicious dump: %s';

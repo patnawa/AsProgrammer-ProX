@@ -3068,20 +3068,124 @@ procedure ReadFlash25(var RomStream: TMemoryStream; StartAddress, ChipSize: card
 //
 //เมื่อสองรอบไม่ตรงกัน เราบอกไม่ได้ว่ารอบไหนถูก และไม่ควรเดา
 //สิ่งที่บอกได้คือดัมป์นี้เชื่อไม่ได้ ซึ่งเป็นข้อมูลที่มีค่ากว่าการเดา
+//ลำดับเมนูความเร็ว SPI ของโปรแกรมเมอร์ตัวปัจจุบัน เรียงจากเร็วสุดไปช้าสุด
+//คืนจำนวนขั้น ศูนย์ = ฮาร์ดแวร์ตัวนี้ไม่มีเมนูความเร็วให้ถอย (เช่น CH341)
+function SPISpeedMenuLadder(var Items: array of TMenuItem): integer;
+var
+  N: integer;
+
+  procedure Add(Item: TMenuItem);
+  begin
+    if N <= High(Items) then
+    begin
+      Items[N] := Item;
+      Inc(N);
+    end;
+  end;
+
+begin
+  N := 0;
+  if AsProgrammer.Current_HW = CHW_CH347 then
+  begin
+    Add(MainForm.MenuCH347SPIClock60MHz);
+    Add(MainForm.MenuCH347SPIClock30MHz);
+    Add(MainForm.MenuCH347SPIClock15MHz);
+    Add(MainForm.MenuCH347SPIClock7_5MHz);
+    Add(MainForm.MenuCH347SPIClock3_75MHz);
+    Add(MainForm.MenuCH347SPIClock1_875MHz);
+    Add(MainForm.MenuCH347SPIClock937_5KHz);
+    Add(MainForm.MenuCH347SPIClock468_75KHz);
+  end
+  else if AsProgrammer.Current_HW = CHW_FT232H then
+  begin
+    Add(MainForm.MenuFT232SPI30Mhz);
+    Add(MainForm.MenuFT232SPI6Mhz);
+  end
+  else if AsProgrammer.Current_HW = CHW_USBASP then
+  begin
+    Add(MainForm.Menu3Mhz);
+    Add(MainForm.Menu1_5Mhz);
+    Add(MainForm.Menu750Khz);
+    Add(MainForm.Menu375Khz);
+    Add(MainForm.Menu187_5Khz);
+    Add(MainForm.Menu93_75Khz);
+    Add(MainForm.Menu32Khz);
+  end
+  else if (AsProgrammer.Current_HW = CHW_ARDUINO) or
+          (AsProgrammer.Current_HW = CHW_BUZZPIRAT) then
+  begin
+    Add(MainForm.MenuArduinoISP8Mhz);
+    Add(MainForm.MenuArduinoISP4Mhz);
+    Add(MainForm.MenuArduinoISP2Mhz);
+    Add(MainForm.MenuArduinoISP1Mhz);
+  end
+  else if AsProgrammer.Current_HW = CHW_AVRISP then
+  begin
+    Add(MainForm.MenuAVRISP8Mhz);
+    Add(MainForm.MenuAVRISP4Mhz);
+    Add(MainForm.MenuAVRISP2Mhz);
+    Add(MainForm.MenuAVRISP1Mhz);
+    Add(MainForm.MenuAVRISP500Khz);
+    Add(MainForm.MenuAVRISP250Khz);
+    Add(MainForm.MenuAVRISP125Khz);
+  end;
+  Result := N;
+end;
+
+//คลิปที่สัมผัสไม่แน่นมักกลับมาอ่านตรงกันเมื่อคล็อกช้าลง: ขยับลงหนึ่งขั้นจาก
+//ตำแหน่งเดิม LadderPos เริ่มที่ -1 = ยังไม่รู้ ให้หาจากเมนูที่ติ๊กอยู่
+//คืน False เมื่อช้าสุดแล้ว หรือฮาร์ดแวร์ตัวนี้ไม่มีเมนูความเร็ว
+//ค่าที่คืนเป็น Tag ของเมนู ส่งให้ EnterProgMode25 ตรง ๆ ไม่ผ่าน SetSPISpeed
+//เพราะ override ศูนย์ของ SetSPISpeed แปลว่า "ใช้ค่าจากเมนู" แต่บางเมนู
+//(6 MHz ของ FT232H) มี Tag เป็นศูนย์จริง ๆ
+function StepDownSPISpeed(var LadderPos: integer; out SpeedTag: integer;
+  out SpeedName: string): boolean;
+var
+  Ladder: array[0..9] of TMenuItem;
+  Count, i: integer;
+begin
+  Result := False;
+  SpeedTag := 0;
+  SpeedName := '';
+  for i := 0 to High(Ladder) do Ladder[i] := nil;
+  Count := SPISpeedMenuLadder(Ladder);
+  if Count = 0 then Exit;
+
+  if LadderPos < 0 then
+    for i := 0 to Count - 1 do
+      if Ladder[i].Checked then
+      begin
+        LadderPos := i;
+        Break;
+      end;
+  if (LadderPos < 0) or (LadderPos >= Count - 1) then Exit;
+
+  Inc(LadderPos);
+  SpeedTag := Ladder[LadderPos].Tag;
+  SpeedName := StringReplace(Ladder[LadderPos].Caption, '&', '',
+                             [rfReplaceAll]);
+  Result := True;
+end;
+
 function ReadPassesAgree(First: TMemoryStream; StartAddress, Size: cardinal;
   Passes: integer): boolean;
 var
   Again: TMemoryStream;
   Diff: cardinal;
   At: int64;
-  i: integer;
+  i, LadderPos, SpeedTag: integer;
+  SpeedName: string;
+  Dropped: boolean;
 begin
   Result := True;
   if (Passes < 2) or (First = nil) or (First.Size = 0) then Exit;
 
   Again := TMemoryStream.Create;
   try
-    for i := 2 to Passes do
+    LadderPos := -1;
+    Dropped := False;
+    i := 2;
+    while i <= Passes do
     begin
       LogPrint(Format(STR_READ_PASS, [i, Passes]));
 
@@ -3102,13 +3206,40 @@ begin
         Diff := CountDifferences(PByte(First.Memory), PByte(Again.Memory),
                                  First.Size);
         LogPrint(Format(STR_READ_UNSTABLE, [Diff, cardinal(At)]));
-        OpFail(Format('two reads of the same chip disagree in %d bytes', [Diff]),
-               At);
-        Exit(False);
+
+        //บันไดถอยคล็อก: อ่านไม่ตรงกันบ่อยที่สุดเพราะหน้าสัมผัสคลิปหลวมนิดเดียว
+        //ซึ่งมักหายเมื่อช้าลงหนึ่งขั้น ถ้าช้าสุดแล้วยังไม่ตรงกันค่อยปฏิเสธ
+        if not StepDownSPISpeed(LadderPos, SpeedTag, SpeedName) then
+        begin
+          OpFail(Format('two reads of the same chip disagree in %d bytes',
+                        [Diff]), At);
+          Exit(False);
+        end;
+
+        LogPrint(Format(STR_READ_RETRY_SLOWER, [SpeedName]));
+        if not EnterProgMode25(SpeedTag, MainForm.MenuSendAB.Checked) then
+        begin
+          OpFail('the programmer did not accept the slower SPI clock');
+          Exit(False);
+        end;
+        Dropped := True;
+
+        //ตัวอ้างอิงเดิมถ่ายที่คล็อกเร็วและอาจเป็นฝั่งที่ผิดเอง อ่านใหม่ทั้งคู่
+        //ที่ความเร็วนี้ แล้วเริ่มนับ pass ใหม่
+        ReadFlash25(First, StartAddress, Size);
+        if UserCancel then Exit(False);
+        if not OpOK then Exit(False);
+        i := 2;
+        Continue;
       end;
+
+      Inc(i);
     end;
 
     LogPrint(STR_READ_STABLE);
+    //ตรงกันก็จริง แต่ตรงกันที่ความเร็วต่ำกว่าที่ผู้ใช้เลือก บอกให้รู้ว่า
+    //งานหน้าจะช้าอีกถ้าไม่แก้หน้าสัมผัสหรือปรับเมนูความเร็วลง
+    if Dropped then LogPrint(Format(STR_READ_STABLE_SLOWER, [SpeedName]));
   finally
     Again.Free;
   end;
