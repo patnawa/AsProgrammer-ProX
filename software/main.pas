@@ -3783,23 +3783,6 @@ begin
   if Blank then OpBegin(opkErase) else OpBegin(opkWrite);
   ForgetChipContent;
 
-  //--- ทางเขียนยังปิดอยู่: วัดกับของจริงแล้วมันไม่ลง ---
-  //
-  //ลำดับที่ส่งตรงกับซอฟต์แวร์ของผู้ผลิตทุกไบต์แล้ว (จับ USB เทียบกันด้วย
-  //tools/ezpspy): descriptor 0007 เหมือนกันเป๊ะรวมรหัสชิป, อ่าน string
-  //descriptor ก่อน claim เหมือนกัน, 0005 ไม่อ่านคำตอบ, ก้อน 256 ไบต์ไป
-  //OUT|1, ปิดด้วย 0108, ไม่เรียก set_configuration, เพดานเวลา 5 วินาที
-  //เท่ากัน แต่ชิปไม่เปลี่ยน และคำตอบของ 0007 ฝั่งเราเป็นเนื้อชิปเก่าซ้ำ ๆ
-  //ขณะที่ของเขาเป็นแพ็กเก็ตสถานะ (01 EF 40 17)
-  //
-  //ยังไม่รู้ว่าเหลืออะไร จึงไม่เปิดให้ใช้ ปุ่มที่ทำชิปเสียเงียบ ๆ แย่กว่า
-  //ปุ่มที่บอกว่ายังทำไม่ได้ ทางอ่านใช้ได้ตามปกติ
-  OpFail('writing through the EZP2023+ is still disabled: the byte sequence ' +
-         'now matches the vendor software exactly and the chip still does ' +
-         'not change, so something outside the captured traffic is missing. ' +
-         'Read and identify work; write with a CH347, CH341 or FT232H');
-  Exit;
-
   if AsProgrammer.Current_HW <> CHW_EZP then
   begin
     OpFail('this path is only for the EZP2023+');
@@ -11675,6 +11658,18 @@ var
 
 begin
   if OperationRunning then Exit;
+
+  //EZP2023+ ไม่มีคำสั่ง SPI ดิบให้ตัววางแผนอ่าน sector ข้างเคียง ลบเป็น
+  //ช่วง หรือโปรแกรมเฉพาะเพจที่เปลี่ยน มันรับได้แต่ภาพทั้งชิปผ่านคำสั่งของ
+  //เฟิร์มแวร์ ปุ่ม Write ปกติคือเส้นทางที่ถูกต้องและตรวจกลับทุกไบต์ให้เอง
+  if AsProgrammer.Current_HW = CHW_EZP then
+  begin
+    OpBegin(opkWrite);
+    OpFail('Smart write is not available through the EZP2023+: its firmware ' +
+      'only accepts a whole-chip image. Use ordinary Write; it still reads ' +
+      'the entire chip back and verifies every byte.');
+    Exit;
+  end;
 
   //ตระกูลที่ลบไม่ได้ (24Cxx, 93xx, 95xx) มีตัวจัดการของตัวเอง: ไม่มีขั้นลบ
   //แผนจึงเป็นแค่ "เขียนเฉพาะหน้าที่ต่าง แล้วตรวจทุกหน้าที่แตะ"

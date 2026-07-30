@@ -1,0 +1,14 @@
+On another AMD64 Windows 10/11 PC, install this combination:
+
+  - Device binding/INF: signed EZP2023+ 1.2.6.0
+  - Kernel driver and runtime DLLs: signed libusb-win32 1.4.0.2
+
+  Connect one EZP2023+, open 64-bit PowerShell as Administrator in the extracted project/release folder, then run:
+
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\update_ezp_libusb1402.ps1
+
+  This installs the correct USB\VID_1FC8&PID_310B binding first, then upgrades the operational driver files to 1.4.0.2.
+
+  It is normal if Device Manager still displays 1.2.6.0; that is the INF metadata. Do not force-install or modify the generic
+  1.4.0.2 INF—it does not contain the EZP hardware ID. The automated installer currently supports AMD64 Windows, not Windows
+  on ARM.

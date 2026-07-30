@@ -233,10 +233,24 @@ Copy-Item "$root\scripts" $out -Recurse
 Copy-Item "$root\software\lang" $out -Recurse
 New-Item -ItemType Directory -Force "$out\icons" | Out-Null
 Copy-Item "$root\software\icons\modern" "$out\icons" -Recurse
+New-Item -ItemType Directory -Force "$out\drivers","$out\tools" | Out-Null
+Copy-Item "$root\drivers\EZP2023Plus" "$out\drivers" -Recurse
+Copy-Item "$root\tools\update_ezp_libusb1402.ps1" "$out\tools"
 
-# DLLs the program links against. They are not in the repository, so take them
-# from the upstream release, which is where they have always been published.
-$dlls = "CH341DLL.DLL","CH347DLL.DLL","ftd2xx.dll","libusb0.dll",
+# The EZP transport uses the signed libusb-win32 1.4.0.2 runtime kept in this
+# repository. Do not replace it with the older libusb0.dll in the upstream
+# release while assembling the ZIP.
+$libusbDll = "$root\software\libusb0.dll"
+if (-not (Test-Path $libusbDll)) { Die "software\libusb0.dll is missing" }
+$libusbVersion = (Get-Item $libusbDll).VersionInfo.FileVersion
+if ($libusbVersion -ne "1.4.0.2") {
+  Die "software\libusb0.dll is $libusbVersion, expected signed release 1.4.0.2"
+}
+Copy-Item $libusbDll $out
+
+# The remaining DLLs are not in the repository, so take them from the upstream
+# release, which is where they have always been published.
+$dlls = "CH341DLL.DLL","CH347DLL.DLL","ftd2xx.dll",
         "buzzpirathlp.dll","libiconv2.dll","libintl3.dll"
 $cache = Join-Path $env:TEMP "aspx-dlls"
 $missing = $dlls | Where-Object { -not (Test-Path (Join-Path $cache $_)) }

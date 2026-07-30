@@ -1179,7 +1179,7 @@ object MainForm: TMainForm
       end
       object MenuHWEZP: TMenuItem
         AutoCheck = True
-        Caption = 'EZP2023+ (read only)'
+        Caption = 'EZP2023+'
         RadioItem = True
         OnClick = MenuHWEZPClick
       end
