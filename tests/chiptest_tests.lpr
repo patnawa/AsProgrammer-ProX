@@ -318,6 +318,23 @@ begin
         (Pos('erase at', R.ErrorText) > 0));
 end;
 
+procedure TestEARBanks;
+begin
+  WriteLn('Extended-address-register bank arithmetic');
+  Check('address 0 is bank 0', EARBankOf(0) = 0);
+  Check('the last byte of bank 0 is bank 0',
+        EARBankOf(EAR_BANK_SIZE - 1) = 0);
+  Check('16 MB is bank 1', EARBankOf(EAR_BANK_SIZE) = 1);
+  Check('the top of a 32 MB chip is bank 1',
+        EARBankOf(2 * EAR_BANK_SIZE - 1) = 1);
+  Check('a chunk inside a bank is untouched',
+        EARChunkClamp(4096, 65535) = 65535);
+  Check('a chunk that would cross the boundary is clamped',
+        EARChunkClamp(EAR_BANK_SIZE - 4096, 8192) = 4096);
+  Check('a chunk starting exactly on the boundary keeps its length',
+        EARChunkClamp(EAR_BANK_SIZE, 8192) = 8192);
+end;
+
 procedure TestTiming;
 var
   Median, Worst: cardinal;
@@ -373,6 +390,7 @@ begin
   TestEraseDiesMidway;
   TestRefusals;
   TestBeyond16MB;
+  TestEARBanks;
   TestSurfaceScan;
   TestTiming;
   TestCrossCheck;

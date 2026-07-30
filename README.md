@@ -6,7 +6,7 @@
 
 Sector-level erase · SFDP auto-detect · checksums · responsive UI
 
-![version](https://img.shields.io/badge/version-4.18-2BB3F3?style=flat-square)
+![version](https://img.shields.io/badge/version-4.19-2BB3F3?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
 ![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
@@ -489,6 +489,18 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 ---
 
 ## Changelog
+
+### 4.19.0.0 — and the C5h bank-register chips too
+
+4.18 refused chips that reach their upper banks through the extended
+address register; now they are driven properly. The tests track the
+current 16 MB bank, rewrite the C5h register whenever an operation
+crosses into another bank — and read it back with C8h, because a bank
+that did not stick means every following command lands 16 MB away from
+where it was aimed — keep every frame 3-byte, clamp read chunks at bank
+boundaries (a 3-byte read that runs off the edge wraps silently back
+into the same bank), and always park the register at bank 0 on the way
+out, since that is what every other tool assumes.
 
 ### 4.18.0.0 — the chip tests learn 4-byte addressing
 

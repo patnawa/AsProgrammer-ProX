@@ -3368,32 +3368,99 @@ end;
 
 var
   CapEraseOpcode: byte = $20;
-  //ชิปเกิน 16MB คุยด้วยเฟรมแอดเดรส 4 ไบต์ ตั้งโดย ChipTestBegin4B เท่านั้น
+  //ชิปเกิน 16MB คุยได้สองแบบ ตั้งโดย ChipTestBegin4B เท่านั้น:
+  //CapUse4B = เข้าโหมด 4 ไบต์แล้ว ทุกเฟรมพกแอดเดรสเต็มสี่ไบต์
+  //CapUseEAR = ชิปตระกูล C5h เฟรมยังเป็น 3 ไบต์ ทะเบียน EAR เติม A31:24
   CapUse4B: boolean = False;
+  CapUseEAR: boolean = False;
+  CapEARBank: integer = -1;   //-1 = ยังไม่รู้ บังคับเขียนครั้งแรกเสมอ
 
 procedure ChipTestLogSink(const Msg: string);
 begin
   LogPrint(Msg);
 end;
 
-//เตรียมโหมดแอดเดรสให้เครื่องทดสอบ: ชิปเกิน 16MB ต้องเข้าโหมด 4 ไบต์ก่อน
-//แล้วทุกเฟรมของ callback จะพกแอดเดรสเต็มสี่ไบต์ ผู้เรียกต้อง Leave4B
-//ใน finally เสมอ (เรียกซ้ำได้ปลอดภัยเมื่อไม่ได้เข้า)
-//
-//ชิปตระกูล C5h (extended address register) สลับหน้า 16MB ผ่านทะเบียน
-//แล้วเฟรมยังเป็น 3 ไบต์ ซึ่งคนละตรรกะกันทั้งเส้น ยังไม่รองรับ บอกตรง ๆ
-function ChipTestBegin4B(ChipSize: QWord): boolean;
+//ตั้งหน้า 16MB ของชิปตระกูล EAR: WREN, เขียน C5h, แล้วอ่านกลับด้วย C8h
+//ทะเบียนที่ไม่ยอมติดคือคำตอบ ไม่ใช่รายละเอียด เพราะหน้าที่ผิดแปลว่า
+//ทุกคำสั่งถัดไปลงคนละ 16MB กับที่ตั้งใจทั้งยวง
+function CapSetBank(Bank: byte; out ErrorText: string): boolean;
+var
+  Cmd: array[0..1] of byte;
+  Back: array[0..0] of byte;
 begin
-  CapUse4B := ChipSize > QWord(16) * 1024 * 1024;
+  Result := False;
+  ErrorText := '';
+  if CapEARBank = integer(Bank) then Exit(True);
+
+  UsbAsp25_Wren();
+  Cmd[0] := $C5;
+  Cmd[1] := Bank;
+  if SPIWrite(1, 2, Cmd) <> 2 then
+  begin
+    ErrorText := 'the extended-address-register write was not transferred ' +
+                 'exactly';
+    Exit;
+  end;
+  Cmd[0] := $C8;
+  if (SPIWrite(0, 1, Cmd) <> 1) or (SPIRead(1, 1, Back) <> 1) then
+  begin
+    ErrorText := 'the extended address register could not be read back';
+    Exit;
+  end;
+  if Back[0] <> Bank then
+  begin
+    ErrorText := Format('the extended address register reads %.2x after ' +
+                        'writing %.2x; the bank did not stick',
+                        [Back[0], Bank]);
+    Exit;
+  end;
+  CapEARBank := integer(Bank);
   Result := True;
-  if not CapUse4B then Exit;
+end;
+
+//เตรียมโหมดแอดเดรสให้เครื่องทดสอบ ผู้เรียกต้อง ChipTestEnd4B ใน finally
+//เสมอ (เรียกซ้ำได้ปลอดภัยเมื่อไม่ได้เข้าโหมดใดเลย)
+function ChipTestBegin4B(ChipSize: QWord): boolean;
+var
+  Err: string;
+begin
+  CapUse4B := False;
+  CapUseEAR := False;
+  CapEARBank := -1;
+  Result := True;
+  if ChipSize <= QWord(16) * 1024 * 1024 then Exit;
+
   if Chip25Entry4B = E4B_EXTC5 then
   begin
-    OpFail('this chip reaches its upper banks through the extended ' +
-           'address register (C5h); the chip tests do not drive that yet');
-    Exit(False);
+    //ตระกูล EAR: ไม่มีโหมดให้เข้า มีแต่หน้าให้ตั้ง เริ่มที่หน้า 0 และ
+    //พิสูจน์เสียเลยว่าทะเบียนเขียนแล้วติดจริง
+    CapUseEAR := True;
+    Result := CapSetBank(0, Err);
+    if not Result then OpFail(Err);
+    Exit;
   end;
+
+  CapUse4B := True;
   Result := Enter4B;
+  if not Result then CapUse4B := False;
+end;
+
+//คืนสถานะแอดเดรสของชิปให้เหมือนก่อนเริ่ม: หน้า EAR กลับเป็นศูนย์
+//(เครื่องมือทุกตัวบนโลกตั้งสมมุติฐานนั้น) และออกจากโหมด 4 ไบต์
+procedure ChipTestEnd4B;
+var
+  Err: string;
+begin
+  if CapUseEAR then
+  begin
+    CapEARBank := -1; //บังคับให้เขียนจริง ไม่ใช่เชื่อแคชของตัวเอง
+    if not CapSetBank(0, Err) then
+      LogPrint('WARNING: the extended address register may be nonzero: ' +
+               Err);
+    CapUseEAR := False;
+  end;
+  Leave4B;
+  CapUse4B := False;
 end;
 
 function CapTestRead(Address: QWord; Len: cardinal; out Data: TBytes;
@@ -3412,10 +3479,19 @@ begin
   begin
     Chunk := AsProgrammer.Programmer.SPIMaxTransfer;
     if cardinal(Chunk) > Len - Off then Chunk := integer(Len - Off);
+    //หน้า EAR: ก้อนห้ามข้ามขอบ 16MB และหน้าต้องตรงก่อนทุกคำสั่ง
+    if CapUseEAR then
+      Chunk := integer(EARChunkClamp(Address + Off, cardinal(Chunk)));
     Tmp := nil;
     SetLength(Tmp, Chunk);
+    if CapUseEAR then
+    begin
+      if not CapSetBank(EARBankOf(Address + Off), ErrorText) then Exit;
+      Got := UsbAsp25_Read($03, longword((Address + Off) and $FFFFFF),
+                           Tmp, Chunk);
+    end
     //ในโหมด 4 ไบต์ opcode 03h เดิมรับแอดเดรสเต็มสี่ไบต์
-    if CapUse4B then
+    else if CapUse4B then
       Got := UsbAsp25_Read32bitAddr($03, longword(Address + Off), Tmp, Chunk)
     else
       Got := UsbAsp25_Read($03, longword(Address + Off), Tmp, Chunk);
@@ -3438,12 +3514,25 @@ var
 begin
   Result := False;
   ErrorText := '';
+  //เซกเตอร์เรียงตามขอบของตัวเอง ไม่มีทางคร่อมขอบหน้า 16MB
+  if CapUseEAR then
+    if not CapSetBank(EARBankOf(Address), ErrorText) then Exit;
   if not UsbAsp25_WrenChecked(WEL) then
   begin
     ErrorText := 'the chip did not accept write enable';
     Exit;
   end;
-  if UsbAsp25_EraseSector(CapEraseOpcode, longword(Address), CapUse4B) < 0 then
+  if CapUseEAR then
+  begin
+    if UsbAsp25_EraseSector(CapEraseOpcode, longword(Address and $FFFFFF),
+                            False) < 0 then
+    begin
+      ErrorText := 'the erase command was not transferred exactly';
+      Exit;
+    end;
+  end
+  else if UsbAsp25_EraseSector(CapEraseOpcode, longword(Address),
+                               CapUse4B) < 0 then
   begin
     ErrorText := 'the erase command was not transferred exactly';
     Exit;
@@ -3468,12 +3557,24 @@ begin
     ErrorText := 'a program chunk must be 1..256 bytes';
     Exit;
   end;
+  //ก้อนเขียนยาวไม่เกินหนึ่งเพจและเรียงตามเพจ ไม่มีทางคร่อมขอบหน้า 16MB
+  if CapUseEAR then
+    if not CapSetBank(EARBankOf(Address), ErrorText) then Exit;
   if not UsbAsp25_WrenChecked(WEL) then
   begin
     ErrorText := 'the chip did not accept write enable';
     Exit;
   end;
-  if CapUse4B then
+  if CapUseEAR then
+  begin
+    if UsbAsp25_Write($02, longword(Address and $FFFFFF), Data,
+                      Length(Data)) <> Length(Data) then
+    begin
+      ErrorText := 'the program command was not transferred exactly';
+      Exit;
+    end;
+  end
+  else if CapUse4B then
   begin
     if UsbAsp25_Write32bitAddr($02, longword(Address), Data,
                                Length(Data)) <> Length(Data) then
@@ -3571,7 +3672,7 @@ begin
                  'the sectors named above may hold FF or marker data');
     end;
   finally
-    Leave4B;
+    ChipTestEnd4B;
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
   end;
@@ -3653,7 +3754,7 @@ begin
     else
       OpFail(R.ErrorText);
   finally
-    Leave4B;
+    ChipTestEnd4B;
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
     SetProgressPos(0);
@@ -3717,6 +3818,7 @@ begin
     LogPrint('Chip health check (nothing is written)');
     //หมออ่านแค่ช่วงต้นชิป (ไม่เกิน 256KB) เฟรม 3 ไบต์พอเสมอ
     CapUse4B := False;
+    CapUseEAR := False;
 
     //1 ความนิ่งของรหัส: อ่านแปดครั้งต้องได้ค่าเดิม บังคับเปิดการตรวจ
     //ชั่วคราวแม้ผู้ใช้ปิดเมนูไว้ เพราะทั้งงานนี้คือการตรวจนั่นเอง

@@ -99,6 +99,18 @@ function RunSurfaceScan(ChipSize: QWord; SectorSize: cardinal;
   Log: TChipTestLog; Progress: TSurfaceProgress;
   ShouldStop: TSurfaceShouldStop; out R: TSurfaceScanResult): boolean;
 
+const
+  //ชิปตระกูล extended address register (C5h) มองเห็นทีละหน้า 16MB
+  //เฟรมคำสั่งยังเป็น 3 ไบต์ ทะเบียน EAR เติมบิต A31:24 ให้
+  EAR_BANK_SIZE = QWord(16) * 1024 * 1024;
+
+//หน้า 16MB ของแอดเดรสนี้
+function EARBankOf(Address: QWord): byte;
+
+//ตัดความยาวก้อนไม่ให้ข้ามขอบหน้า: คำสั่ง 3 ไบต์ที่วิ่งเลยขอบจะวนกลับ
+//ต้นหน้าเดิมเงียบ ๆ แบบเดียวกับที่ 24Cxx วนขอบ bank ของมัน
+function EARChunkClamp(Address: QWord; Len: cardinal): cardinal;
+
 //แฟลชตายแบบช้าลงก่อนแล้วค่อยพัง: บล็อกที่ใช้เวลาลบ/เขียนนานผิดฝูงคือ
 //บล็อกที่กำลังหมดอายุ ก่อนที่ verify จะเริ่มจับได้เสียอีก ตัวเลขพวกนี้
 //ได้มาฟรีจากการรอ BUSY อยู่แล้ว เหลือแค่ดูให้เป็น
@@ -557,6 +569,20 @@ begin
 
   R.Completed := True;
   Result := True;
+end;
+
+function EARBankOf(Address: QWord): byte;
+begin
+  Result := byte(Address div EAR_BANK_SIZE);
+end;
+
+function EARChunkClamp(Address: QWord; Len: cardinal): cardinal;
+var
+  Room: QWord;
+begin
+  Room := EAR_BANK_SIZE - (Address mod EAR_BANK_SIZE);
+  if QWord(Len) > Room then Result := cardinal(Room)
+  else Result := Len;
 end;
 
 function TimingMedian(const Durations: array of cardinal): cardinal;
