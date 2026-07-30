@@ -32,7 +32,8 @@ uses
   Windows, Forms, main, basehw, fileformats, findchip, sfdp, jedec, appver,
   opresult, prodlog, serialnum, spi25, utilfunc, imgcheck, ifd, DateUtils,
   prodcrypto, prodjob, prodstate, productiongate, electricalpreflight,
-  chipprofile, chipsave;
+  chipprofile, chipsave,
+  nandmodel, nandplanner, nandengine, spi25nandadapter, nandcatalog;
 
 const
   EXIT_OK    = 0;
@@ -40,17 +41,17 @@ const
   EXIT_USAGE = 2;
 
   //สวิตช์ที่ตามด้วยค่า
-  ValueSwitches: array[0..20] of string = (
+  ValueSwitches: array[0..21] of string = (
     'chip', 'hw', 'read', 'write', 'verify', 'job', 'operator', 'log', 'save-chip',
     'read-passes', 'sfdp-dump', 'sfdp-decode', 'compare', 'scan',
     'prod-job', 'prod-auth', 'prod-key-id', 'prod-key-env', 'evidence-dir',
-    'export-chip', 'region'
+    'export-chip', 'region', 'nand-read'
   );
 
   //สวิตช์ที่เป็นธงเปล่า ๆ
-  FlagSwitches: array[0..9] of string = (
+  FlagSwitches: array[0..11] of string = (
     'erase', 'detect', 'sfdp', 'help', 'force', 'json', 'verify',
-    'no-fast-read', 'smart', 'plan-only'
+    'no-fast-read', 'smart', 'plan-only', 'nand-info', 'nand-raw'
   );
 
   //The secret source is station policy, not an arbitrary caller-selected
@@ -209,6 +210,16 @@ begin
   Say('  --sfdp-dump F   write the chip''s raw SFDP table to F');
   Say('  --sfdp-decode F decode an SFDP table saved earlier, no chip needed');
   Say('  --no-fast-read  use 03h instead of 0Bh even when the chip declares SFDP');
+  Say('');
+  Say('  SPI NAND (W25N, GD5F, MX35 and friends -- separate command model,');
+  Say('  bad blocks and on-die ECC; --chip is not used):');
+  Say('  --nand-info     identify the chip, scan the factory bad-block');
+  Say('                  markers and report the map. Read-only');
+  Say('  --nand-read F   dump every good block in order to F, skipping bad');
+  Say('                  blocks, with the chip''s ECC verdict checked on');
+  Say('                  every page. An uncorrectable page fails the dump');
+  Say('  --nand-raw      with --nand-read: include the spare areas (ECC off,');
+  Say('                  bytes exactly as stored)');
   Say('');
   Say('  Production:');
   Say('  --job FILE      refuse to write unless the buffer matches the job file');
@@ -516,10 +527,11 @@ begin
      (SwitchValue('sfdp-decode') <> '') or
      (SwitchValue('save-chip') <> '') or
      (SwitchValue('export-chip') <> '') or
-     (SwitchValue('read-passes') <> '') then
+     (SwitchValue('read-passes') <> '') or
+     HasSwitch('nand-info') or (SwitchValue('nand-read') <> '') then
     Exit(Reject('authenticated production cannot be combined with read, ' +
-      'write, erase, verify, force, legacy-job/log, detection, or offline ' +
-      'inspection switches', EXIT_USAGE));
+      'write, erase, verify, force, legacy-job/log, detection, NAND, or ' +
+      'offline inspection switches', EXIT_USAGE));
 
   if KeyEnvName <> STATION_HMAC_KEY_ENV then
     Exit(Reject('--prod-key-env must name the station-locked ' +
@@ -731,6 +743,162 @@ begin
     ClearSensitiveBytes(Key);
     for i := 1 to Length(KeyHex) do KeyHex[i] := #0;
     KeyHex := '';
+  end;
+end;
+
+//งาน SPI NAND ทั้งหมดของ CLI: ระบุชิป สแกนบล็อกเสีย และดัมป์
+//แยกจากทางปุ่มของหน้าต่างหลักทั้งเส้น เพราะ NAND ใช้ตัววางแผนกับ
+//ตัวปฏิบัติการของมันเอง ไม่มีปุ่มบนจอให้ยืม
+function RunNANDCLI(Json: boolean): integer;
+var
+  Config: TSPINANDConfig;
+  Dev: TSPINANDDevice;
+  Raw: TBytes;
+  Entry: TNANDCatalogEntry;
+  Geo: TNANDGeometry;
+  Layout: TNANDImageLayout;
+  Map: TNANDBlockMap;
+  Plan: TNANDPlan;
+  Image: TBytes;
+  Err, FileName, IDText, BadText, Action: string;
+  IO: TNANDIOResult;
+  Rep: TNANDRunReport;
+  i: SizeInt;
+  BadCount: cardinal;
+  F: TFileStream;
+  UsableBytes: QWord;
+
+  function Fail(const Msg: string): integer;
+  begin
+    Say(Msg);
+    OpFail(Msg);
+    if Json then SayJson(Action);
+    Result := EXIT_FAIL;
+  end;
+
+begin
+  FileName := SwitchValue('nand-read');
+  if FileName <> '' then Action := 'nand-read' else Action := 'nand-info';
+  OpBegin(opkDetect);
+
+  if HasSwitch('nand-raw') then Layout := nilRaw else Layout := nilMainOnly;
+
+  if not OpenDevice() then
+    Exit(Fail('the programmer could not be opened'));
+  try
+    if not EnterProgModeSPI25 then
+      Exit(Fail('the programmer could not initialize the SPI bus'));
+
+    Config := DefaultSPINANDConfig;
+    if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
+      Config.ReadTransport := sntCombinedWriteRead;
+
+    //ยังไม่รู้ว่าชิปตัวไหน: reset กับอ่าน ID ไม่พึ่ง geometry จริง
+    //ใช้ตัวเล็ก ๆ ไปพลางก่อน แล้วสร้างใหม่เมื่อรู้แล้ว
+    if not BuildNANDGeometry(2048, 64, 64, 1, Layout, Geo, Err) then
+      Exit(Fail('internal geometry error: ' + Err));
+
+    Dev := TSPINANDDevice.Create(AsProgrammer.Programmer, Geo, Config);
+    try
+      IO := Dev.Reset;
+      if not IO.Success then
+        Exit(Fail('the NAND did not come out of reset: ' + IO.ErrorText));
+      IO := Dev.ReadRawID(Raw);
+      if not IO.Success then
+        Exit(Fail('reading the NAND id failed: ' + IO.ErrorText));
+    finally
+      Dev.Free;
+    end;
+
+    IDText := '';
+    for i := 0 to High(Raw) do IDText := IDText + IntToHex(Raw[i], 2);
+    Say('NAND ID(9F): ' + IDText);
+
+    if not NANDIdentify(Raw, Entry) then
+    begin
+      Say('this id is not in the NAND catalog. The parts this build can drive:');
+      Say(NANDCatalogList);
+      Exit(Fail('unknown SPI NAND id ' + IDText));
+    end;
+    if not NANDCatalogGeometry(Entry, Layout, Geo, Err) then
+      Exit(Fail('the catalog geometry does not validate: ' + Err));
+
+    Say(Format('%s %s: %d blocks x %d pages x (%d+%d) bytes, %d MB main',
+        [string(Entry.Vendor), string(Entry.Name), Geo.BlockCount,
+         Geo.PagesPerBlock, Geo.PageSize, Geo.SpareSize,
+         NANDMainSize(Geo) div (1024 * 1024)]));
+
+    Dev := TSPINANDDevice.Create(AsProgrammer.Programmer, Geo, Config);
+    try
+      Say('scanning the factory bad-block markers...');
+      if not ScanNANDBadBlocks(Dev, Geo, Map, Err) then
+        Exit(Fail('the bad-block scan failed: ' + Err));
+
+      BadCount := Geo.BlockCount - NANDCountUsable(Map);
+      BadText := '';
+      for i := 0 to High(Map) do
+        if Map[i] <> nbsGood then
+        begin
+          if BadText <> '' then BadText := BadText + ', ';
+          BadText := BadText + IntToStr(i);
+          if Length(BadText) > 200 then
+          begin
+            BadText := BadText + ', ...';
+            Break;
+          end;
+        end;
+      if BadCount = 0 then
+        Say('no bad blocks')
+      else
+        Say(Format('%d bad blocks: %s', [BadCount, BadText]));
+
+      if Action = 'nand-info' then
+      begin
+        if Json then SayJson(Action);
+        Exit(EXIT_OK);
+      end;
+
+      //ดัมป์บล็อกดีทั้งหมดตามลำดับ ข้ามบล็อกเสีย (แผน nbpSkip)
+      UsableBytes := QWord(NANDCountUsable(Map)) * NANDImageBlockStride(Geo);
+      if UsableBytes = 0 then
+        Exit(Fail('every block is bad; there is nothing to dump'));
+      if not PlanNANDRead(Geo, Map, 0, UsableBytes, nbpSkip, Plan, Err) then
+        Exit(Fail('planning the dump failed: ' + Err));
+
+      Image := nil;
+      SetLength(Image, Plan.ReadBytes);
+      Say(Format('reading %d bytes from %d good blocks...',
+                 [Plan.ReadBytes, Plan.BlocksUsed]));
+      Rep := ExecuteNANDRead(Dev, Geo, Map, Plan, Image, nil, nil);
+      if not Rep.Success then
+        Exit(Fail('the dump failed: ' + Rep.ErrorText));
+      if Rep.CorrectedPages > 0 then
+        Say(Format('the chip corrected bit errors on %d pages; the data ' +
+                   'is good but the part is aging', [Rep.CorrectedPages]));
+
+      try
+        F := TFileStream.Create(FileName, fmCreate);
+        try
+          F.WriteBuffer(Image[0], Length(Image));
+        finally
+          F.Free;
+        end;
+      except
+        on E: Exception do
+          Exit(Fail('could not save ' + FileName + ': ' + E.Message));
+      end;
+      if Plan.BlocksSkipped > 0 then
+        Say(Format('%d bad blocks were skipped; the file holds the good ' +
+                   'blocks in order', [Plan.BlocksSkipped]));
+      Say('written to ' + FileName);
+      if Json then SayJson(Action);
+      Exit(EXIT_OK);
+    finally
+      Dev.Free;
+    end;
+  finally
+    ExitProgMode25;
+    AsProgrammer.Programmer.DevClose;
   end;
 end;
 
@@ -1075,6 +1243,10 @@ begin
       AsProgrammer.Programmer.DevClose;
     end;
   end;
+
+  //SPI NAND เดินคนละเส้นทั้งสาย: ไม่ใช้ตารางชิป ไม่ใช้ปุ่มของหน้าต่างหลัก
+  if HasSwitch('nand-info') or (SwitchValue('nand-read') <> '') then
+    Exit(RunNANDCLI(Json));
 
   if CurrentICParam.Size = 0 then
   begin

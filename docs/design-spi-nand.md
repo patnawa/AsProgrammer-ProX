@@ -1,28 +1,38 @@
 # Design: SPI NAND support with bad blocks and ECC
 
-Status: **phase 1 built** (task 10). `nandmodel.pas` (geometry, image layout,
-block map) and `nandplanner.pas` (bad-block-aware read/erase/program plans)
-are implemented and covered by `tests/nandplanner_tests.lpr` — 49 checks
-including 500 randomised bad-block layouts, run on both toolchains.
+Status: **phase 2 built** (4.11.0.0). On top of phase 1's `nandmodel.pas` /
+`nandplanner.pas` (49 checks, 500 randomised layouts):
 
-What phase 1 pins down, and why it came first: the planner can never emit a
-step that touches a block the map does not call **good**, and a block whose
-state is `unknown` is not good — an unscanned map satisfies no request at
-all. `ValidateNANDPlan` re-checks that independently of the builder, so the
-tests assert on the plan rather than trusting the code that made it. It also
-rejects programming a block that was never erased, page indices past the end
-of a block, and gaps in the image offsets.
+- `nandengine.pas` — the executor. Scans factory markers with ECC off
+  (an erased page has no codeword; GD5F flags that as an ECC failure) and
+  restores the previous ECC state; checks the ECC verdict after every page
+  of a main-only read and fails an uncorrectable page naming block and
+  page; counts corrected pages; unlocks before programming and believes
+  only the read-back of the protection register; checks E_FAIL/P_FAIL
+  after every erase/program; reads every programmed page back.
+- `tests/virtualspinand.pas` + `tests/nandengine_tests.lpr` — the virtual
+  chip models AND-programming, factory markers, injectable corrected /
+  uncorrectable pages, P_FAIL/E_FAIL, silent protection (a locked chip
+  ignores program/erase without raising anything — only read-back
+  catches a chip that lies about unlocking), and a fail-the-Nth-call
+  fault matrix. 300 randomised layouts round-trip. Both toolchains.
+- `spi25nandadapter.pas` — wire framing over `TBaseHardware` (13h/03h/
+  02h/10h/D8h/0Fh/1Fh/FFh/9Fh), exact-transfer discipline, all-FF status
+  treated as a silent bus, WEL confirmed after WREN, feature-register
+  writes read back.
+- `nandcatalog.pas` — the JEDEC-ID catalog (W25N512GV/01GV/02KV,
+  GD5F1GQ4UA/UB, MX35LF1GE4AB, TC58CVG0S3), matching both the with-dummy
+  and no-dummy 9Fh reply shapes. Only single-plane parts whose command
+  set matches the adapter's assumptions are admitted.
+- CLI: `--nand-info` (identify + bad-block scan, read-only) and
+  `--nand-read FILE` (dump every good block in order, skip policy, ECC
+  verdict per page; `--nand-raw` for main+spare with ECC off).
 
-Both bad-block policies are implemented: `nbpRefuse` (exact placement — a bad
-block anywhere in the range fails the whole request rather than silently
-moving the payload) and `nbpSkip` (step over it, which is what a
-skip-block-aware bootloader expects).
-
-Still to build: `nandengine.pas` (executor with on-die ECC status checks and
-P_FAIL/E_FAIL after every program/erase), `spi25nandadapter.pas` (wire
-framing), `virtualspinand.pas` (injectable bit errors and factory markers),
-detection via the parameter page, and the chiplist `spicmd="NAND"` family.
-The order below is unchanged for those.
+Still to build (phase 3): erase/write from the CLI, GUI integration, ONFI
+parameter-page detection for parts not in the catalog (needs ECC-off page
+reads at address 01h), and the chiplist `spicmd="NAND"` family once the
+GUI knows what to do with it. Live validation on CH347 hardware with a
+W25N01GV is the gate before erase/write ships.
 
 ## What makes NAND different (and why the current code must not touch it)
 

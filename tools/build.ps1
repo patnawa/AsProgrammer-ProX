@@ -145,6 +145,14 @@ Run-Suite "nandplanner_tests" $nandDir @(
   "$root\tests\nandplanner_tests.lpr", "$root\software\nandmodel.pas",
   "$root\software\nandplanner.pas")
 
+# The NAND executor against the virtual chip: ECC verdicts, P_FAIL/E_FAIL,
+# silent protection, cancellation, the fault matrix, and the id catalog.
+$nandEngineDir = Join-Path $env:TEMP "aspx-tests-nand-engine"
+Run-Suite "nandengine_tests" $nandEngineDir @(
+  "$root\tests\nandengine_tests.lpr", "$root\tests\virtualspinand.pas",
+  "$root\software\nandmodel.pas", "$root\software\nandplanner.pas",
+  "$root\software\nandengine.pas", "$root\software\nandcatalog.pas")
+
 # Real TBaseHardware-to-NOR-service adapter framing, identity gates, exact
 # transfer counts, four-byte strategies, and exactly-once cleanup.
 $adapterDir = Join-Path $env:TEMP "aspx-tests-spi25-adapter"

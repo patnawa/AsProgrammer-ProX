@@ -106,12 +106,19 @@ run_suite eepromengine_tests "$eeprom" \
   tests/eepromengine_tests.lpr tests/virtualeeprom.pas \
   software/operationmodel.pas software/eepromengine.pas
 
-# SPI NAND geometry and bad-block-aware planning. The engine and adapter are
-# not built yet; this is the arithmetic that decides whether a bad block is
-# ever touched, so it is tested first and on its own.
+# SPI NAND geometry and bad-block-aware planning: the arithmetic that decides
+# whether a bad block is ever touched.
 nand="$tmp/nand"
 run_suite nandplanner_tests "$nand" \
   tests/nandplanner_tests.lpr software/nandmodel.pas software/nandplanner.pas
+
+# The NAND executor against the virtual chip: ECC verdicts, P_FAIL/E_FAIL,
+# silent protection, cancellation, the fault matrix, and the id catalog.
+nand_engine="$tmp/nand-engine"
+run_suite nandengine_tests "$nand_engine" \
+  tests/nandengine_tests.lpr tests/virtualspinand.pas \
+  software/nandmodel.pas software/nandplanner.pas \
+  software/nandengine.pas software/nandcatalog.pas
 
 adapter="$tmp/spi25-adapter"
 run_suite spi25noradapter_tests "$adapter" \
