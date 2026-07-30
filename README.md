@@ -6,7 +6,7 @@
 
 Sector-level erase · SFDP auto-detect · checksums · responsive UI
 
-![version](https://img.shields.io/badge/version-4.17-2BB3F3?style=flat-square)
+![version](https://img.shields.io/badge/version-4.18-2BB3F3?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
 ![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
@@ -34,7 +34,7 @@ programmers, while staying free and open source.
 | **Read twice and compare** | A SOIC clip with one marginal contact returns a dump that is the right size, reads every byte, raises nothing, and is wrong. Reading the chip twice and diffing is the only thing that catches it. When the passes disagree, the SPI clock steps down the programmer's own speed menu and both passes are reread — a marginal contact is usually fine one step slower — and the dump is refused only when the slowest clock still disagrees. One that stabilised below the selected clock says so, naming the speed that worked. |
 | **Intel flash descriptor regions** | A dump holding an Intel descriptor logs its region map — where the BIOS starts, where the ME ends, and whether a region runs off the end of the image (the signature of a too-small chip selection). On the command line, `--region bios` reads, writes or verifies just that region; with `--smart` it reflashes a BIOS without touching the ME. |
 | **SPI NAND (read, CLI)** | `--nand-info` identifies the chip and scans the factory bad-block markers; `--nand-read` dumps every good block in order with the chip's own ECC verdict checked after every page — an uncorrectable page fails the dump by block and page instead of returning plausible garbage. W25N512GV/01GV/02KV, GD5F1GQ4UA/UB, MX35LF1GE4AB, TC58CVG0S3. Erase/write land after live hardware validation. |
-| **Chip health checks** | A non-destructive *chip doctor* (id stability, id opcode cross-check, WREN/WRDI execution proof, SFDP size consistency, fast-vs-slow clock read). A *true capacity test* that catches remarked fakes the way h2testw catches fake USB sticks — markers at power-of-two boundaries, with every touched sector backed up, restored and byte-verified. A destructive *surface scan* (badblocks for SPI NOR): erase/55/AA/address-stamp per block with a bad-block map. Erase jobs warn when blocks erase five times slower than the median — flash slows down before it fails. |
+| **Chip health checks** | A non-destructive *chip doctor* (id stability, id opcode cross-check, WREN/WRDI execution proof, SFDP size consistency, fast-vs-slow clock read). A *true capacity test* that catches remarked fakes the way h2testw catches fake USB sticks — markers at power-of-two boundaries, with every touched sector backed up, restored and byte-verified. A destructive *surface scan* (badblocks for SPI NOR): erase/55/AA/address-stamp per block with a bad-block map; both tests drive 4-byte addressing on chips beyond 16 MB. Erase jobs warn when blocks erase five times slower than the median — flash slows down before it fails. |
 | **AT45 geometry from the chip** | A DataFlash declares its family, capacity and page mode in its status register, so the selected page size is checked against the real chip before every operation — a 161 in power-of-2 mode has 512-byte pages, and driving it as 528 would shift every address in the job. Read ID fills both size fields from the chip itself. |
 | **The connection is checked before anything is touched** | The JEDEC id is read eight times before every read, write and erase. If it is not identical every time, the job stops before a single byte moves. |
 | **Write enable is confirmed, not assumed** | `WREN` is followed by a status register read to confirm `WEL` actually latched. A chip with `WP#` held low accepts `WREN`, ignores it, and then silently ignores everything after it. That used to surface as "verify failed at every address" after the whole write; now it is *"the chip did not accept write enable"* before the first page. |
@@ -489,6 +489,17 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 ---
 
 ## Changelog
+
+### 4.18.0.0 — the chip tests learn 4-byte addressing
+
+The capacity test and the surface scan now drive chips beyond 16 MB —
+W25Q256, MX25L256, GD25Q256 and friends up to 256 MB. The session enters
+the chip's own 4-byte mode (B7h, WREN+B7h, the Spansion bank register or
+Micron's B1h, per what the chip declares) and every erase, program and
+read frame carries the full four-byte address; the mode is unwound in a
+`finally` like everywhere else. Chips that reach their upper banks only
+through the C5h extended address register are refused with a message
+saying exactly that, rather than silently testing the wrong 16 MB.
 
 ### 4.17.0.0 — surface scan: badblocks for SPI NOR
 

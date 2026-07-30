@@ -3368,10 +3368,32 @@ end;
 
 var
   CapEraseOpcode: byte = $20;
+  //ชิปเกิน 16MB คุยด้วยเฟรมแอดเดรส 4 ไบต์ ตั้งโดย ChipTestBegin4B เท่านั้น
+  CapUse4B: boolean = False;
 
 procedure ChipTestLogSink(const Msg: string);
 begin
   LogPrint(Msg);
+end;
+
+//เตรียมโหมดแอดเดรสให้เครื่องทดสอบ: ชิปเกิน 16MB ต้องเข้าโหมด 4 ไบต์ก่อน
+//แล้วทุกเฟรมของ callback จะพกแอดเดรสเต็มสี่ไบต์ ผู้เรียกต้อง Leave4B
+//ใน finally เสมอ (เรียกซ้ำได้ปลอดภัยเมื่อไม่ได้เข้า)
+//
+//ชิปตระกูล C5h (extended address register) สลับหน้า 16MB ผ่านทะเบียน
+//แล้วเฟรมยังเป็น 3 ไบต์ ซึ่งคนละตรรกะกันทั้งเส้น ยังไม่รองรับ บอกตรง ๆ
+function ChipTestBegin4B(ChipSize: QWord): boolean;
+begin
+  CapUse4B := ChipSize > QWord(16) * 1024 * 1024;
+  Result := True;
+  if not CapUse4B then Exit;
+  if Chip25Entry4B = E4B_EXTC5 then
+  begin
+    OpFail('this chip reaches its upper banks through the extended ' +
+           'address register (C5h); the chip tests do not drive that yet');
+    Exit(False);
+  end;
+  Result := Enter4B;
 end;
 
 function CapTestRead(Address: QWord; Len: cardinal; out Data: TBytes;
@@ -3392,7 +3414,11 @@ begin
     if cardinal(Chunk) > Len - Off then Chunk := integer(Len - Off);
     Tmp := nil;
     SetLength(Tmp, Chunk);
-    Got := UsbAsp25_Read($03, longword(Address + Off), Tmp, Chunk);
+    //ในโหมด 4 ไบต์ opcode 03h เดิมรับแอดเดรสเต็มสี่ไบต์
+    if CapUse4B then
+      Got := UsbAsp25_Read32bitAddr($03, longword(Address + Off), Tmp, Chunk)
+    else
+      Got := UsbAsp25_Read($03, longword(Address + Off), Tmp, Chunk);
     if Got <> Chunk then
     begin
       ErrorText := Format('read at 0x%.8x moved %d of %d bytes',
@@ -3417,7 +3443,7 @@ begin
     ErrorText := 'the chip did not accept write enable';
     Exit;
   end;
-  if UsbAsp25_EraseSector(CapEraseOpcode, longword(Address), False) < 0 then
+  if UsbAsp25_EraseSector(CapEraseOpcode, longword(Address), CapUse4B) < 0 then
   begin
     ErrorText := 'the erase command was not transferred exactly';
     Exit;
@@ -3447,8 +3473,17 @@ begin
     ErrorText := 'the chip did not accept write enable';
     Exit;
   end;
-  if UsbAsp25_Write($02, longword(Address), Data, Length(Data)) <>
-     Length(Data) then
+  if CapUse4B then
+  begin
+    if UsbAsp25_Write32bitAddr($02, longword(Address), Data,
+                               Length(Data)) <> Length(Data) then
+    begin
+      ErrorText := 'the program command was not transferred exactly';
+      Exit;
+    end;
+  end
+  else if UsbAsp25_Write($02, longword(Address), Data, Length(Data)) <>
+          Length(Data) then
   begin
     ErrorText := 'the program command was not transferred exactly';
     Exit;
@@ -3508,11 +3543,13 @@ begin
     //ชิปที่ล็อกอยู่รับคำสั่งลบแล้วเมินเงียบ ๆ ผลจะออกมาเป็น "เก็บข้อมูล
     //ไม่อยู่" ทั้งที่ความจริงคือยังไม่ได้ปลดล็อก กันไว้ก่อนตรงนี้
     if not ProtectionGuardOK(0, cardinal(ClaimedSize)) then Exit;
+    if not ChipTestBegin4B(ClaimedSize) then Exit;
 
     LogPrint(Format('True capacity test: claimed %d KB, %d KB sectors ' +
-                    '(opcode %.2xh)',
+                    '(opcode %.2xh%s)',
                     [ClaimedSize div 1024, SectorSz div 1024,
-                     CapEraseOpcode]));
+                     CapEraseOpcode,
+                     BoolToStr(CapUse4B, ', 4-byte addressing', '')]));
     if RunCapacityTest(ClaimedSize, SectorSz, @CapTestRead, @CapTestErase,
                        @CapTestProgram, @ChipTestLogSink, R) then
     begin
@@ -3534,6 +3571,7 @@ begin
                  'the sectors named above may hold FF or marker data');
     end;
   finally
+    Leave4B;
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
   end;
@@ -3591,6 +3629,7 @@ begin
     end;
     if not ContactIsStable then Exit;
     if not ProtectionGuardOK(0, cardinal(ChipSize)) then Exit;
+    if not ChipTestBegin4B(ChipSize) then Exit;
 
     if RunSurfaceScan(ChipSize, SectorSz, @CapTestRead, @CapTestErase,
                       @CapTestProgram, @ChipTestLogSink,
@@ -3614,6 +3653,7 @@ begin
     else
       OpFail(R.ErrorText);
   finally
+    Leave4B;
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
     SetProgressPos(0);
@@ -3675,6 +3715,8 @@ begin
     end;
 
     LogPrint('Chip health check (nothing is written)');
+    //หมออ่านแค่ช่วงต้นชิป (ไม่เกิน 256KB) เฟรม 3 ไบต์พอเสมอ
+    CapUse4B := False;
 
     //1 ความนิ่งของรหัส: อ่านแปดครั้งต้องได้ค่าเดิม บังคับเปิดการตรวจ
     //ชั่วคราวแม้ผู้ใช้ปิดเมนูไว้ เพราะทั้งงานนี้คือการตรวจนั่นเอง
@@ -7585,7 +7627,7 @@ begin
   //เขียนจริง (สำรองและกู้คืนให้) แต่ไฟดับกลางคันคือข้อมูลบางเซกเตอร์หาย
   //ให้ผู้ใช้ตัดสินใจเองก่อนเสมอ
   if MessageDlg('True capacity test',
-       'This test really erases and rewrites up to 13 sectors (they are ' +
+       'This test really erases and rewrites up to 17 sectors (they are ' +
        'backed up first and restored afterwards, byte-verified). ' +
        'If power is lost mid-test, those sectors are lost. ' + LineEnding +
        LineEnding + 'Run the test?',

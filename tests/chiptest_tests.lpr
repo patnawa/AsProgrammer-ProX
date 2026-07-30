@@ -230,10 +230,35 @@ begin
                             @FakeProgram, @QuietLog, R));
   Check('nothing was erased or written',
         (EraseCalls = 0) and (ProgramCalls = 0));
-  Check('a chip above 16 MB is refused for now',
-        not RunCapacityTest(QWord(32) * 1024 * 1024, SECTOR, @FakeRead,
+  Check('a size beyond any real SPI NOR is refused',
+        not RunCapacityTest(QWord(512) * 1024 * 1024, SECTOR, @FakeRead,
                             @FakeErase, @FakeProgram, @QuietLog, R));
-  Check('the reason is addressing', Pos('4-byte', R.ErrorText) > 0);
+  Check('the reason names the 256 MB ceiling',
+        Pos('256 MB', R.ErrorText) > 0);
+end;
+
+procedure TestBeyond16MB;
+var
+  Before: TBytes;
+  R: TCapacityResult;
+begin
+  WriteLn('Chips beyond the 3-byte address space');
+  FakeReset(QWord(32) * 1024 * 1024);
+  Before := Copy(FakeMem, 0, Length(FakeMem));
+  Check('a genuine 32 MB chip tests clean',
+        RunCapacityTest(QWord(32) * 1024 * 1024, SECTOR, @FakeRead,
+                        @FakeErase, @FakeProgram, @QuietLog, R) and
+        R.Genuine and R.RestoredOK);
+  Check('thirteen probes cover 32 MB', R.ProbeCount = 13);
+  Check('its content survives', SnapshotEquals(Before));
+
+  FakeReset(4 * 1024 * 1024);
+  Before := Copy(FakeMem, 0, Length(FakeMem));
+  Check('a 4 MB die remarked as 32 MB is exposed',
+        RunCapacityTest(QWord(32) * 1024 * 1024, SECTOR, @FakeRead,
+                        @FakeErase, @FakeProgram, @QuietLog, R) and
+        (not R.Genuine) and (R.DetectedSize = 4 * 1024 * 1024));
+  Check('the real die is restored', R.RestoredOK and SnapshotEquals(Before));
 end;
 
 var
@@ -347,6 +372,7 @@ begin
   TestFailingWrites;
   TestEraseDiesMidway;
   TestRefusals;
+  TestBeyond16MB;
   TestSurfaceScan;
   TestTiming;
   TestCrossCheck;

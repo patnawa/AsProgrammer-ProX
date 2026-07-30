@@ -208,7 +208,7 @@ begin
   Say('                  opcode cross-check, WEL command execution, SFDP');
   Say('                  size consistency, and a fast-vs-slow clock read');
   Say('  --capacity-test prove the chip''s real capacity (counterfeit');
-  Say('                  check). Erases and rewrites up to 13 sectors,');
+  Say('                  check). Erases and rewrites up to 17 sectors,');
   Say('                  backed up first and restored with verification;');
   Say('                  needs --force because a power loss mid-test');
   Say('                  loses those sectors. Exit 1 on a remarked fake');
@@ -1300,7 +1300,7 @@ begin
     //เขียนจริง แม้จะสำรอง-กู้คืนให้ ก็ต้องให้คนยืนยันความตั้งใจมาในคำสั่ง
     if not CLIForce then
     begin
-      Say('--capacity-test really erases and rewrites up to 13 sectors ' +
+      Say('--capacity-test really erases and rewrites up to 17 sectors ' +
           '(backed up and restored, byte-verified). Add --force to run it');
       Exit(EXIT_USAGE);
     end;

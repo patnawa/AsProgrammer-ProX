@@ -36,8 +36,9 @@ uses
 
 const
   CAPTEST_MARKER_LEN = 64;
-  //ยังคุยแบบแอดเดรส 3 ไบต์: ชิปปลอมยอดนิยม (25Q64/25Q128) อยู่ในช่วงนี้หมด
-  CAPTEST_MAX_SIZE = 16 * 1024 * 1024;
+  //เพดาน 2Gbit: ใหญ่สุดที่ SPI NOR จริงมีขาย ตัว callback ฝั่งฮาร์ดแวร์
+  //จัดการเรื่องแอดเดรส 3/4 ไบต์เอง เครื่องทดสอบนี้คิดแต่เลขคณิต
+  CAPTEST_MAX_SIZE = QWord(256) * 1024 * 1024;
 
 type
   TChipTestLog = procedure(const Msg: string);
@@ -257,8 +258,8 @@ begin
   end;
   if ClaimedSize > CAPTEST_MAX_SIZE then
   begin
-    R.ErrorText := 'chips above 16 MB need 4-byte addressing, which this ' +
-                   'test does not drive yet';
+    R.ErrorText := 'no real SPI NOR is larger than 256 MB; a declared ' +
+                   'size above that is a configuration mistake';
     Exit;
   end;
   if (SectorSize = 0) or (not IsPowerOfTwo(SectorSize)) or
@@ -510,8 +511,8 @@ begin
   end;
   if ChipSize > CAPTEST_MAX_SIZE then
   begin
-    R.ErrorText := 'chips above 16 MB need 4-byte addressing, which this ' +
-                   'scan does not drive yet';
+    R.ErrorText := 'no real SPI NOR is larger than 256 MB; a declared ' +
+                   'size above that is a configuration mistake';
     Exit;
   end;
 
