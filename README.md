@@ -31,7 +31,10 @@ programmers, while staying free and open source.
 | **Erase follows the chip's own map** | When the chip publishes an SFDP sector map, the erase is planned against it: boot-block parts are erased with the sector size that region actually uses, and long runs use the largest erase opcode that still fits inside the requested range. A whole-chip erase of a boot-block 8 MB part takes 158 commands instead of 2048. |
 | **Four byte addressing without mode switching** | Chips over 128 Mbit that publish a 4-byte address instruction table are driven with their own `13h` / `12h` / `21h` / `DCh` opcodes, so the chip is never left in a sticky 4-byte mode. Where a mode switch is still needed it is unwound in a `finally`, so a cancelled or failed job cannot leave the chip in a state the next tool reads as garbage. |
 | **Empty socket is named as such** | A missing, unpowered or back-to-front chip reads `FFh` from the status register, which looks exactly like "busy forever". That is now detected in half a second and reported as no chip answering, rather than after the full timeout — up to ten minutes on a chip erase — as "the chip stayed busy". |
-| **Read twice and compare** | A SOIC clip with one marginal contact returns a dump that is the right size, reads every byte, raises nothing, and is wrong. Reading the chip twice and diffing is the only thing that catches it. When the passes disagree the dump is refused rather than guessed at — there is no way to tell which pass was right. |
+| **Read twice and compare** | A SOIC clip with one marginal contact returns a dump that is the right size, reads every byte, raises nothing, and is wrong. Reading the chip twice and diffing is the only thing that catches it. When the passes disagree, the SPI clock steps down the programmer's own speed menu and both passes are reread — a marginal contact is usually fine one step slower — and the dump is refused only when the slowest clock still disagrees. One that stabilised below the selected clock says so, naming the speed that worked. |
+| **Intel flash descriptor regions** | A dump holding an Intel descriptor logs its region map — where the BIOS starts, where the ME ends, and whether a region runs off the end of the image (the signature of a too-small chip selection). On the command line, `--region bios` reads, writes or verifies just that region; with `--smart` it reflashes a BIOS without touching the ME. |
+| **SPI NAND (read, CLI)** | `--nand-info` identifies the chip and scans the factory bad-block markers; `--nand-read` dumps every good block in order with the chip's own ECC verdict checked after every page — an uncorrectable page fails the dump by block and page instead of returning plausible garbage. W25N512GV/01GV/02KV, GD5F1GQ4UA/UB, MX35LF1GE4AB, TC58CVG0S3. Erase/write land after live hardware validation. |
+| **AT45 geometry from the chip** | A DataFlash declares its family, capacity and page mode in its status register, so the selected page size is checked against the real chip before every operation — a 161 in power-of-2 mode has 512-byte pages, and driving it as 528 would shift every address in the job. Read ID fills both size fields from the chip itself. |
 | **The connection is checked before anything is touched** | The JEDEC id is read eight times before every read, write and erase. If it is not identical every time, the job stops before a single byte moves. |
 | **Write enable is confirmed, not assumed** | `WREN` is followed by a status register read to confirm `WEL` actually latched. A chip with `WP#` held low accepts `WREN`, ignores it, and then silently ignores everything after it. That used to surface as "verify failed at every address" after the whole write; now it is *"the chip did not accept write enable"* before the first page. |
 | **Program and erase failures the chip reports itself** | Micron's flag status register (`70h`), Macronix's security register (`2Bh`) and Spansion's `SR1` error bits are read after each erase and program. Those parts clear BUSY normally and raise a flag instead, so a failed erase used to pass unnoticed unless verify happened to be on. |
@@ -58,7 +61,7 @@ programmers, while staying free and open source.
 | **Background operations** | Long transfers run on a worker thread; the window stays responsive and Cancel keeps working. |
 | **Dark industrial theme** | Modern flat icon set and a dark palette. Toggle in *Options*. |
 | **Scripting** | Pascal-like scripts per chip for parts that need a custom unlock or programming sequence. |
-| **Editable chip database** | Plain XML. Adding a chip is one line. |
+| **Editable chip database** | 1751 chips across five plain-XML files: the master list, flashrom- and EZP-derived lists, IMSProg-derived parts, and your own `chiplist-user.xml`, which survives program updates. Adding a chip is one line; `tools/merge_chiplist.py` folds other lists in without hand-editing, reporting conflicts instead of overwriting. |
 
 ## Supported hardware
 
@@ -74,7 +77,8 @@ programmers, while staying free and open source.
 | **serprog** | ● | | | Any board speaking flashrom's serial protocol: Raspberry Pi Pico (pico-serprog), STM32, ESP32, frser-duino. Set the COM port under *Settings*. |
 
 Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-series I²C EEPROM,
-93-series MicroWire EEPROM, KB9012 EC.
+93-series MicroWire EEPROM, KB9012 EC, and SPI NAND (W25N / GD5F / MX35 / TC58 — read and
+bad-block scan from the command line, erase/write after live validation).
 
 ---
 
@@ -496,6 +500,11 @@ phase and executes each transaction as one exchange — the protocol layers
 never notice. SPI only, honestly: I2C, MicroWire and the KB9012 EC path
 say so instead of misbehaving.
 
+Releases are also published by CI now: pushing `v<version>` builds, runs
+every suite, and attaches the zip those suites just ran against — after a
+fast gate that the tag matches `PROX_VERSION`, so a tag on the wrong
+commit cannot ship a mislabelled build.
+
 ### 4.13.0.0 — 119 more chips, from everyone's lists at once
 
 Every open chip database checked against ours: latest flashrom (already
@@ -507,6 +516,11 @@ and IMSProg's database, which turned out to use the same 68-byte records as
 the EZP files (57 parts nobody else had, shipped as `chiplist-imsprog.xml`,
 GPL-3-or-later, deletable). 1751 chips total. The Find IC search dialog now
 actually searches all five files instead of two.
+
+The machinery is reusable: `tools/merge_chiplist.py` diffs any chip list
+against the master, reports what is new, identical, or conflicting, and
+`--write` inserts the new entries under the right vendor group without
+disturbing the master's hand formatting — then validates the result.
 
 ### 4.12.0.0 — CH347 over libusb, awaiting silicon
 
