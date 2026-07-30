@@ -1,0 +1,3 @@
+# These upstream/vendor driver files are pinned byte-for-byte by
+# drivers/EZP2023Plus/SHA256SUMS.txt. Never normalize their line endings.
+/drivers/EZP2023Plus/** -text

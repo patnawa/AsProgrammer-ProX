@@ -505,6 +505,13 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 
 ## Changelog
 
+### 4.22.0.2 — release driver bundle stays byte-exact
+
+Git attributes now prevent Windows checkout from changing line endings inside
+the checksum-pinned EZP driver bundle. Release assembly validates all 24
+vendor/upstream payload hashes after copying and fails before publishing if
+even a licence or documentation byte differs.
+
 ### 4.22.0.1 — EZP2023+ is detected safely at startup
 
 Automatic programmer detection now finds an attached EZP2023+ even when the
