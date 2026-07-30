@@ -172,12 +172,48 @@ type
     function MWIsBusy: boolean; override;
   end;
 
+//Enumerate only: no open, interface claim, reset or command is sent.  This is
+//safe for startup/hot-plug detection even if another program owns the EZP.
+function EZPDevicePresent: boolean;
+
 implementation
 
 uses main;
 
 var
   UsbInited: boolean = False;
+
+function EZPDevicePresent: boolean;
+var
+  bus: pusb_bus;
+  dev: pusb_device;
+  LoadError: string;
+begin
+  Result := False;
+  if not LibUSBAvailable(LoadError) then Exit;
+
+  if not UsbInited then
+  begin
+    usb_init();
+    UsbInited := True;
+  end;
+
+  usb_find_busses();
+  usb_find_devices();
+  bus := usb_get_busses();
+  while Assigned(bus) do
+  begin
+    dev := bus^.devices;
+    while Assigned(dev) do
+    begin
+      if (dev^.descriptor.idVendor = EZP_VID) and
+         (dev^.descriptor.idProduct = EZP_PID) then
+        Exit(True);
+      dev := dev^.next;
+    end;
+    bus := bus^.next;
+  end;
+end;
 
 constructor TEZPHardware.Create;
 begin
@@ -259,16 +295,17 @@ begin
 end;
 
 function TEZPHardware.DevOpen: boolean;
+var
+  LoadError: string;
 begin
   Result := False;
   if FOpened then DevClose;
   FStrError := '';
 
-  if not Assigned(usb_open) then
+  if not LibUSBAvailable(LoadError) then
   begin
-    FStrError := 'libusb0.dll is not available, so no EZP2023+ can be ' +
-      'opened. Put libusb0.dll next to AsProgrammer.exe (the release zip ' +
-      'ships one)';
+    FStrError := LoadError + ', so no EZP2023+ can be opened. Put ' +
+      'libusb0.dll next to AsProgrammer.exe (the release zip ships one)';
     Exit;
   end;
 
