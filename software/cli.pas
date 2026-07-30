@@ -183,7 +183,10 @@ begin
   Say('  --sfdp          take the chip parameters from SFDP instead of the list');
   Say('  --hw NAME       ch341, ch347, ft232h, usbasp, avrisp, arduino,');
   Say('                  buzzpirat, serprog (Pico/STM32/ESP32 flashrom-style');
-  Say('                  serial programmers; set the port in the GUI once)');
+  Say('                  serial programmers; set the port in the GUI once),');
+  Say('                  ezp (EZP2023+: read and identify only -- its');
+  Say('                  firmware exposes no raw SPI, so write, erase,');
+  Say('                  SFDP and the chip tests cannot work through it)');
   Say('  --erase         erase before writing');
   Say('  --smart         SPI NOR transactional differential write: two-pass');
   Say('                  backup, neighbour preservation and full-block verify');
@@ -272,6 +275,7 @@ begin
   else if SameText(S, 'arduino') then HW := CHW_ARDUINO
   else if SameText(S, 'buzzpirat') then HW := CHW_BUZZPIRAT
   else if SameText(S, 'serprog') then HW := CHW_SERPROG
+  else if SameText(S, 'ezp') then HW := CHW_EZP
   else
   begin
     HW := CHW_NONE;

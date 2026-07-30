@@ -17,7 +17,7 @@ uses
   prodevidence, eepromengine, eepromadapters,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw,
-  serproghw;
+  serproghw, ezphw;
 
 type
 
@@ -113,6 +113,7 @@ type
     MenuBuzzpiratCOMPort: TMenuItem;
     MenuSerprogCOMPort: TMenuItem;
     MenuHWSERPROG: TMenuItem;
+    MenuHWEZP: TMenuItem;
     MenuChipDoctor: TMenuItem;
     MenuCapacityTest: TMenuItem;
     MenuSurfaceScan: TMenuItem;
@@ -277,6 +278,7 @@ type
     procedure MenuBuzzpiratCOMPortClick(Sender: TObject);
     procedure MenuSerprogCOMPortClick(Sender: TObject);
     procedure MenuHWSERPROGClick(Sender: TObject);
+    procedure MenuHWEZPClick(Sender: TObject);
     procedure MenuChipDoctorClick(Sender: TObject);
     procedure MenuCapacityTestClick(Sender: TObject);
     procedure MenuSurfaceScanClick(Sender: TObject);
@@ -7348,6 +7350,19 @@ begin
     AsProgrammer.Current_HW := CHW_ARDUINO;
   end;
 
+  if programmer = CHW_EZP then
+  begin
+    //ความเร็วอยู่ในแพ็กเก็ตบอกชิป ไม่มีเมนูฝั่งนี้ และเครื่องนี้ทำ SPI
+    //อย่างเดียวเท่าที่เราต่อไว้
+    MainForm.MenuSPIClock.Visible:= false;
+    MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuAVRISPSPIClock.Visible:= false;
+    MainForm.MenuArduinoSPIClock.Visible:= false;
+    MainForm.MenuFT232SPIClock.Visible:= false;
+    MainForm.MenuMicrowire.Enabled:= false;
+    AsProgrammer.Current_HW := CHW_EZP;
+  end;
+
   if programmer = CHW_SERPROG then
   begin
     //ความถี่อยู่ในมือเฟิร์มแวร์ของบอร์ด ไม่มีเมนูให้เลือกฝั่งนี้
@@ -7387,8 +7402,8 @@ end;
 //ข้ามพวกที่ใช้พอร์ตอนุกรม เพราะการไล่เปิดพอร์ตมั่ว ๆ จะไปกวนอุปกรณ์อื่น
 function ProbeProgrammer(out Found: THardwareList): boolean;
 const
-  Candidates: array[0..4] of THardwareList =
-    (CHW_CH341, CHW_CH347, CHW_FT232H, CHW_USBASP, CHW_AVRISP);
+  Candidates: array[0..5] of THardwareList =
+    (CHW_CH341, CHW_CH347, CHW_FT232H, CHW_USBASP, CHW_AVRISP, CHW_EZP);
 var
   i: integer;
   Saved: THardwareList;
@@ -7423,6 +7438,7 @@ begin
   MainForm.MenuHWBUZZPIRAT.Checked := HW = CHW_BUZZPIRAT;
   MainForm.MenuHWFT232H.Checked    := HW = CHW_FT232H;
   MainForm.MenuHWSERPROG.Checked   := HW = CHW_SERPROG;
+  MainForm.MenuHWEZP.Checked       := HW = CHW_EZP;
 end;
 
 //เช็คว่ามีเครื่องโปรแกรมต่ออยู่ไหม ถ้าตัวที่เลือกไว้หายไปและเปิดโหมดค้นหาอัตโนมัติ
@@ -7717,6 +7733,11 @@ end;
 procedure TMainForm.MenuHWSERPROGClick(Sender: TObject);
 begin
   SelectHW(CHW_SERPROG);
+end;
+
+procedure TMainForm.MenuHWEZPClick(Sender: TObject);
+begin
+  SelectHW(CHW_EZP);
 end;
 
 procedure TMainForm.MenuChipDoctorClick(Sender: TObject);
@@ -10500,6 +10521,7 @@ begin
   AsProgrammer.AddHW(TFT232HHardware.Create);
   AsProgrammer.AddHW(TCH347Hardware.Create);
   AsProgrammer.AddHW(TSerprogHardware.Create);
+  AsProgrammer.AddHW(TEZPHardware.Create);
 
   SelectHW(CHW_BUZZPIRAT); // ทางลัดแบบหยาบ ๆ ของ dreg
 
@@ -12663,6 +12685,8 @@ begin
       TDOMElement(ParentNode).SetAttribute('hw', 'ft232h');
     if MainForm.MenuHWSERPROG.Checked then
       TDOMElement(ParentNode).SetAttribute('hw', 'serprog');
+    if MainForm.MenuHWEZP.Checked then
+      TDOMElement(ParentNode).SetAttribute('hw', 'ezp');
 
     //เลขรันนิ่งและการผลิตเป็นชุด
     TDOMElement(ParentNode).SetAttribute('sn_enabled', BoolToStr(ProdSettings.SNEnabled, '1', '0'));
@@ -12938,6 +12962,12 @@ begin
         begin
           MainForm.MenuHWSERPROG.Checked := true;
           SelectHW(CHW_SERPROG);
+        end;
+
+        if OptVal = 'ezp' then
+        begin
+          MainForm.MenuHWEZP.Checked := true;
+          SelectHW(CHW_EZP);
         end;
 
 

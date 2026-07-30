@@ -6,7 +6,7 @@
 
 Sector-level erase · SFDP auto-detect · checksums · responsive UI
 
-![version](https://img.shields.io/badge/version-4.19.2-2BB3F3?style=flat-square)
+![version](https://img.shields.io/badge/version-4.20-2BB3F3?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
 ![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
@@ -76,6 +76,7 @@ programmers, while staying free and open source.
 | **AVRISP (LUFA)** | ● | | | |
 | **Arduino** | ● | | | |
 | **serprog** | ● | | | Any board speaking flashrom's serial protocol: Raspberry Pi Pico (pico-serprog), STM32, ESP32, frser-duino. Set the COM port under *Settings*. |
+| **EZP2023+** | ◐ | | | Identify and read only. Its firmware performs whole-chip operations itself and exposes no way to send an SPI command, so SFDP, protection decoding, Smart write, erase and the chip tests cannot work through it. Needs the vendor's libusb0 driver installed once. |
 
 Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-series I²C EEPROM,
 93-series MicroWire EEPROM, KB9012 EC, and SPI NAND (W25N / GD5F / MX35 / TC58 — read and
@@ -489,6 +490,24 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 ---
 
 ## Changelog
+
+### 4.20.0.0 — the EZP2023+ can identify and read
+
+Reverse engineering that programmer (Spring 1FC8:310B, a CH552G board on
+libusb0 — the same driver stack this program already binds for UsbAsp)
+turned up a protocol unlike every other backend's: it exposes no raw SPI
+at all. You hand the firmware a 64-byte descriptor — chip class, algorithm
+index, page size, delay, capacity, expected JEDEC id, clock, voltage — and
+it performs the entire read or write by itself, streaming 64-byte blocks.
+
+So the new backend implements exactly what that allows and says so about
+the rest: `9Fh` is answered from the programmer's own chip detection, `03h`
+reads are served from a whole-chip image pulled once per session (so the
+chip is read once however the caller chunks it), and every other opcode is
+refused with a message naming the reason. Read ID, Read, dump inspection,
+compare and verify-against-a-file work. Write, erase, SFDP, Smart write
+and the chip health tests do not, and cannot until someone teaches this
+program a whole-image write path worth trusting.
 
 ### 4.19.2.0 — "FT_Open device not found" now says which problem it is
 

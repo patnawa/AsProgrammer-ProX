@@ -10,7 +10,7 @@ uses
 type
 
 //รายชื่ออุปกรณ์ที่รองรับ
-THardwareList = (CHW_NONE, CHW_CH341, CHW_CH347, CHW_AVRISP, CHW_USBASP, CHW_ARDUINO, CHW_FT232H, CHW_BUZZPIRAT, CHW_SERPROG);
+THardwareList = (CHW_NONE, CHW_CH341, CHW_CH347, CHW_AVRISP, CHW_USBASP, CHW_ARDUINO, CHW_FT232H, CHW_BUZZPIRAT, CHW_SERPROG, CHW_EZP);
 
 //คลาสฐานของฮาร์ดแวร์
 TBaseHardware = class
