@@ -78,15 +78,20 @@ type
     //รหัสชิปที่เครื่องอ่านมาเอง (24 บิต) ใช้ตอบ 9Fh
     FChipID: array[0..2] of byte;
     FHaveID: boolean;
+    FIdentityChecked: boolean;
     //ภาพทั้งชิปที่อ่านมาแล้วในรอบนี้ 03h ทุกครั้งเสิร์ฟจากตรงนี้
     FImage: TBytes;
     FImageValid: boolean;
-    //แอดเดรสที่คำสั่ง 03h ล่าสุดขอ ตั้งโดย SPIWrite แล้ว SPIRead มาใช้ต่อ
+    //คำสั่งล่าสุดที่รับไว้ ตั้งโดย SPIWrite แล้ว SPIRead มาใช้ต่อ
+    //ต้องจำว่าเป็น 9Fh หรือ 03h แยกกัน ไม่ใช่แค่ "มีอะไรค้างอยู่":
+    //ถ้าคำสั่งที่เพิ่งถูกปฏิเสธ (90h, ABh, 15h) แล้วผู้เรียกยังอ่านต่อ
+    //การเสิร์ฟรหัส 9Fh ให้มันคือการกุคำตอบที่ชิปไม่ได้พูด
     FPendingRead: boolean;
+    FPendingID: boolean;
     FPendingAddr: cardinal;
 
     function BulkOut(Endpoint: longword; const Data: TBytes): boolean;
-    function BulkIn(var Data: TBytes; Len: integer): boolean;
+    function BulkIn(var Data: TBytes; Len, TimeoutMs: integer): boolean;
     function Command(Cmd: word; out Reply: TBytes): boolean;
     function CheckChip: boolean;
     function ReadWholeChip: boolean;
@@ -130,8 +135,8 @@ implementation
 uses main;
 
 const
-  TIMEOUT_MS      = 3000;
-  TIMEOUT_READ_MS = 20000;  //อ่านทั้งชิปใช้เวลาเป็นนาทีบนชิปใหญ่
+  TIMEOUT_MS      = 1000;   //แพ็กเก็ตคำสั่ง 64 ไบต์ ตอบทันทีหรือไม่ตอบเลย
+  TIMEOUT_READ_MS = 20000;  //ก้อนข้อมูลของการอ่านทั้งชิป รอได้นานกว่า
 
 var
   UsbInited: boolean = False;
@@ -197,26 +202,19 @@ begin
             'Win10_11_driver installer once)';
           Exit;
         end;
-        //อินเทอร์เฟซ 0 คือที่อยู่ของ bulk endpoint ทั้งสามเส้น
-        usb_set_configuration(FHandle, 1);
-        if usb_claim_interface(FHandle, 0) <> 0 then
-        begin
-          FStrError := 'another program already owns the EZP2023+ ' +
-            '(close the vendor software and try again)';
-          usb_close(FHandle);
-          FHandle := nil;
-          Exit;
-        end;
+        //ไม่ตั้ง configuration และไม่ถือว่า claim ล้มเหลวเป็นเรื่องคอขาด:
+        //ไดรเวอร์ libusb0 ของเครื่องนี้ตั้งค่ามาให้แล้ว การสั่งซ้ำบางเครื่อง
+        //ค้างไปเลย และตัวที่ใช้งานได้จริงในโลกก็ไม่ได้เรียกทั้งสองอย่าง
+        usb_claim_interface(FHandle, 0);
         FOpened := True;
         FImageValid := False;
         FHaveID := False;
+        FIdentityChecked := False;
         FPendingRead := False;
-        //ยืนยันว่าเป็น EZP จริงไม่ใช่อะไรที่ id ชนกัน และเก็บรหัสชิปไว้เลย
-        if not CheckChip then
-        begin
-          DevClose;
-          Exit;
-        end;
+        FPendingID := False;
+        //ไม่คุยกับชิปตอนเปิด: ตัวตรวจว่ามีเครื่องเสียบอยู่เรียก DevOpen ทุก
+        //สามวินาที ถ้าเปิดแล้วยิงคำสั่งด้วย หน้าต่างจะค้างเป็นจังหวะ
+        //การยืนยันตัวเครื่องและอ่านรหัสชิปเลื่อนไปตอนที่มีคนขอจริง
         Exit(True);
       end;
       dev := dev^.next;
@@ -239,7 +237,9 @@ begin
   FImageValid := False;
   FImage := nil;
   FHaveID := False;
+  FIdentityChecked := False;
   FPendingRead := False;
+  FPendingID := False;
 end;
 
 function TEZPHardware.BulkOut(Endpoint: longword;
@@ -256,14 +256,15 @@ begin
                         [n, Length(Data)]);
 end;
 
-function TEZPHardware.BulkIn(var Data: TBytes; Len: integer): boolean;
+function TEZPHardware.BulkIn(var Data: TBytes; Len,
+  TimeoutMs: integer): boolean;
 var
   n: integer;
 begin
   Result := False;
   SetLength(Data, Len);
   if not FOpened then Exit;
-  n := usb_bulk_read(FHandle, EZP_EP_IN, Data[0], Len, TIMEOUT_READ_MS);
+  n := usb_bulk_read(FHandle, EZP_EP_IN, Data[0], Len, longword(TimeoutMs));
   Result := n = Len;
   if not Result then
     FStrError := Format('the EZP2023+ returned %d of %d bytes', [n, Len]);
@@ -280,10 +281,12 @@ begin
   //big endian ตามที่เฟิร์มแวร์คาด
   Pkt[0] := byte(Cmd shr 8);
   Pkt[1] := byte(Cmd);
-  Result := BulkOut(EZP_EP_CMD, Pkt) and BulkIn(Reply, EZP_PACKET_LEN);
+  Result := BulkOut(EZP_EP_CMD, Pkt) and
+            BulkIn(Reply, EZP_PACKET_LEN, TIMEOUT_MS);
 end;
 
 //CHECK_CHIP: ยืนยันตัวเครื่อง และคายรหัส JEDEC ของชิปในซ็อกเก็ตมาให้ด้วย
+//เรียกครั้งแรกที่มีคนต้องใช้ ไม่ใช่ตอนเปิดอุปกรณ์
 function TEZPHardware.CheckChip: boolean;
 var
   Reply, Dummy: TBytes;
@@ -309,6 +312,7 @@ begin
   FChipID[2] := Reply[3];
 
   Command(EZP_CMD_RESET, Dummy);
+  FIdentityChecked := True;
   Result := True;
 end;
 
@@ -359,7 +363,7 @@ begin
   //Pkt[28] คือ voltage: ศูนย์ = ราง 3.3 V ซึ่งเป็นค่าของ SPI NOR ทั้งวงศ์
 
   if not BulkOut(EZP_EP_CMD, Pkt) then Exit;
-  if not BulkIn(Reply, EZP_PACKET_LEN) then Exit;
+  if not BulkIn(Reply, EZP_PACKET_LEN, TIMEOUT_MS) then Exit;
 
   if not Command(EZP_CMD_START, Reply) then Exit;
 
@@ -370,7 +374,7 @@ begin
   Got := 0;
   while Got < Size do
   begin
-    if not BulkIn(Block, integer(BlockLen)) then
+    if not BulkIn(Block, integer(BlockLen), TIMEOUT_READ_MS) then
     begin
       FImage := nil;
       Exit;
@@ -426,8 +430,11 @@ begin
   case buffer[0] of
     $9F:
       begin
-        //ตัวรหัสมีอยู่แล้วจาก CHECK_CHIP ตอนเปิดเครื่อง
+        //ถามเครื่องตอนนี้ถ้ายังไม่เคยถาม
         FPendingRead := False;
+        FPendingID := True;
+        if not FIdentityChecked then
+          if not CheckChip then Exit;
         Exit(BufferLen);
       end;
     $03, $0B:
@@ -437,11 +444,13 @@ begin
         FPendingAddr := (cardinal(buffer[1]) shl 16) or
                         (cardinal(buffer[2]) shl 8) or cardinal(buffer[3]);
         FPendingRead := True;
+        FPendingID := False;
         Exit(BufferLen);
       end;
   end;
 
   FPendingRead := False;
+  FPendingID := False;
   FStrError := Format('the EZP2023+ firmware cannot send SPI command %.2xh. ' +
     'It only exposes whole-chip operations, so identification and reading ' +
     'work but nothing that needs raw SPI does', [buffer[0]]);
@@ -455,8 +464,9 @@ begin
   if (BufferLen <= 0) or (BufferLen > Length(buffer)) then Exit;
 
   //คำตอบของ 9Fh: สามไบต์ที่เครื่องอ่านมาเอง
-  if not FPendingRead then
+  if FPendingID then
   begin
+    FPendingID := False;
     if not FHaveID then
     begin
       FStrError := 'the EZP2023+ reports no chip in the socket';
@@ -465,6 +475,15 @@ begin
     if BufferLen > 3 then Exit;
     Move(FChipID[0], buffer[0], BufferLen);
     Exit(BufferLen);
+  end;
+
+  //ไม่มีคำสั่งที่เรารับไว้ค้างอยู่: อ่านลอย ๆ ไม่มีคำตอบให้ ต้องบอกว่าไม่มี
+  //ไม่ใช่หยิบอะไรก็ได้มาตอบ
+  if not FPendingRead then
+  begin
+    FStrError := 'the EZP2023+ has no reply pending: the command before ' +
+      'this read was one its firmware cannot send';
+    Exit;
   end;
 
   //คำตอบของ 03h: เสิร์ฟจากภาพทั้งชิป อ่านจากตัวชิปครั้งเดียวต่อรอบ

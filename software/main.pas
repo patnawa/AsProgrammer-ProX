@@ -7402,8 +7402,10 @@ end;
 //ข้ามพวกที่ใช้พอร์ตอนุกรม เพราะการไล่เปิดพอร์ตมั่ว ๆ จะไปกวนอุปกรณ์อื่น
 function ProbeProgrammer(out Found: THardwareList): boolean;
 const
-  Candidates: array[0..5] of THardwareList =
-    (CHW_CH341, CHW_CH347, CHW_FT232H, CHW_USBASP, CHW_AVRISP, CHW_EZP);
+  //ไม่รวม EZP2023+: มันเปิดได้เร็วก็จริง แต่การไปเปิดของคนอื่นทุกสามวินาที
+  //ระหว่างที่เครื่องอาจกำลังสตรีมชิปอยู่ ไม่คุ้มกับความสะดวกที่ได้
+  Candidates: array[0..4] of THardwareList =
+    (CHW_CH341, CHW_CH347, CHW_FT232H, CHW_USBASP, CHW_AVRISP);
 var
   i: integer;
   Saved: THardwareList;
@@ -7453,7 +7455,8 @@ begin
   Was := ProgrammerPresent;
 
   //อุปกรณ์ที่ใช้พอร์ตอนุกรมไม่เอามาวนเช็ค เพราะจะไปจับพอร์ตทิ้งขว้างตลอดเวลา
-  if AsProgrammer.Current_HW in [CHW_ARDUINO, CHW_BUZZPIRAT, CHW_SERPROG] then
+  if AsProgrammer.Current_HW in [CHW_ARDUINO, CHW_BUZZPIRAT, CHW_SERPROG,
+                                 CHW_EZP] then
   begin
     ProgrammerPresent := True;
     MainForm.ChipView.Invalidate;

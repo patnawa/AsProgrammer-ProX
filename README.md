@@ -6,7 +6,7 @@
 
 Sector-level erase · SFDP auto-detect · checksums · responsive UI
 
-![version](https://img.shields.io/badge/version-4.20-2BB3F3?style=flat-square)
+![version](https://img.shields.io/badge/version-4.20.1-2BB3F3?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
 ![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
@@ -490,6 +490,27 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 ---
 
 ## Changelog
+
+### 4.20.1.0 — the EZP2023+ no longer freezes the window
+
+Three faults in yesterday's backend, all of them mine. The programmer
+poller reopens the selected device every three seconds, and opening the
+EZP2023+ also talked to the chip — so the window stalled on USB traffic
+on a loop; opening now touches the USB device only, and the identity
+check and chip id happen when something actually asks. Every reply was
+waited for with the twenty-second timeout meant for whole-chip data
+blocks, turning one unanswered 64-byte packet into a twenty-second
+freeze; command replies now use one second. And `usb_set_configuration`
+on an already-configured libusb0 device can hang outright, so it is gone
+and a failed interface claim is no longer treated as fatal — neither is
+something the working reference implementation does. Auto-detect no
+longer probes the EZP either: opening somebody else's programmer every
+three seconds while it may be mid-stream is not worth the convenience.
+
+Also fixed: after refusing an opcode the firmware cannot send (`90h`,
+`ABh`, `15h`), a following read was served the `9Fh` id as though it were
+that command's answer. A read with nothing pending now says so instead of
+fabricating a reply.
 
 ### 4.20.0.0 — the EZP2023+ can identify and read
 
