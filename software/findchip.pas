@@ -352,8 +352,13 @@ end;
 procedure TChipSearchForm.EditSearchChange(Sender: TObject);
 begin
   ListBoxChips.Clear;
+  //ค้นทุกไฟล์ที่โปรแกรมโหลด ไม่ใช่แค่สองไฟล์แรก: ของเดิมข้ามตารางผู้ใช้
+  //ตาราง EZP และตาราง IMSProg ไปเงียบ ๆ ชิปที่มีอยู่จริงเลยหาไม่เจอ
   FindChip(chiplistfile, EditSearch.Text);
   FindChip(ChipListFile2, EditSearch.Text);
+  FindChip(ChipListFile3, EditSearch.Text);
+  FindChip(ChipListFile4, EditSearch.Text);
+  FindChip(ChipListFile5, EditSearch.Text);
 end;
 
 procedure TChipSearchForm.ChipSearchSelectButtonClick(Sender: TObject);

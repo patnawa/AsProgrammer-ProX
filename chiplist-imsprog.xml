@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  chiplist-imsprog.xml
+
+  Additional chips converted from the IMSProg project's chip database
+  (https://github.com/bigbigmdm/IMSProg) with tools/import_ezp.py, the
+  same 68-byte record layout the EZP databases use. Only parts absent
+  from chiplist.xml, chiplist-flashrom.xml and chiplist-ezp.xml are here.
+
+  IMSProg is GPL-3-or-later, so this file is too; it is third-party data
+  kept in its own file, exactly like chiplist-flashrom.xml. Delete this
+  file and the program still works.
+
+  SPDX-License-Identifier: GPL-3.0-or-later
+  SPDX-FileCopyrightText: Mikhail Medvedev and the IMSProg contributors
+-->
+<chiplist>
+  <I2C>
+    <ATMEL>
+      <AT24C02 page="8" size="256" addrtype="1" />
+      <AT24C04 page="16" size="512" addrtype="2" />
+      <AT24C08 page="16" size="1024" addrtype="3" />
+      <AT24C128 page="32" size="16384" addrtype="5" />
+      <AT24C16 page="16" size="2048" addrtype="4" />
+      <AT24C256 page="32" size="32768" addrtype="5" />
+      <AT24C32 page="32" size="4096" addrtype="5" />
+      <AT24C512 page="32" size="65536" addrtype="5" />
+      <AT24C64 page="32" size="8192" addrtype="5" />
+    </ATMEL>
+    <HOLTEK>
+      <HT24C01 page="8" size="128" addrtype="1" />
+      <HT24C02 page="8" size="256" addrtype="1" />
+      <HT24C04 page="16" size="512" addrtype="2" />
+      <HT24C08 page="16" size="1024" addrtype="3" />
+      <HT24C128 page="32" size="16384" addrtype="5" />
+      <HT24C16 page="16" size="2048" addrtype="4" />
+      <HT24C256 page="32" size="32768" addrtype="5" />
+      <HT24C32 page="32" size="4096" addrtype="5" />
+      <HT24C512 page="32" size="65536" addrtype="5" />
+      <HT24C64 page="32" size="8192" addrtype="5" />
+    </HOLTEK>
+    <ISSI>
+      <IS24C01 page="8" size="128" addrtype="1" />
+      <IS24C02 page="8" size="256" addrtype="1" />
+      <IS24C04 page="16" size="512" addrtype="2" />
+      <IS24C08 page="16" size="1024" addrtype="3" />
+      <IS24C128 page="32" size="16384" addrtype="5" />
+      <IS24C16 page="16" size="2048" addrtype="4" />
+      <IS24C256 page="32" size="32768" addrtype="5" />
+      <IS24C32 page="32" size="4096" addrtype="5" />
+      <IS24C512 page="32" size="65536" addrtype="5" />
+      <IS24C64 page="32" size="8192" addrtype="5" />
+    </ISSI>
+    <MICROCHIP>
+      <_24C515 page="32" size="65536" addrtype="5" />
+    </MICROCHIP>
+    <RAMTRON>
+      <FM24C04A page="16" size="512" addrtype="2" />
+      <FM24C128 page="32" size="16384" addrtype="5" />
+      <FM24C16A page="16" size="2048" addrtype="4" />
+      <FM24C256 page="32" size="32768" addrtype="5" />
+      <FM24C32A page="32" size="4096" addrtype="5" />
+      <FM24C512 page="32" size="65536" addrtype="5" />
+      <FM24C64A page="32" size="8192" addrtype="5" />
+      <FM24CL04A page="16" size="512" addrtype="2" />
+      <FM24CL16A page="16" size="2048" addrtype="4" />
+      <FM24CL32A page="32" size="4096" addrtype="5" />
+      <FM24CL64A page="32" size="8192" addrtype="5" />
+    </RAMTRON>
+    <RAMXEED>
+      <MB85RC04 page="16" size="512" addrtype="2" />
+      <MB85RC128 page="32" size="16384" addrtype="5" />
+      <MB85RC16 page="16" size="2048" addrtype="4" />
+      <MB85RC256 page="32" size="32768" addrtype="5" />
+      <MB85RC512 page="32" size="65536" addrtype="5" />
+      <MB85RC64 page="32" size="8192" addrtype="5" />
+    </RAMXEED>
+    <ST>
+      <M24C01 page="8" size="128" addrtype="1" />
+      <M24C02 page="8" size="256" addrtype="1" />
+      <M24C04 page="16" size="512" addrtype="2" />
+      <M24C08 page="16" size="1024" addrtype="3" />
+      <M24C128 page="32" size="16384" addrtype="5" />
+      <M24C16 page="16" size="2048" addrtype="4" />
+      <M24C256 page="32" size="32768" addrtype="5" />
+      <M24C32 page="32" size="4096" addrtype="5" />
+      <M24C512 page="32" size="65536" addrtype="5" />
+      <M24C64 page="32" size="8192" addrtype="5" />
+    </ST>
+  </I2C>
+</chiplist>

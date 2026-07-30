@@ -383,6 +383,10 @@ const
   //เป็นข้อมูลของบุคคลที่สาม จึงแยกไฟล์ไว้แบบเดียวกับ chiplist-flashrom.xml
   //ลบไฟล์นี้ทิ้งแล้วโปรแกรมก็ยังทำงานได้ตามปกติ
   ChipListFile4Name      = 'chiplist-ezp.xml';
+  //ตารางชิปจากฐานข้อมูลของโครงการ IMSProg (GPL-3+) แปลงด้วยเครื่องมือ
+  //ตัวเดียวกับของ EZP เพราะใช้เรคคอร์ด 68 ไบต์แบบเดียวกัน แยกไฟล์ไว้
+  //ตามสัญญาอนุญาตเช่นเคย ลบทิ้งได้โดยไม่กระทบโปรแกรม
+  ChipListFile5Name      = 'chiplist-imsprog.xml';
   SettingsFileName       = 'settings.xml';
   ScriptsPath            = 'scripts'+DirectorySeparator;
 
@@ -411,6 +415,7 @@ var
   ChipListFile2: TXMLDocument;
   ChipListFile3: TXMLDocument;
   ChipListFile4: TXMLDocument;
+  ChipListFile5: TXMLDocument;
   SettingsFile: TXMLDocument;
   CurrentICParam: TCurrentICParam;
   ScriptEngine: TPasCalc;
@@ -830,6 +835,7 @@ begin
   ChipListFile2 := nil;
   ChipListFile3 := nil;
   ChipListFile4 := nil;
+  ChipListFile5 := nil;
   SettingsFile := nil;
   if FileExists(ChipListFileName) then
   begin
@@ -881,6 +887,19 @@ begin
       begin
         ShowMessage(E.Message);
         ChipListFile4 := nil;
+      end;
+    end;
+  end;
+
+  if FileExists(ChipListFile5Name) then
+  begin
+    try
+      ReadXMLFile(ChipListFile5, ChipListFile5Name);
+    except
+      on E: EXMLReadError do
+      begin
+        ShowMessage(E.Message);
+        ChipListFile5 := nil;
       end;
     end;
   end;
@@ -6895,6 +6914,8 @@ begin
     Result := findchip.SelectChip(ChipListFile3, AName);
   if not Result then
     Result := findchip.SelectChip(ChipListFile4, AName);
+  if not Result then
+    Result := findchip.SelectChip(ChipListFile5, AName);
   UpdateChipInfo;
 end;
 
@@ -8195,6 +8216,7 @@ begin
       FindChipInto(ChipListFile2, '', IDstr9FH, Matches);
       FindChipInto(ChipListFile3, '', IDstr9FH, Matches);
       FindChipInto(ChipListFile4, '', IDstr9FH, Matches);
+      FindChipInto(ChipListFile5, '', IDstr9FH, Matches);
 
       if Matches.Count = 0 then
       begin
@@ -8202,6 +8224,7 @@ begin
         FindChipInto(ChipListFile2, '', IDstr90H, Matches);
         FindChipInto(ChipListFile3, '', IDstr90H, Matches);
         FindChipInto(ChipListFile4, '', IDstr90H, Matches);
+        FindChipInto(ChipListFile5, '', IDstr90H, Matches);
       end;
 
       if Matches.Count = 0 then
@@ -8210,6 +8233,7 @@ begin
         FindChipInto(ChipListFile2, '', IDstrABH, Matches);
         FindChipInto(ChipListFile3, '', IDstrABH, Matches);
         FindChipInto(ChipListFile4, '', IDstrABH, Matches);
+        FindChipInto(ChipListFile5, '', IDstrABH, Matches);
       end;
 
       if Matches.Count = 0 then
@@ -8218,6 +8242,7 @@ begin
         FindChipInto(ChipListFile2, '', IDstr15H, Matches);
         FindChipInto(ChipListFile3, '', IDstr15H, Matches);
         FindChipInto(ChipListFile4, '', IDstr15H, Matches);
+        FindChipInto(ChipListFile5, '', IDstr15H, Matches);
       end;
 
       if Matches.Count = 1 then
@@ -9562,6 +9587,9 @@ begin
       if ChipListFile4 <> nil then
         s.Add('chiplist-ezp.xml       ' + IntToStr(CountChips(ChipListFile4)) +
               ' chips  (converted from an EZP database)');
+      if ChipListFile5 <> nil then
+        s.Add('chiplist-imsprog.xml   ' + IntToStr(CountChips(ChipListFile5)) +
+              ' chips  (converted from IMSProg, GPL-3+)');
       if ChipListFile3 <> nil then
         s.Add('chiplist-user.xml      ' + IntToStr(CountChips(ChipListFile3)) +
               ' chips  (added by you)');
@@ -9795,6 +9823,7 @@ begin
   LoadChipList(ChipListFile2);
   LoadChipList(ChipListFile3);
   LoadChipList(ChipListFile4);
+  LoadChipList(ChipListFile5);
   RomF := TMemoryStream.Create;
   ScriptEngine := TPasCalc.Create;
   ScriptsFunc.SetScriptFunctions(ScriptEngine);

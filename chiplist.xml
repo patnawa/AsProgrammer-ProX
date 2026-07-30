@@ -163,10 +163,16 @@
 	  <Pm25LV020 id="7F9D22" page="256" size="262144"/>
 	  <Pm25W020 id="7F9D7D" page="256" size="262144"/>
 	  <Pm25LV040 id="7F9D7E" page="256" size="524288"/>
+      <Pm25LQ010 id="7F9D21" page="256" size="131072"/>
+      <Pm25LQ020 id="7F9D42" page="256" size="262144"/>
+      <Pm25LQ040 id="7F9D7E" page="256" size="524288"/>
+      <Pm25LQ512 id="7F9D20" page="256" size="65536"/>
 	</PFLASH>
 	<PUYA>
     <P25D40H id="856013" page="256" size="524288"/>
 	<P25Q80H id="856014" page="256" size="1048576"/>
+      <P25D40SH id="856013" page="256" size="524288"/>
+      <P25D80SH id="856014" page="256" size="1048576"/>
   </PUYA>
 	<TERRA>
 	  <TS25L512A id="373010" page="256" size="65536"/>
@@ -270,6 +276,7 @@
       <MD25D40 id="514013" page="256" size="524288"/>
       <MD25D80 id="514014" page="256" size="1048576"/>
       <MD25D16 id="514015" page="256" size="2097152"/>
+      <GD25Q127C id="C84018" page="256" size="16777216"/>
     </GIGADEVICE>
     <ICE>
       <ICE25P05 id="1C2010" page="128" size="65536"/>
@@ -315,6 +322,15 @@
       <IS25C64 page="64" size="8192" spicmd="95"/>
       <IS25C128 page="64" size="16384" spicmd="95"/>
       <IS25C256 page="64" size="32768" spicmd="95"/>
+      <IS25LP080D id="9D6014" page="256" size="1048576"/>
+      <IS25WP020D_1.8V id="9D7012" page="256" size="262144"/>
+      <IS25WP040D_1.8V id="9D7013" page="256" size="524288"/>
+      <IS25WP080D_1.8V id="9D7014" page="256" size="1048576"/>
+      <IS25LQ010 id="9D4011" page="256" size="131072"/>
+      <IS25LQ020 id="9D4012" page="256" size="262144"/>
+      <IS25LQ025 id="9D4009" page="256" size="32768"/>
+      <IS25LQ040 id="9D4013" page="256" size="524288"/>
+      <IS25LQ512 id="9D4010" page="256" size="65536"/>
     </ISSI>
     <KHIC>
       <KH25L1005 id="C22011" page="256" size="131072"/>
@@ -459,6 +475,8 @@
 	  <MX66U1G45G_1.8V id="C2253B" page="256" size="134217728"/>
 	  <MX77L12850F id="C27518" page="256" size="16777216"/>
 	<MX25L51245G id="C2201A" page="256" size="67108864"/>
+      <MX25L12872F id="C22018" page="256" size="16777216"/>
+      <MX66L1G45G id="C2201B" page="256" size="134217728"/>
     </MACRONIX>
     <MICROCHIP>
       <_25AA010A page="16" size="128" spicmd="95"/>
@@ -515,6 +533,7 @@
       <MT25QL02GC id="20BA22" page="256" size="268435456"/>
       <MT25QU256 id="20BB19" page="256" size="33554432"/>  
 	  <N25Q00AA13G id="20BA21" page="256" size="134217728"/>
+      <MT25QL01GB id="20BA21" page="256" size="134217728"/>
     </MICRON>
     <MSHINE>
       <MS25X512 id="373010" page="256" size="65536"/>
@@ -772,6 +791,12 @@
       <ST25P40 id="202013" page="256" size="524288"/>
       <ST25P64 id="202017" page="256" size="8388608"/>
       <ST25P80 id="202014" page="256" size="1048576"/>
+      <M35128WT page="32" size="4096" spicmd="95"/>
+      <M35160WT page="32" size="2048" spicmd="95"/>
+      <M95M02 page="256" size="262144" spicmd="95"/>
+      <ST95P02 page="16" size="256" spicmd="95"/>
+      <ST95P04 page="16" size="512" spicmd="95"/>
+      <ST95P08 page="16" size="1024" spicmd="95"/>
     </ST>
     <WINBOND>
       <W25P10 id="EF1000" page="256" size="131072"/>
@@ -865,6 +890,14 @@
 	  <W74M12JWSSIQ_1.8V id="EF6018" page="256" size="16777216"/>
 	  <W74M12JWZPIQ_1.8V id="EF6018" page="256" size="16777216"/>
 	  <W74M12JWZEIQ_1.8V id="EF6018" page="256" size="16777216"/>
+      <W25Q256JV-IM-JM id="EF7019" page="256" size="33554432"/>
+      <W25Q256JV-IQ-JQ id="EF4019" page="256" size="33554432"/>
+      <W25Q64JV-IM-JM id="EF7017" page="256" size="8388608"/>
+      <W25Q64JV-IQ-JQ id="EF4017" page="256" size="8388608"/>
+      <W25Q01JV id="EF4021" page="256" size="134217728"/>
+      <W25Q128JV-xM id="EF7018" page="256" size="16777216"/>
+      <W25Q128JV-xQ id="EF4018" page="256" size="16777216"/>
+      <W25Q512JV id="EF4020" page="256" size="67108864"/>
     </WINBOND>
     <XICOR>
       <X25010 page="4" size="128" spicmd="95"/>
@@ -916,6 +949,7 @@
 	  <XM25QW128C id="204218" page="256" size="16777216"/>
 	  <XM25QW256C id="204219" page="256" size="33554432"/>
 	  <XM25QW512C id="204220" page="256" size="67108864"/>
+      <XM25QH32B id="204016" page="256" size="4194304"/>
 	</XMC>
     <ZEMPRO>
       <!-- TS25L010A, TS25L020A, TS25L16AP and TS25L16BP used to be repeated
@@ -927,6 +961,14 @@
     </ZEMPRO>
 	<Zbit>
 	  <ZB25D16 id="5E4015" page="256" size="2097152"/>
+      <ZB25VQ128 id="5E4018" page="256" size="16777216"/>
+      <ZB25VQ16 id="5E4015" page="256" size="2097152"/>
+      <ZB25VQ32 id="5E4016" page="256" size="4194304"/>
+      <ZB25VQ64 id="5E4017" page="256" size="8388608"/>
+      <ZD25D40 id="5E4013" page="256" size="524288"/>
+      <ZD25D80 id="5E4014" page="256" size="1048576"/>
+      <ZD25VQ40 id="5E4013" page="256" size="524288"/>
+      <ZD25VQ80 id="5E4014" page="256" size="1048576"/>
 	</Zbit>
     <Berg_Micro>
       <BG25Q40A id="E04013" page="256" size="524288"/>
@@ -1008,6 +1050,7 @@
     <Fudan>
 	  <FM25Q04A id="A14013" page="256" size="524288"/>
       <FM25Q32 id="A14016" page="256" size="4194304"/>
+      <FM25Q128 id="A14018" page="256" size="16777216"/>
     </Fudan>
     <Genitop>
       <GT25Q80A id="E04014" page="256" size="1048576"/>
@@ -1034,6 +1077,23 @@
       <_24AA1025 page="128" size="131072" addrtype="7"/>
       <_24FC1025 page="128" size="131072" addrtype="7"/>
     </_24Cxxx>
+    <ATMEL>
+      <AT24RF08C page="16" size="1024" addrtype="3"/>
+    </ATMEL>
+    <Generic>
+      <_24C2048 page="256" size="262144" addrtype="7"/>
+    </Generic>
+    <MICROCHIP>
+      <_24LC1026 page="128" size="131072" addrtype="6"/>
+      <_24LC515 page="64" size="65536" addrtype="5"/>
+    </MICROCHIP>
+    <Philips>
+      <PCF8582C page="8" size="256" addrtype="1"/>
+    </Philips>
+    <ST>
+      <M24M01 page="256" size="131072" addrtype="6"/>
+      <M24M02 page="256" size="262144" addrtype="7"/>
+    </ST>
   </I2C>
   <Microwire>
     <Microchip>
@@ -1043,6 +1103,18 @@
       <M93C56 size="256" addrbitlen="8"/>
       <M93C46 size="128" addrbitlen="6"/>
       <M93C06 size="16" addrbitlen="6"/>
+      <M93C06_16bits size="16" addrbitlen="6"/>
+      <M93C06_8bits size="16" addrbitlen="7"/>
+      <M93C46_16bits size="128" addrbitlen="6"/>
+      <M93C46_8bits size="128" addrbitlen="7"/>
+      <M93C56_16bits size="256" addrbitlen="8"/>
+      <M93C56_8bits size="256" addrbitlen="9"/>
+      <M93C66_16bits size="512" addrbitlen="8"/>
+      <M93C66_8bits size="512" addrbitlen="9"/>
+      <M93C76_16bits size="1024" addrbitlen="10"/>
+      <M93C76_8bits size="1024" addrbitlen="11"/>
+      <M93C86_16bits size="2048" addrbitlen="10"/>
+      <M93C86_8bits size="2048" addrbitlen="11"/>
     </Microchip>
   </Microwire>
 </chiplist>

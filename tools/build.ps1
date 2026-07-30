@@ -58,7 +58,8 @@ $python = (Get-Command python -ErrorAction SilentlyContinue)
 if ($python) {
   & $python.Source "$root\tools\validate_chiplist.py" "$root\chiplist.xml" `
     $(if (Test-Path "$root\chiplist-flashrom.xml") { "$root\chiplist-flashrom.xml" }) `
-    $(if (Test-Path "$root\chiplist-ezp.xml") { "$root\chiplist-ezp.xml" })
+    $(if (Test-Path "$root\chiplist-ezp.xml") { "$root\chiplist-ezp.xml" }) `
+    $(if (Test-Path "$root\chiplist-imsprog.xml") { "$root\chiplist-imsprog.xml" })
   if ($LASTEXITCODE -ne 0) { Die "the chip tables have errors" }
 } else {
   Write-Host "    python not found, skipped" -ForegroundColor Yellow
@@ -220,6 +221,7 @@ Copy-Item $exe $out
 Copy-Item "$root\chiplist.xml","$root\settings.xml" $out
 if (Test-Path "$root\chiplist-flashrom.xml") { Copy-Item "$root\chiplist-flashrom.xml" $out }
 if (Test-Path "$root\chiplist-ezp.xml") { Copy-Item "$root\chiplist-ezp.xml" $out }
+if (Test-Path "$root\chiplist-imsprog.xml") { Copy-Item "$root\chiplist-imsprog.xml" $out }
 Copy-Item "$root\LICENSE","$root\README.md" $out
 Copy-Item "$root\scripts" $out -Recurse
 Copy-Item "$root\software\lang" $out -Recurse
