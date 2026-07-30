@@ -16,9 +16,22 @@ Record layout, 68 bytes, verified against EZP2023+.Dat (878 records):
             byte 48 = 3rd id byte, 49 = 2nd, 50 = manufacturer, 51 = 0
     52..55  little endian u32, chip size in bytes
     56..57  little endian u16, program page size in bytes
-    58..59  little endian u16, purpose not established
-    60..63  little endian u32, a time in milliseconds (1000 / 3000 / 4000)
-    64..67  little endian u32, purpose not established
+    58      u8,  chip class: 0 SPI flash, 1 24-EEPROM, 2 93-EEPROM,
+            3 25-EEPROM, 4 95-EEPROM
+    59      u8,  which programming algorithm the firmware should run
+    60..61  little endian u16, delay in milliseconds
+    62..63  little endian u16, "extend"
+    64..65  little endian u16, EEPROM size on parts that carry one
+    66      u8,  EEPROM page size
+    67      u8,  supply voltage: 0 = 3.3 V, 1 = 1.8 V, 2 = 5.0 V
+
+    Bytes 58..67 were "purpose not established" here until the field names
+    were confirmed against the ezp_chip_data struct that libezp2023plus
+    documents (github.com/alexandro-45/libezp2023plus) and re-checked
+    against this file.  Only the voltage is used below: class is redundant
+    with the family in the name, and the algorithm/delay/extend fields are
+    instructions for the EZP firmware, which is not what drives this
+    program's chips.
 
     Page is a u16, not the low half of a u32.  Reading it as a u32 gives
     values like 196624 for CAT25C02P, whose page is really 16; the 0x0003 in
@@ -89,11 +102,30 @@ I2C_ADDRTYPE = {
 
 VALID_NAME = re.compile(r"[^A-Za-z0-9_.-]")
 
-# Parts that run at 1.8 V.  Feeding one of these 3.3 V destroys it, and the
-# program can only warn about what it knows, so the voltage is written into
-# the table as an attribute instead of being guessed from the name.  The
-# name is not enough on its own: W25Q64FW is a 1.8 V part whose name never
-# says so.  These are naming conventions the makers use consistently:
+# Byte 67 is the rail the EZP2023+ switches on, NOT the chip's rating, and
+# the difference matters enough to spell out.  Across all 877 records in
+# EZP2023+.Dat (ver 3.0):
+#
+#     0 (3.3 V)  444 records -- every SPI flash, INCLUDING every part whose
+#                own name ends in "(1.8V)": W25Q64FW, GD25LQ128, the
+#                BoyaMicro AL series, all of them
+#     2 (5.0 V)  431 records -- the 24 / 93 / 25 EEPROM families
+#     1 (1.8 V)    1 record  -- EN25LF40, alone against its whole family
+#   255            2 records -- trailing duplicates of A25L05PU, junk
+#
+# So the vendor's software drives 1.8 V parts from the 3.3 V rail and warns
+# the operator by putting "(1.8V)" in the chip's name; it does not encode
+# the requirement in the field.  Taking byte 67 as the chip's voltage would
+# therefore mark every 1.8 V part in the file as 3.3 V -- the exact mistake
+# that destroys one.  The field is trusted only where it says 5 V, which
+# agrees with the datasheets for those EEPROM families, and the single
+# 1.8 V claim is ignored as a typo in the vendor's own table.
+EZP_VOLTAGE_5V = 2
+
+# 1.8 V therefore still comes from the name, which is where this vendor
+# actually records it.  Not every part says so in words -- W25Q64FW is a
+# 1.8 V part whose name never mentions it -- so these maker conventions
+# fill the gap:
 #
 #   EF60xx / EF70xx  Winbond W25Q..FW / ..EW / ..DW / ..BW / ..NW
 #   MX25U / MX66U    Macronix, U is the 1.8 V suffix
@@ -102,6 +134,13 @@ VALID_NAME = re.compile(r"[^A-Za-z0-9_.-]")
 LOW_VOLTAGE_ID = ("EF60", "EF70")
 LOW_VOLTAGE_NAME = re.compile(r"^(MX25U|MX66U|MT25QU|GD25LQ|GD25WQ|W25Q\d+(FW|EW|DW|BW|NW))",
                               re.IGNORECASE)
+
+
+VOLTAGE_CLASHES = []
+
+
+def report_voltage_clash(name: str, declared: str, why: str) -> None:
+    VOLTAGE_CLASHES.append(f"{name}: the record says {declared} V but {why}")
 
 
 def is_1v8(name: str, chip_id: str) -> bool:
@@ -153,7 +192,9 @@ def read_records(path):
             continue
 
         id2, id1, man, _pad = rec[48:52]
-        size, page, _u2, _ms, _u4 = struct.unpack("<IHHII", rec[52:68])
+        (size, page, clazz, algorithm, delay, extend,
+         eeprom, eeprom_page, voltage) = struct.unpack("<IHBBHHHBB",
+                                                       rec[52:68])
 
         parts = name.split(",")
         if len(parts) < 3:
@@ -165,6 +206,10 @@ def read_records(path):
             "part": ",".join(parts[2:]).strip(),
             "man": man, "id1": id1, "id2": id2,
             "size": size, "page": page,
+            "clazz": clazz, "algorithm": algorithm,
+            "delay": delay, "extend": extend,
+            "eeprom": eeprom, "eeprom_page": eeprom_page,
+            "voltage": voltage,
         }
 
 
@@ -274,9 +319,19 @@ def main():
             attrs["spicmd"] = spicmd
         if addrtype is not None:
             attrs["addrtype"] = str(addrtype)
+        # 1.8 V from the name (see EZP_VOLTAGE_5V above for why the record
+        # cannot supply it), 5 V from the record where it says so.  A part
+        # that looks 1.8 V by name and 5 V by record is a contradiction
+        # nobody should resolve silently.
         if is_1v8(name, attrs.get("id", "")):
             attrs["vcc"] = "1.8"
-            stats["marked as 1.8 V"] += 1
+            stats["marked as 1.8 V from the name"] += 1
+            if r["voltage"] == EZP_VOLTAGE_5V:
+                report_voltage_clash(name, "5.0",
+                                     "the name says 1.8 V")
+        elif r["voltage"] == EZP_VOLTAGE_5V:
+            attrs["vcc"] = "5.0"
+            stats["marked as 5 V from the record"] += 1
 
         out[section][r["maker"]].append((name, attrs))
         emitted.add(key)
@@ -306,6 +361,11 @@ def main():
 
     for k in sorted(stats):
         print(f"  {stats[k]:5d}  {k}")
+    if VOLTAGE_CLASHES:
+        print(f"\n{len(VOLTAGE_CLASHES)} voltage disagreements "
+              f"(the record won; check these against the datasheet):")
+        for c in VOLTAGE_CLASHES:
+            print(f"  {c}")
     print(f"\n{total} chips written to {args.out}")
     return 0
 

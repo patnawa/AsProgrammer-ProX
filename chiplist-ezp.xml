@@ -75,21 +75,21 @@
       <BY25Q80AL id="E06014" page="256" size="1048576" />
     </BoyaMicro>
     <CATALYST>
-      <CAT25C02P page="16" size="256" spicmd="95" />
-      <CAT25C03P page="16" size="256" spicmd="95" />
-      <CAT25C04S page="16" size="512" spicmd="95" />
-      <CAT25C05P page="16" size="512" spicmd="95" />
-      <CAT25C08P page="32" size="1024" spicmd="95" />
-      <CAT25C09P page="32" size="1024" spicmd="95" />
-      <CAT25C11 page="16" size="128" spicmd="95" />
-      <CAT25C128P page="64" size="16384" spicmd="95" />
-      <CAT25C16P page="32" size="2048" spicmd="95" />
-      <CAT25C17P page="32" size="2048" spicmd="95" />
-      <CAT25C256P page="64" size="32768" spicmd="95" />
-      <CAT25C32P page="64" size="4096" spicmd="95" />
-      <CAT25C33P page="64" size="4096" spicmd="95" />
-      <CAT25C64P page="64" size="8192" spicmd="95" />
-      <CAT25C65P page="64" size="8192" spicmd="95" />
+      <CAT25C02P page="16" size="256" spicmd="95" vcc="5.0"/>
+      <CAT25C03P page="16" size="256" spicmd="95" vcc="5.0"/>
+      <CAT25C04S page="16" size="512" spicmd="95" vcc="5.0"/>
+      <CAT25C05P page="16" size="512" spicmd="95" vcc="5.0"/>
+      <CAT25C08P page="32" size="1024" spicmd="95" vcc="5.0"/>
+      <CAT25C09P page="32" size="1024" spicmd="95" vcc="5.0"/>
+      <CAT25C11 page="16" size="128" spicmd="95" vcc="5.0"/>
+      <CAT25C128P page="64" size="16384" spicmd="95" vcc="5.0"/>
+      <CAT25C16P page="32" size="2048" spicmd="95" vcc="5.0"/>
+      <CAT25C17P page="32" size="2048" spicmd="95" vcc="5.0"/>
+      <CAT25C256P page="64" size="32768" spicmd="95" vcc="5.0"/>
+      <CAT25C32P page="64" size="4096" spicmd="95" vcc="5.0"/>
+      <CAT25C33P page="64" size="4096" spicmd="95" vcc="5.0"/>
+      <CAT25C64P page="64" size="8192" spicmd="95" vcc="5.0"/>
+      <CAT25C65P page="64" size="8192" spicmd="95" vcc="5.0"/>
     </CATALYST>
     <CHINGIS>
       <PM25LQ010 id="7F9D11" page="256" size="131072" />
@@ -286,18 +286,18 @@
     </ISSI>
     <MICROCHIP>
       <_25AA010 page="16" size="128" spicmd="95" />
-      <_25AA016C page="16" size="2048" spicmd="95" />
+      <_25AA016C page="16" size="2048" spicmd="95" vcc="5.0"/>
       <_25AA020 page="16" size="256" spicmd="95" />
-      <_25AA0320 page="32" size="4096" spicmd="95" />
-      <_25AA0640 page="32" size="8192" spicmd="95" />
+      <_25AA0320 page="32" size="4096" spicmd="95" vcc="5.0"/>
+      <_25AA0640 page="32" size="8192" spicmd="95" vcc="5.0"/>
       <_25AAF1024 page="256" size="131072" spicmd="95" />
       <_25AAF512 page="128" size="65536" spicmd="95" />
-      <_25C128 page="64" size="16384" spicmd="95" />
-      <_25C256 page="64" size="32768" spicmd="95" />
-      <_25C512 page="128" size="65536" spicmd="95" />
-      <_25LC010 page="16" size="128" spicmd="95" />
-      <_25LC020 page="16" size="256" spicmd="95" />
-      <_25LC16C page="16" size="2048" spicmd="95" />
+      <_25C128 page="64" size="16384" spicmd="95" vcc="5.0"/>
+      <_25C256 page="64" size="32768" spicmd="95" vcc="5.0"/>
+      <_25C512 page="128" size="65536" spicmd="95" vcc="5.0"/>
+      <_25LC010 page="16" size="128" spicmd="95" vcc="5.0"/>
+      <_25LC020 page="16" size="256" spicmd="95" vcc="5.0"/>
+      <_25LC16C page="16" size="2048" spicmd="95" vcc="5.0"/>
     </MICROCHIP>
     <MICRON>
       <M25P016 id="202015" page="256" size="2097152" />
@@ -405,10 +405,10 @@
       <PY25Q512HB id="85201A" page="256" size="67108864" />
     </Puya>
     <RAMTRON>
-      <FM25CL40 page="32" size="512" spicmd="95" />
+      <FM25CL40 page="32" size="512" spicmd="95" vcc="5.0"/>
       <FM25CL64B page="32" size="8192" spicmd="95" />
       <FM25L04B page="32" size="512" spicmd="95" />
-      <FM25L128 page="128" size="16384" spicmd="95" />
+      <FM25L128 page="128" size="16384" spicmd="95" vcc="5.0"/>
     </RAMTRON>
     <RAMXEED>
       <MB85RD16LX id="040721" page="64" size="2048" spicmd="95" />
@@ -464,23 +464,23 @@
     <ST>
       <M95512 page="128" size="65536" spicmd="95" />
       <M95M01 page="256" size="131072" spicmd="95" />
-      <ST25C01 page="8" size="128" spicmd="95" />
-      <ST25C02 page="8" size="256" spicmd="95" />
-      <ST25C04 page="8" size="512" spicmd="95" />
-      <ST25C08 page="16" size="1024" spicmd="95" />
-      <ST25W01 page="8" size="128" spicmd="95" />
-      <ST25W02 page="8" size="256" spicmd="95" />
-      <ST25W04 page="8" size="512" spicmd="95" />
-      <ST25W08 page="16" size="1024" spicmd="95" />
-      <ST25W16 page="16" size="2048" spicmd="95" />
+      <ST25C01 page="8" size="128" spicmd="95" vcc="5.0"/>
+      <ST25C02 page="8" size="256" spicmd="95" vcc="5.0"/>
+      <ST25C04 page="8" size="512" spicmd="95" vcc="5.0"/>
+      <ST25C08 page="16" size="1024" spicmd="95" vcc="5.0"/>
+      <ST25W01 page="8" size="128" spicmd="95" vcc="5.0"/>
+      <ST25W02 page="8" size="256" spicmd="95" vcc="5.0"/>
+      <ST25W04 page="8" size="512" spicmd="95" vcc="5.0"/>
+      <ST25W08 page="16" size="1024" spicmd="95" vcc="5.0"/>
+      <ST25W16 page="16" size="2048" spicmd="95" vcc="5.0"/>
       <ST25p10V page="256" size="131072" />
     </ST>
     <TI>
-      <TI25080 page="8" size="1024" spicmd="95" />
-      <TI2516 page="16" size="2048" spicmd="95" />
-      <TI2532 page="16" size="4096" spicmd="95" />
-      <TI2532A page="16" size="4096" spicmd="95" />
-      <TI2564 page="64" size="8192" spicmd="95" />
+      <TI25080 page="8" size="1024" spicmd="95" vcc="5.0"/>
+      <TI2516 page="16" size="2048" spicmd="95" vcc="5.0"/>
+      <TI2532 page="16" size="4096" spicmd="95" vcc="5.0"/>
+      <TI2532A page="16" size="4096" spicmd="95" vcc="5.0"/>
+      <TI2564 page="64" size="8192" spicmd="95" vcc="5.0"/>
     </TI>
     <UCUNDATA>
       <UC25HQ05 id="B36010" page="256" size="65536" />
@@ -527,8 +527,8 @@
       <W25X80 id="EF3014" page="256" size="1048576" />
     </WINBOND>
     <XICOR>
-      <X25256 page="64" size="32768" spicmd="95" />
-      <X25512 page="64" size="65536" spicmd="95" />
+      <X25256 page="64" size="32768" spicmd="95" vcc="5.0"/>
+      <X25512 page="64" size="65536" spicmd="95" vcc="5.0"/>
     </XICOR>
     <XMC>
       <XM25LU128C id="204118" page="256" size="16777216" />
