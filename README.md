@@ -6,7 +6,7 @@
 
 Sector-level erase · SFDP auto-detect · checksums · responsive UI
 
-![version](https://img.shields.io/badge/version-4.4-2BB3F3?style=flat-square)
+![version](https://img.shields.io/badge/version-4.14-2BB3F3?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-Windows%20x86-94A3B8?style=flat-square)
 ![built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
@@ -484,6 +484,78 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 ---
 
 ## Changelog
+
+### 4.14.0.0 — serprog: every DIY programmer at once
+
+A Raspberry Pi Pico running pico-serprog costs four dollars and speaks
+flashrom's documented serial protocol; so do STM32, ESP32 and frser-duino
+boards. One new backend supports them all: pick **serprog** under
+*Programmator*, set its COM port once, done. serprog's SPI operations are
+atomic (the firmware owns chip select), so the backend queues the command
+phase and executes each transaction as one exchange — the protocol layers
+never notice. SPI only, honestly: I2C, MicroWire and the KB9012 EC path
+say so instead of misbehaving.
+
+### 4.13.0.0 — 119 more chips, from everyone's lists at once
+
+Every open chip database checked against ours: latest flashrom (already
+fully mined), upstream UsbAsp-flash (11 new), the community-consolidated
+list from upstream issue 163 (51 new after filtering out what must not be
+taken — AVR parts this program cannot drive, NAND entries the GUI cannot
+drive *yet*, and page-variant duplicates the live AT45 detection obsoletes),
+and IMSProg's database, which turned out to use the same 68-byte records as
+the EZP files (57 parts nobody else had, shipped as `chiplist-imsprog.xml`,
+GPL-3-or-later, deletable). 1751 chips total. The Find IC search dialog now
+actually searches all five files instead of two.
+
+### 4.12.0.0 — CH347 over libusb, awaiting silicon
+
+Cross-platform step 3, first half: the CH347's reverse-engineered bulk
+packet layout as a pure, byte-exact-tested unit; a libusb-1.0 transport
+implementing the standard hardware contract; and a non-destructive smoke
+harness (`tools/ch347smoke.lpr`). Compile-checked on every Linux CI run,
+kept out of every UI until it passes on a real CH347.
+
+### 4.11.0.0 — SPI NAND phase 2: it executes now
+
+Phase 1 planned around bad blocks; this executes the plans. The engine
+scans factory markers with ECC off (GD5F flags an erased page as an ECC
+failure, which would make a fresh chip scan as all-bad), checks the chip's
+ECC verdict after every dumped page and refuses uncorrectable ones by
+block and page, unlocks before programming and believes only the read-back,
+checks E_FAIL/P_FAIL after every erase and program, and reads every written
+page straight back. The CLI gains `--nand-info` and `--nand-read` for
+W25N512GV/01GV/02KV, GD5F1GQ4UA/UB, MX35LF1GE4AB and TC58CVG0S3. Erase and
+write wait for live CH347 validation.
+
+### 4.10.0.0 — Intel flash descriptor regions, named and usable
+
+A dump holding an Intel flash descriptor now logs its region table — where
+the BIOS starts, where the ME ends, and whether a region runs off the end
+of the image (the signature of a too-small chip selection). The command
+line gains `--region bios` (or fd/me/gbe/pd/ec): `--read` keeps only that
+region at full-chip offsets, `--write --smart` reflashes a BIOS without
+touching the ME, and `--region --erase` is refused because a whole-chip
+erase under a one-region write would destroy the other regions.
+
+### 4.9.0.0 — the clock steps down before the dump is refused
+
+When read-twice-and-compare disagrees, the commonest cause is a clip
+contact that is marginal at the selected clock and fine one step slower.
+The reads now walk the programmer's own speed menu downward — rereading
+both passes, since the fast reference may be the corrupted side — and only
+refuse when the slowest clock still disagrees. A dump that stabilised below
+the selected clock says so, naming the speed that worked.
+
+### 4.8.0.0 — the AT45 tells you its own geometry
+
+The two oldest TODOs in the tree. A DataFlash declares its family, capacity
+and current page mode in its status register, so the page-size field is now
+checked against the chip before every read, write and verify — a 161 in
+power-of-2 mode has 512-byte pages, and driving it as 528 shifts every
+address in the job with nothing to say so until verify. Read ID fills both
+size fields from the chip itself, because the XML table cannot know a chip
+was switched permanently to binary mode.
 
 ### 4.7.1.0 — a big verify read is not a disconnect
 
