@@ -184,9 +184,10 @@ begin
   Say('  --hw NAME       ch341, ch347, ft232h, usbasp, avrisp, arduino,');
   Say('                  buzzpirat, serprog (Pico/STM32/ESP32 flashrom-style');
   Say('                  serial programmers; set the port in the GUI once),');
-  Say('                  ezp (EZP2023+: read and identify only -- its');
-  Say('                  firmware exposes no raw SPI, so write, erase,');
-  Say('                  SFDP and the chip tests cannot work through it)');
+  Say('                  ezp (EZP2023+: identify, read, whole-chip write and');
+  Say('                  erase with automatic byte-for-byte read-back.');
+  Say('                  Smart write, SFDP and chip tests need raw SPI and');
+  Say('                  therefore cannot work through this firmware)');
   Say('  --erase         erase before writing');
   Say('  --smart         SPI NOR transactional differential write: two-pass');
   Say('                  backup, neighbour preservation and full-block verify');

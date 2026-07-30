@@ -41,7 +41,7 @@ var
   n, i: integer;
   Sent: cardinal;
   s: string;
-  Detected: boolean;
+  Tries, Retried: integer;
 
 procedure Fail(const Msg: string);
 begin
@@ -89,7 +89,7 @@ end;
 function SendCmd(var Dev: pusb_dev_handle; const Cmd: array of byte): boolean;
 var
   Local: array of byte;
-  k: integer;
+  k, Attempt: integer;
 begin
   SetLength(Local, PACKET);
   FillChar(Local[0], PACKET, 0);
@@ -98,17 +98,34 @@ begin
   if usb_bulk_write(Dev, EP_CMD, Local[0], PACKET, 5000) = PACKET then
     Exit(True);
 
+  //ปลดค้างที่ปลายทางก่อน ราคาถูกที่สุดและบางทีก็พอ
+  usb_clear_halt(Dev, EP_CMD);
+  usb_clear_halt(Dev, EP_IN);
+  usb_clear_halt(Dev, EP_DATA);
+  if usb_bulk_write(Dev, EP_CMD, Local[0], PACKET, 5000) = PACKET then
+    Exit(True);
+
   usb_set_configuration(Dev, 1);
   usb_claim_interface(Dev, 0);
   if usb_bulk_write(Dev, EP_CMD, Local[0], PACKET, 5000) = PACKET then
     Exit(True);
 
-  usb_reset(Dev);
-  usb_close(Dev);
-  Sleep(1500);
-  Dev := OpenOnce;
-  if Dev = nil then Exit(False);
-  Result := usb_bulk_write(Dev, EP_CMD, Local[0], PACKET, 5000) = PACKET;
+  //งานที่เลิกกลางสตรีมทิ้งเฟิร์มแวร์ค้างไว้ รีเซ็ตรอบเดียวไม่พอทุกครั้ง
+  //ลองสามรอบพร้อมรอให้มันกลับมาจริงก่อนตัดสินว่าต้องถอดสายเอง
+  for Attempt := 1 to 3 do
+  begin
+    usb_reset(Dev);
+    usb_close(Dev);
+    Sleep(2500);
+    Dev := OpenOnce;
+    if Dev = nil then Continue;
+    usb_clear_halt(Dev, EP_CMD);
+    usb_clear_halt(Dev, EP_IN);
+    usb_clear_halt(Dev, EP_DATA);
+    if usb_bulk_write(Dev, EP_CMD, Local[0], PACKET, 5000) = PACKET then
+      Exit(True);
+  end;
+  Result := False;
 end;
 
 //หนึ่ง session ของ CHECK_CHIP แบบครบวงจร: เปิด -> 0009 -> อ่านคำตอบ ->
@@ -117,15 +134,15 @@ end;
 //นี่คือขั้นที่หายไป: ซอฟต์แวร์ของผู้ผลิตทำสิ่งนี้ให้จบสองรอบก่อนจะเข้ารอบ
 //เขียน เฟิร์มแวร์ไปตรวจชิปจริงตอนนี้ พอถึงรอบเขียน 0007 จึงได้คำตอบสถานะ
 //(01 EF 40 17) ถ้าไม่ทำ 0007 จะได้ FF FF FF แล้วข้อมูลถูกทิ้งทั้งหมด
-function PrimeCheckChip(out Detected: boolean): boolean;
+function PrimeCheckChip(ExpectedID: cardinal): boolean;
 var
   Dev: pusb_dev_handle;
   Rep: array of byte;
   k, m: integer;
   Line: string;
+  GotID: cardinal;
 begin
   Result := False;
-  Detected := False;
   Dev := OpenOnce;
   if Dev = nil then Exit;
   try
@@ -136,8 +153,16 @@ begin
     Line := '';
     for k := 0 to 7 do Line := Line + IntToHex(Rep[k], 2) + ' ';
     WriteLn('  check-chip reply (', m, '): ', Line);
-    Detected := (m = PACKET) and (Rep[0] = 1);
-    SendCmd(Dev, [$01, $08]);
+    if m <> PACKET then Exit;
+    GotID := (cardinal(Rep[1]) shl 16) or
+             (cardinal(Rep[2]) shl 8) or cardinal(Rep[3]);
+    if (Rep[0] <> 1) or (GotID <> ExpectedID) then
+    begin
+      WriteLn(Format('  expected detected chip %.6x, got family %d id %.6x',
+                     [ExpectedID, Rep[0], GotID]));
+      Exit;
+    end;
+    if not SendCmd(Dev, [$01, $08]) then Exit;
     Result := True;
   finally
     if Dev <> nil then
@@ -184,12 +209,11 @@ begin
 
   //ขั้นเตรียม: CHECK_CHIP ให้จบเป็น session ของตัวเอง สองรอบ เหมือนผู้ผลิต
   WriteLn('priming with check-chip sessions, the way the vendor does:');
-  if not PrimeCheckChip(Detected) then Fail('the check-chip session failed');
-  if not PrimeCheckChip(Detected) then Fail('the second check-chip failed');
-  if Detected then
-    WriteLn('  the firmware has identified the chip')
-  else
-    WriteLn('  WARNING: the firmware still does not report a chip');
+  if not PrimeCheckChip(ChipID) then
+    Fail('the check-chip session did not identify the expected chip');
+  if not PrimeCheckChip(ChipID) then
+    Fail('the second check-chip did not identify the expected chip');
+  WriteLn('  both sessions identified the expected chip');
 
   //รอบเขียน: session ใหม่ทั้งหมด
   h := OpenOnce;
@@ -223,11 +247,13 @@ begin
   s := '';
   for i := 0 to 15 do s := s + IntToHex(Reply[i], 2) + ' ';
   WriteLn('0007 reply (', n, ' bytes): ', s);
-  if (n = PACKET) and (Reply[0] = 1) then
-    WriteLn('  GOOD: the firmware reports a detected chip, like the vendor')
-  else
-    WriteLn('  BAD: the vendor sees 01 EF 40 17 here. We are out of phase, ' +
-            'so this write will very likely be discarded.');
+  if (n <> PACKET) or (Reply[0] <> 1) or
+     (Reply[1] <> byte(ChipID shr 16)) or
+     (Reply[2] <> byte(ChipID shr 8)) or
+     (Reply[3] <> byte(ChipID)) then
+    Fail('the descriptor reply is not the expected detected-chip status; ' +
+         'the session is out of phase, so no data was written');
+  WriteLn('  GOOD: the firmware reports the expected detected chip');
 
   //0005 START, no reply read (that is what the vendor does)
   FillChar(Pkt[0], PACKET, 0);
@@ -240,12 +266,28 @@ begin
   SetLength(Buf, Page);
   Img.Position := 0;
   Sent := 0;
+  Retried := 0;
   while Sent < Size do
   begin
     Img.ReadBuffer(Buf[0], Page);
-    n := usb_bulk_write(h, EP_DATA, Buf[0], Page, 5000);
+    //เฟิร์มแวร์โปรแกรมเพจละราว 0.7 ms การยิงก้อนรัว ๆ เท่าที่ USB ไหวจะ
+    //แซงมัน แล้ว libusb0 คืน -5 (EIO) ซึ่งความจริงคือ "ยังไม่พร้อม" ไม่ใช่
+    //"พัง" จึงต้องรอแล้วส่งก้อนเดิมซ้ำ ไม่ใช่ยกเลิกงานทั้งชิป
+    Tries := 0;
+    repeat
+      n := usb_bulk_write(h, EP_DATA, Buf[0], Page, 5000);
+      if n = integer(Page) then Break;
+      //ค่าบวกที่สั้นแปลว่าบางส่วนของเพจอาจถูกกินไปแล้ว ส่งทั้งเพจซ้ำจะ
+      //ทำให้ข้อมูลถัดจากนี้เหลื่อม จึงหยุดทันที มีแต่ค่าติดลบเท่านั้นที่
+      //ยืนยันว่าไม่มีไบต์ถูกส่งและลองก้อนเดิมใหม่ได้
+      if n >= 0 then Break;
+      Inc(Tries);
+      Inc(Retried);
+      Sleep(2);
+    until Tries >= 200;
     if n <> integer(Page) then
-      Fail(Format('block at %d took %d of %d bytes', [Sent, n, Page]));
+      Fail(Format('block at %d took %d of %d bytes after %d retries',
+                  [Sent, n, Page, Tries]));
     Inc(Sent, Page);
     if (Sent mod (1024 * 1024)) = 0 then
       WriteLn('  ', Sent div 1024, ' KB');
@@ -259,6 +301,6 @@ begin
   usb_release_interface(h, 0);
   usb_close(h);
   Img.Free;
-  WriteLn('the whole image was accepted. Now read the chip back with a ');
-  WriteLn('separate program to find out whether it actually landed.');
+  WriteLn(Format('the whole image was accepted (%d block retries while the ' +
+                 'chip caught up). Now read it back to confirm.', [Retried]));
 end.

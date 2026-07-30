@@ -23,11 +23,13 @@ unit ezphw;
 //   everything else       refused with a message saying why, because the
 //                         firmware has no way to send it
 //
-// That is enough for Read ID, Read, dump inspection, compare and
-// verify-against-a-file. Erase and write are refused: the firmware can do
-// whole-chip writes, but wiring that to this program's page-at-a-time
-// write path would mean buffering a whole image and guessing when to flush
-// it, and a wrong guess there costs somebody their chip. Reads first.
+// Read ID, Read, dump inspection, compare and verify-against-a-file use that
+// emulated SPI contract. Write and Erase deliberately bypass it and call the
+// firmware's whole-chip operation: two isolated CHECK_CHIP priming sessions,
+// a fresh descriptor session whose status must contain the selected JEDEC id,
+// START, the exact-size image on OUT|1, RESET, then another fresh whole-chip
+// read and a byte-for-byte comparison. Smart write, SFDP and the chip tests
+// remain unavailable because they require arbitrary SPI commands.
 //
 // Protocol source: the packet layout is documented by libezp2023plus
 // (github.com/alexandro-45/libezp2023plus, GPL-2) and was re-checked
@@ -77,6 +79,10 @@ const
   TIMEOUT_MS       = 5000;
   TIMEOUT_READ_MS  = 20000;  //ก้อนข้อมูลของการอ่านทั้งชิป เผื่อไว้มากกว่า
   TIMEOUT_WRITE_MS = 20000;  //ก้อนข้อมูลของการเขียน เผื่อจากของผู้ผลิต
+  EZP_RECOVERY_ATTEMPTS = 3;
+  EZP_RECOVERY_DELAY_MS = 2500;
+  EZP_STREAM_RETRIES    = 200;
+  EZP_RETRY_DELAY_MS    = 2;
 
 type
   TEZPHardware = class(TBaseHardware)
@@ -108,15 +114,20 @@ type
     function BulkOut(Endpoint: longword; const Data: TBytes;
       TimeoutMs: integer = TIMEOUT_MS;
       MayRecover: boolean = True): boolean;
-    function BulkIn(var Data: TBytes; Len, TimeoutMs: integer): boolean;
+    function BulkOutStream(Endpoint: longword; const Data: TBytes;
+      TimeoutMs: integer): boolean;
+    function BulkIn(var Data: TBytes; Len, TimeoutMs: integer;
+      Retries: integer = 0): boolean;
     function DrainIn(MaxRounds: integer): integer;
     procedure CleanSession;
     function Command(Cmd: word; out Reply: TBytes): boolean;
+    function SendReset: boolean;
     function CheckChip: boolean;
     //รหัส 9Fh จากตารางชิปที่ผู้ใช้เลือก ใส่ลง FChipID ถ้าอ่านได้
     function ChipIDFromTable: boolean;
     function ReadWholeChip: boolean;
     function SendChipDescriptor: boolean;
+    function PrimeWriteSessions(ExpectedID: cardinal): boolean;
   public
     constructor Create;
     destructor Destroy; override;
@@ -241,7 +252,7 @@ begin
   FHandle := nil;
   FOpened := False;
   //ตัวเครื่องหายไปจากบัสชั่วครู่หลังรีเซ็ต ต้องรอให้มันกลับมา
-  Sleep(1500);
+  Sleep(EZP_RECOVERY_DELAY_MS);
   FImageValid := False;
   FIdentityChecked := False;
   Result := FindAndOpen;
@@ -297,7 +308,7 @@ end;
 function TEZPHardware.BulkOut(Endpoint: longword;
   const Data: TBytes; TimeoutMs: integer; MayRecover: boolean): boolean;
 var
-  n: integer;
+  n, Attempt: integer;
 begin
   Result := False;
   if (not FOpened) or (Length(Data) = 0) then Exit;
@@ -305,7 +316,7 @@ begin
                       longword(TimeoutMs));
   if n = Length(Data) then Exit(True);
 
-  //ไม่รับคำสั่ง = เฟิร์มแวร์ค้าง กู้หนึ่งครั้งแล้วลองซ้ำ ถ้ายังไม่ได้
+  //ไม่รับคำสั่ง = เฟิร์มแวร์ค้าง กู้แล้วลองซ้ำ ถ้ายังไม่ได้
   //ค่อยบอกว่าเครื่องไม่ตอบ ไม่ใช่รายงานเลขติดลบดิบ ๆ ให้คนไปเดาเอง
   //
   //ห้ามกู้กลางสตรีมเด็ดขาด: การรีเซ็ตตอนที่เฟิร์มแวร์กำลังรับข้อมูลทั้งชิป
@@ -315,13 +326,17 @@ begin
   begin
     FRecovering := True;
     try
-      if Recover then
+      for Attempt := 1 to EZP_RECOVERY_ATTEMPTS do
       begin
-        main.LogPrint('the EZP2023+ was not answering; a USB reset ' +
-                      'brought it back');
+        if not Recover then Continue;
         n := usb_bulk_write(FHandle, Endpoint, Data[0], Length(Data),
-                            TIMEOUT_MS);
-        if n = Length(Data) then Exit(True);
+                            longword(TimeoutMs));
+        if n = Length(Data) then
+        begin
+          main.LogPrint(Format('the EZP2023+ was not answering; USB reset ' +
+            'cycle %d brought it back', [Attempt]));
+          Exit(True);
+        end;
       end;
     finally
       FRecovering := False;
@@ -329,23 +344,57 @@ begin
   end;
 
   FStrError := Format('the EZP2023+ would not accept a command even after ' +
-    'a USB reset (%d of %d bytes). Unplug it, wait a few seconds and plug ' +
+    '%d USB reset cycles (%d of %d bytes). Unplug it, wait a few seconds and plug ' +
     'it back in: that power-cycles the CH552, which is what clears one ' +
-    'that is truly stuck', [n, Length(Data)]);
+    'that is truly stuck', [EZP_RECOVERY_ATTEMPTS, n, Length(Data)]);
+end;
+
+//ก้อนข้อมูลกลางสตรีมห้ามเรียก Recover: USB reset จะทำให้เฟิร์มแวร์หลุด
+//ตำแหน่งและข้อมูลที่ตามมาทั้งหมดเหลื่อม ลองซ้ำได้เฉพาะค่าติดลบซึ่งแปลว่า
+//ไม่มีไบต์ถูกส่ง ค่าบวกที่สั้นอาจกินบางส่วนไปแล้วจึงต้องหยุดทันที
+function TEZPHardware.BulkOutStream(Endpoint: longword;
+  const Data: TBytes; TimeoutMs: integer): boolean;
+var
+  n, Attempt: integer;
+begin
+  Result := False;
+  if (not FOpened) or (Length(Data) = 0) then Exit;
+
+  for Attempt := 0 to EZP_STREAM_RETRIES do
+  begin
+    n := usb_bulk_write(FHandle, Endpoint, Data[0], Length(Data),
+                        longword(TimeoutMs));
+    if n = Length(Data) then Exit(True);
+    if (n >= 0) or (Attempt >= EZP_STREAM_RETRIES) then Break;
+    Sleep(EZP_RETRY_DELAY_MS);
+  end;
+
+  FStrError := Format('the EZP2023+ accepted %d of %d stream bytes after ' +
+    '%d retries', [n, Length(Data), Attempt]);
 end;
 
 function TEZPHardware.BulkIn(var Data: TBytes; Len,
-  TimeoutMs: integer): boolean;
+  TimeoutMs, Retries: integer): boolean;
 var
-  n: integer;
+  n, Attempt: integer;
 begin
   Result := False;
   SetLength(Data, Len);
   if not FOpened then Exit;
-  n := usb_bulk_read(FHandle, EZP_EP_IN, Data[0], Len, longword(TimeoutMs));
-  Result := n = Len;
-  if not Result then
-    FStrError := Format('the EZP2023+ returned %d of %d bytes', [n, Len]);
+  for Attempt := 0 to Retries do
+  begin
+    n := usb_bulk_read(FHandle, EZP_EP_IN, Data[0], Len,
+                       longword(TimeoutMs));
+    if n = Len then Exit(True);
+
+    //ค่าติดลบหมายถึงไม่มีข้อมูลถูกส่งมา จึงลองอ่านก้อนเดิมใหม่ได้โดยไม่
+    //ทำให้ตำแหน่งเลื่อน แต่ short packet ที่เป็นบวกกินข้อมูลไปแล้ว ห้ามลอง
+    //ซ้ำเพราะจะทำให้ภาพทั้งชิปเหลื่อมหนึ่งก้อน
+    if (n >= 0) or (Attempt >= Retries) then Break;
+    Sleep(EZP_RETRY_DELAY_MS);
+  end;
+  FStrError := Format('the EZP2023+ returned %d of %d bytes after %d ' +
+    'retries', [n, Len, Attempt]);
 end;
 
 //ล้างท่อ IN ให้ว่างก่อนเริ่มงาน
@@ -418,6 +467,19 @@ begin
             BulkIn(Reply, EZP_PACKET_LEN, TIMEOUT_MS);
 end;
 
+//RESET เป็นคำสั่งทางเดียว ซอฟต์แวร์ผู้ผลิตไม่อ่านคำตอบหลังมัน การอ่านรอ
+//จะได้แพ็กเก็ตเก่าซ้ำจาก libusb0 แล้วทำให้คำตอบทุกคำสั่งหลังจากนั้นเลื่อนเฟส
+function TEZPHardware.SendReset: boolean;
+var
+  Pkt: TBytes;
+begin
+  SetLength(Pkt, EZP_PACKET_LEN);
+  FillByte(Pkt[0], EZP_PACKET_LEN, 0);
+  Pkt[0] := byte(EZP_CMD_RESET shr 8);
+  Pkt[1] := byte(EZP_CMD_RESET and $FF);
+  Result := BulkOut(EZP_EP_CMD, Pkt);
+end;
+
 //รหัสจากตารางชิป: CurrentICParam.ID เก็บเป็นสตริงเลขฐานสิบหกหกตัว
 function TEZPHardware.ChipIDFromTable: boolean;
 var
@@ -439,7 +501,7 @@ end;
 //เรียกครั้งแรกที่มีคนต้องใช้ ไม่ใช่ตอนเปิดอุปกรณ์
 function TEZPHardware.CheckChip: boolean;
 var
-  Reply, Dummy, Pkt: TBytes;
+  Reply, Pkt: TBytes;
   Code: cardinal;
   Size, Page: cardinal;
 begin
@@ -495,7 +557,7 @@ begin
   FChipID[1] := Reply[2];
   FChipID[2] := Reply[3];
 
-  Command(EZP_CMD_RESET, Dummy);
+  if not SendReset then Exit;
   FIdentityChecked := True;
   Result := True;
 end;
@@ -524,11 +586,10 @@ begin
 
   //รหัสชิปเอาจากตารางชิปที่เลือกไว้ ไม่ใช่ไปถามเครื่อง
   //
-  //เคยเรียก CheckChip ตรงนี้เพื่อขอรหัส แล้วมันพัง: CheckChip ส่ง 0009 และ
-  //ปิดท้ายด้วย RESET (0108) การมี RESET คาอยู่ก่อน 0007 ทำให้เฟิร์มแวร์รับ
-  //ข้อมูลทั้ง 8MB แล้วทิ้งทั้งหมด ชิปไม่เปลี่ยนแม้แต่ไบต์เดียวและไม่มีอะไร
-  //แจ้งเลย ซอฟต์แวร์ของผู้ผลิตไม่ส่ง 0009 ในรอบเขียนเลย (จับ USB มาแล้ว)
-  //มันเอารหัสจากฐานข้อมูลของตัวเอง เราก็ทำแบบเดียวกัน
+  //ห้ามเรียก CheckChip ติดกับ 0007 ใน session เขียน: CHECK_CHIP ปิดท้ายด้วย
+  //RESET และ 0007 จะตอบข้อมูลเก่าหรือรับภาพไปทิ้ง ซอฟต์แวร์ผู้ผลิตทำการ
+  //ตรวจสอง session แยกก่อน แล้วเปิด session ที่สามเพื่อ 0007/START/data
+  //รหัสใน descriptor ของ session ที่สามมาจากฐานข้อมูล เราก็ทำแบบเดียวกัน
   if not ChipIDFromTable then
   begin
     //ไม่มีรหัสในตาราง (เช่นชิปที่มาจาก SFDP) ก็ยังถามเครื่องได้ แต่ต้อง
@@ -568,7 +629,62 @@ begin
   //Pkt[28] คือ voltage: ศูนย์ = ราง 3.3 V ซึ่งเป็นค่าของ SPI NOR ทั้งวงศ์
 
   if not BulkOut(EZP_EP_CMD, Pkt) then Exit;
-  Result := BulkIn(Reply, EZP_PACKET_LEN, TIMEOUT_MS);
+  if not BulkIn(Reply, EZP_PACKET_LEN, TIMEOUT_MS) then Exit;
+
+  //ทางเขียนต้อง fail closed: ถ้าได้ข้อมูลเก่าซ้ำแทนสถานะ 01 + JEDEC id
+  //แปลว่าฝั่งเครื่องกับฝั่งเราคิดว่าอยู่คนละ session การส่งภาพต่อไปจะถูก
+  //ทิ้งหรือวางผิดตำแหน่งโดยไม่มี error จากเฟิร์มแวร์
+  if FInWriteSession and
+     ((Reply[0] <> 1) or
+      (Reply[1] <> FChipID[0]) or
+      (Reply[2] <> FChipID[1]) or
+      (Reply[3] <> FChipID[2])) then
+  begin
+    FStrError := Format('the EZP2023+ descriptor reply was %.2x %.2x %.2x ' +
+      '%.2x, expected 01 %.2x %.2x %.2x; no image data was sent',
+      [Reply[0], Reply[1], Reply[2], Reply[3],
+       FChipID[0], FChipID[1], FChipID[2]]);
+    Exit;
+  end;
+  Result := True;
+end;
+
+//ซอฟต์แวร์ผู้ผลิตตรวจชิปสอง session เต็มก่อนเปิด session ใหม่เพื่อเขียน
+//จริง การตรวจนั้นเป็นจุดที่เฟิร์มแวร์เติมสถานะชิปซึ่ง 0007 ใช้ต่อ ข้ามขั้น
+//นี้แล้ว 0007 อาจตอบ FF หรือข้อมูลเก่าและรับภาพไปทิ้งเงียบ ๆ
+function TEZPHardware.PrimeWriteSessions(ExpectedID: cardinal): boolean;
+var
+  Pass: integer;
+  GotID: cardinal;
+begin
+  Result := False;
+  for Pass := 1 to 2 do
+  begin
+    DevClose;
+    if not DevOpen then Exit;
+    if not CheckChip then Exit;
+    if not FHaveID then
+    begin
+      FStrError := Format('the EZP2023+ did not detect the expected chip ' +
+        '%.6x during write priming pass %d', [ExpectedID, Pass]);
+      Exit;
+    end;
+    GotID := (cardinal(FChipID[0]) shl 16) or
+             (cardinal(FChipID[1]) shl 8) or cardinal(FChipID[2]);
+    if GotID <> ExpectedID then
+    begin
+      FStrError := Format('the selected chip is %.6x but the EZP2023+ ' +
+        'detected %.6x during write priming pass %d',
+        [ExpectedID, GotID, Pass]);
+      Exit;
+    end;
+    main.LogPrint(Format('EZP2023+: write priming pass %d detected %.6x',
+                         [Pass, GotID]));
+    DevClose;
+  end;
+
+  //descriptor + START + data ต้องอยู่ใน session ใหม่ทั้งหมด
+  Result := DevOpen;
 end;
 
 //อ่านทั้งชิปเข้าหน่วยความจำครั้งเดียวต่อรอบ
@@ -591,11 +707,12 @@ begin
   Got := 0;
   while Got < Size do
   begin
-    if not BulkIn(Block, integer(BlockLen), TIMEOUT_READ_MS) then
+    if not BulkIn(Block, integer(BlockLen), TIMEOUT_READ_MS,
+                  EZP_STREAM_RETRIES) then
     begin
       //เลิกเฉย ๆ ไม่ได้: เฟิร์มแวร์จะสตรีมต่อจนจบชิป แล้วงานหน้าจะไปเจอ
       //ข้อมูลค้างเต็มท่อ ซึ่งเป็นที่มาของบั๊กเฟสทั้งหมดที่ตามหากันมา
-      Command(EZP_CMD_RESET, Reply);
+      SendReset;
       DrainIn(64);
       FImage := nil;
       Exit;
@@ -608,12 +725,12 @@ begin
     begin
       FStrError := 'cancelled while the EZP2023+ was streaming the chip';
       FImage := nil;
-      Command(EZP_CMD_RESET, Reply);
+      SendReset;
       Exit;
     end;
   end;
 
-  Command(EZP_CMD_RESET, Reply);
+  SendReset;
   FImageValid := True;
   Result := True;
 end;
@@ -739,8 +856,11 @@ end;
 function TEZPHardware.ReadBackWholeChip(out Data: TBytes): boolean;
 begin
   Data := nil;
-  //บังคับอ่านจากชิปจริง ไม่ใช่ภาพที่ค้างอยู่ก่อนเขียน
+  //บังคับอ่านจากชิปจริงใน session ใหม่ ไม่ใช่ภาพหรือสถานะ USB ที่ค้างจาก
+  //รอบเขียน การแยก session นี้เป็นเงื่อนไขเดียวกับที่ทดสอบบนฮาร์ดแวร์จริง
   ForgetImage;
+  DevClose;
+  if not DevOpen then Exit(False);
   Result := ReadWholeChip;
   if Result then Data := Copy(FImage, 0, Length(FImage));
 end;
@@ -750,8 +870,8 @@ end;
 //ไม่มีคำตอบกลับ (รออยู่ก็ค้าง) และก้อนข้อมูลไปที่ปลายทาง OUT|1 ไม่ใช่ OUT|2
 function TEZPHardware.WriteWholeChip(const Data: TBytes): boolean;
 var
-  Reply, Block: TBytes;
-  Size, Page, BlockLen, Sent: cardinal;
+  Block: TBytes;
+  Size, Page, BlockLen, Sent, ExpectedID: cardinal;
   Pkt: TBytes;
 begin
   Result := False;
@@ -760,7 +880,6 @@ begin
     FStrError := 'the EZP2023+ is not open';
     Exit;
   end;
-  FInWriteSession := True;
   Size := main.CurrentICParam.Size;
   Page := main.CurrentICParam.Page;
   if cardinal(Length(Data)) <> Size then
@@ -770,58 +889,75 @@ begin
       [Size, Length(Data)]);
     Exit;
   end;
-  if not SendChipDescriptor then Exit;
-
-  //START ของทางเขียนไม่มีคำตอบ อ่านรอจะค้างจนหมดเวลา
-  SetLength(Pkt, EZP_PACKET_LEN);
-  FillByte(Pkt[0], EZP_PACKET_LEN, 0);
-  Pkt[0] := byte(EZP_CMD_START shr 8);
-  Pkt[1] := byte(EZP_CMD_START and $FF);
-  if not BulkOut(EZP_EP_CMD, Pkt, TIMEOUT_MS, False) then Exit;
-
-  BlockLen := Page;
-  if BlockLen < EZP_BLOCK_MIN then BlockLen := EZP_BLOCK_MIN;
-
-  main.LogPrint('the firmware erases the chip before it takes data; the ' +
-                'first block can take a minute on a large part');
-  SetLength(Block, BlockLen);
-  Sent := 0;
-  while Sent < Size do
+  if not ChipIDFromTable then
   begin
-    Move(Data[Sent], Block[0], BlockLen);
-    if not BulkOut(EZP_EP_DATA, Block, TIMEOUT_WRITE_MS, False) then
-    begin
-      //ครึ่ง ๆ กลาง ๆ คือชิปที่เนื้อในผสมกันอยู่ ต้องบอกให้ชัดว่าถึงไหน
-      FStrError := FStrError + Format(' (stopped %d bytes into the write; ' +
-        'the chip now holds part of the new image and part of the old)',
-        [Sent]);
-      Command(EZP_CMD_RESET, Reply);
-      ForgetImage;
-      Exit;
-    end;
-    Inc(Sent, BlockLen);
-    OpProgress(Sent, Size);
-    OpProcessMessages;
-    if main.UserCancel then
-    begin
-      FStrError := Format('cancelled %d bytes into the write; the chip now ' +
-        'holds part of the new image and part of the old', [Sent]);
-      Command(EZP_CMD_RESET, Reply);
-      ForgetImage;
-      Exit;
-    end;
+    FStrError := 'the EZP2023+ write path needs a six-digit JEDEC id from ' +
+      'the selected chip entry';
+    Exit;
   end;
+  ExpectedID := (cardinal(FChipID[0]) shl 16) or
+                (cardinal(FChipID[1]) shl 8) or cardinal(FChipID[2]);
+  if not PrimeWriteSessions(ExpectedID) then Exit;
 
-  //RESET ของทางเขียนก็ไม่มีคำตอบกลับเช่นกัน
-  FillByte(Pkt[0], EZP_PACKET_LEN, 0);
-  Pkt[0] := byte(EZP_CMD_RESET shr 8);
-  Pkt[1] := byte(EZP_CMD_RESET and $FF);
-  BulkOut(EZP_EP_CMD, Pkt);
+  FInWriteSession := True;
+  try
+    //DevOpen ของ session ใหม่ล้าง id ที่ prime มา จึงใส่ค่าจากตารางกลับไป
+    if not ChipIDFromTable then Exit;
+    if not SendChipDescriptor then Exit;
 
-  //สิ่งที่อยู่บนชิปเปลี่ยนไปแล้ว ภาพที่แคชไว้ใช้ไม่ได้อีก
-  ForgetImage;
-  FInWriteSession := False;
-  Result := True;
+    //START ของทางเขียนไม่มีคำตอบ อ่านรอจะค้างจนหมดเวลา
+    SetLength(Pkt, EZP_PACKET_LEN);
+    FillByte(Pkt[0], EZP_PACKET_LEN, 0);
+    Pkt[0] := byte(EZP_CMD_START shr 8);
+    Pkt[1] := byte(EZP_CMD_START and $FF);
+    if not BulkOut(EZP_EP_CMD, Pkt, TIMEOUT_MS, False) then Exit;
+
+    BlockLen := Page;
+    if BlockLen < EZP_BLOCK_MIN then BlockLen := EZP_BLOCK_MIN;
+
+    main.LogPrint('the firmware erases the chip before it takes data; the ' +
+                  'first block can take a minute on a large part');
+    SetLength(Block, BlockLen);
+    Sent := 0;
+    while Sent < Size do
+    begin
+      Move(Data[Sent], Block[0], BlockLen);
+      if not BulkOutStream(EZP_EP_DATA, Block, TIMEOUT_WRITE_MS) then
+      begin
+        //ครึ่ง ๆ กลาง ๆ คือชิปที่เนื้อในผสมกันอยู่ ต้องบอกให้ชัดว่าถึงไหน
+        FStrError := FStrError + Format(' (stopped %d bytes into the write; ' +
+          'the chip now holds part of the new image and part of the old)',
+          [Sent]);
+        SendReset;
+        ForgetImage;
+        Exit;
+      end;
+      Inc(Sent, BlockLen);
+      OpProgress(Sent, Size);
+      OpProcessMessages;
+      if main.UserCancel then
+      begin
+        FStrError := Format('cancelled %d bytes into the write; the chip now ' +
+          'holds part of the new image and part of the old', [Sent]);
+        SendReset;
+        ForgetImage;
+        Exit;
+      end;
+    end;
+
+    //RESET ของทางเขียนก็ไม่มีคำตอบกลับเช่นกัน และห้าม USB-recover หลัง
+    //ก้อนสุดท้ายเพราะอาจรีเซ็ตเครื่องขณะที่ชิปยังปิดงานเพจสุดท้าย
+    FillByte(Pkt[0], EZP_PACKET_LEN, 0);
+    Pkt[0] := byte(EZP_CMD_RESET shr 8);
+    Pkt[1] := byte(EZP_CMD_RESET and $FF);
+    BulkOut(EZP_EP_CMD, Pkt, TIMEOUT_MS, False);
+
+    //สิ่งที่อยู่บนชิปเปลี่ยนไปแล้ว ภาพที่แคชไว้ใช้ไม่ได้อีก
+    ForgetImage;
+    Result := True;
+  finally
+    FInWriteSession := False;
+  end;
 end;
 
 //I2C กับ MicroWire: เฟิร์มแวร์ทำได้ แต่ผ่านเส้นทางเดียวกับ SPI คือทั้งชิป

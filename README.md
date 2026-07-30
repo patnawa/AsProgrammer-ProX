@@ -76,7 +76,7 @@ programmers, while staying free and open source.
 | **AVRISP (LUFA)** | ● | | | |
 | **Arduino** | ● | | | |
 | **serprog** | ● | | | Any board speaking flashrom's serial protocol: Raspberry Pi Pico (pico-serprog), STM32, ESP32, frser-duino. Set the COM port under *Settings*. |
-| **EZP2023+** | ◐ | | | Identify and read only. Writing was implemented and then **disabled**: tested on real hardware it corrupts the chip (see 4.21.1.0 below). SFDP, protection decoding, Smart write and the chip health tests still cannot work through it — those need raw SPI commands, which the firmware has no way to send. Needs the vendor's libusb0 driver installed once. |
+| **EZP2023+** | ◐ | | | Identify, read, whole-chip write and erase. Every write is read back in a fresh USB session and compared byte for byte. SFDP, protection decoding, Smart write and the chip health tests cannot work through it — those need raw SPI commands, which the firmware has no way to send. Uses libusb-win32 1.4.0.2; the device-mode driver must be installed once. |
 
 Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-series I²C EEPROM,
 93-series MicroWire EEPROM, KB9012 EC, and SPI NAND (W25N / GD5F / MX35 / TC58 — read and
@@ -94,7 +94,19 @@ bad-block scan from the command line, erase/write after live validation).
    **Chip → Detect chip via SFDP**.
 5. Press **Read** to dump, or load a file and use the write button's dropdown →
    **Smart write** for a preservation-aware, differential write with full
-   affected-block verification.
+   affected-block verification. With an EZP2023+, use ordinary **Write**
+   instead: its firmware replaces the whole chip and AsProgrammer verifies
+   the complete result automatically.
+
+The complete signed EZP driver bundle is stored in
+`drivers\EZP2023Plus`; no separate Desktop download is required. With exactly
+one EZP connected, run `tools\update_ezp_libusb1402.ps1` from an elevated
+64-bit PowerShell. On a new PC it installs the signed EZP-specific binding; on
+an existing installation it updates the kernel and 32/64-bit libusb runtime to
+1.4.0.2. The updater validates every signature, creates a rollback backup,
+restarts only `1FC8:310B`, and rolls back automatically if the device does not
+return with status `OK`. See `drivers\EZP2023Plus\README.md` for package
+contents, checksums and verification commands.
 
 The **Safe workflow** strip keeps the normal path visible: **Detect chip →
 Open image → Smart write**, with `Read chip` and `Verify` kept to the right of
@@ -162,7 +174,9 @@ AsProgrammer.exe --scan dump.bin                    # no hardware needed
 machine that has none.
 
 `--hw` forces a programmer (`ch341`, `ch347`, `ft232h`, `usbasp`, `avrisp`,
-`arduino`, `buzzpirat`); without it the one that is plugged in is used.
+`arduino`, `buzzpirat`, `serprog`, `ezp`); without it the one that is plugged
+in is used. EZP writes always replace and verify the complete chip; `--smart`,
+SFDP and the chip tests are unavailable through that firmware.
 `--sfdp` takes the chip parameters from the chip itself instead of the
 database. File format follows the extension, so `.bin`, `.hex` and S-record
 all work. An unrecognised switch is an error rather than being ignored.
@@ -490,6 +504,35 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 ---
 
 ## Changelog
+
+### 4.22.0.0 — EZP2023+ write fixed and verified on the real programmer
+
+Whole-chip Write and Erase are enabled again. The missing protocol state was
+not another packet in the captured write itself: the vendor program performs
+two complete CHECK_CHIP sessions first, closes both, and opens a third session
+for descriptor, START and data. The descriptor reply must be `01` plus the
+selected JEDEC id. AsProgrammer now reproduces that state machine and refuses
+to send any image data if either priming pass or the descriptor reply disagrees.
+
+The USB transport is hardened as well. RESET is one-way rather than a command
+with a reply, negative read interruptions are retried without shifting the
+stream, and a stuck CH552 gets up to three full reset/reopen cycles before the
+user is asked to power-cycle it. The bundled 32-bit `libusb0.dll` is the signed
+1.4.0.2 release; it includes upstream large-transfer, ordering, hang and bulk
+ZLP fixes absent from 1.2.6.0.
+
+The repository also carries a self-contained Windows driver bundle under
+`drivers\EZP2023Plus`: the signed EZP-specific device package, the unmodified
+signed libusb-win32 1.4.0.2 AMD64/x86/ARM64 runtime, upstream licences and
+SHA-256 checksums. The elevated updater consumes these project-local files and
+supports both a first installation and an idempotent upgrade.
+
+Validated on the connected EZP2023+ (`1FC8:310B`, identity `90381CBC`) and a
+W25Q64-class 8 MiB chip (`EF 40 17`): a backup was read twice, written back
+through the isolated writer, then read twice with exactly the same SHA-256.
+The integrated application follows every write with its own fresh-session,
+full-chip byte comparison. Smart write, SFDP and health tests remain disabled
+for EZP because its firmware cannot issue arbitrary SPI commands.
 
 ### 4.21.1.0 — EZP2023+ writing is disabled: it corrupts chips
 
