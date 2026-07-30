@@ -225,6 +225,10 @@ resourcestring
   STR_READ_STABLE        = 'Both reads agree, so the dump can be trusted';
   STR_READ_RETRY_SLOWER  = 'Dropping the SPI clock to %s and reading again '
                          + 'before giving up';
+  STR_ERASE_WEAR_WARNING = 'Wear warning: %d blocks erased more than five '
+                         + 'times slower than the rest (worst %d ms at '
+                         + '0x%.8x, median %d ms). Flash slows down before '
+                         + 'it fails; consider retiring this chip';
   STR_READ_STABLE_SLOWER = 'The dump only became stable at %s, below the '
                          + 'selected clock. Reseat the clip, or keep the '
                          + 'clock at this speed';

@@ -99,6 +99,9 @@ type
     //Pages whose data the chip had to correct: the dump is fine but the
     //part is aging, and the caller deserves to know.
     CorrectedPages: cardinal;
+    //The same, per block (allocated by read runs): a cluster of corrected
+    //pages in one block is a block wearing out, not random noise.
+    CorrectedPerBlock: array of cardinal;
     StepsDone: SizeInt;
   end;
 
@@ -154,6 +157,7 @@ begin
   Result.FailPage := 0;
   Result.HasFailAddress := False;
   Result.CorrectedPages := 0;
+  Result.CorrectedPerBlock := nil;
   Result.StepsDone := 0;
 end;
 
@@ -282,6 +286,7 @@ var
   IO: TNANDIOResult;
   UseECC: boolean;
   ErrorText: string;
+  PrevCorrected: cardinal;
 begin
   Result := ClearReport;
 
@@ -312,6 +317,8 @@ begin
     Exit;
   end;
 
+  SetLength(Result.CorrectedPerBlock, Geometry.BlockCount);
+
   for i := 0 to High(Plan.Steps) do
   begin
     if Assigned(ShouldStop) and ShouldStop() then
@@ -326,8 +333,11 @@ begin
       Exit;
     end;
 
+    PrevCorrected := Result.CorrectedPages;
     if not ReadStepChecked(Device, Plan.Steps[i], UseECC, Result, Data) then
       Exit;
+    if Result.CorrectedPages > PrevCorrected then
+      Inc(Result.CorrectedPerBlock[Plan.Steps[i].Block]);
 
     Move(Data[0], Image[Plan.Steps[i].ImageOffset], Plan.Steps[i].Length);
     Inc(Result.StepsDone);

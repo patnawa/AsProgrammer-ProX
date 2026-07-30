@@ -67,6 +67,16 @@ function RunCapacityTest(ClaimedSize: QWord; SectorSize: cardinal;
 //เครื่องหมายประจำแอดเดรส เปิดเป็น public เพื่อให้เทสต์ตรวจแยกแยะได้
 function CapacityMarker(Address: QWord): TBytes;
 
+//แฟลชตายแบบช้าลงก่อนแล้วค่อยพัง: บล็อกที่ใช้เวลาลบ/เขียนนานผิดฝูงคือ
+//บล็อกที่กำลังหมดอายุ ก่อนที่ verify จะเริ่มจับได้เสียอีก ตัวเลขพวกนี้
+//ได้มาฟรีจากการรอ BUSY อยู่แล้ว เหลือแค่ดูให้เป็น
+function TimingMedian(const Durations: array of cardinal): cardinal;
+
+//นับตัวที่ช้ากว่ามัธยฐานเกิน Factor เท่า คืนจำนวน พร้อมชี้ตัวที่แย่สุด
+function CountTimingOutliers(const Durations: array of cardinal;
+  Factor: cardinal; out Median, Worst: cardinal;
+  out WorstIndex: integer): integer;
+
 //หมอตรวจชิป: รหัสจากโอปโค้ดต่างยุคต้องเล่าเรื่องเดียวกัน ชิปปลอมจำนวนมาก
 //ทำการบ้านแค่ 9Fh แล้วปล่อยโอปโค้ดเก่าตอบมั่ว ค่าที่ไม่ตอบ (เงียบ/FF/00)
 //ไม่นับว่าขัดแย้ง เพราะชิปแท้บางรุ่นก็ไม่รองรับโอปโค้ดเก่าจริง ๆ
@@ -321,6 +331,54 @@ begin
   R.Completed := True;
   R.Genuine := R.DetectedSize = ClaimedSize;
   Result := True;
+end;
+
+function TimingMedian(const Durations: array of cardinal): cardinal;
+var
+  Sorted: array of cardinal;
+  i, j: integer;
+  T: cardinal;
+begin
+  Result := 0;
+  if Length(Durations) = 0 then Exit;
+  Sorted := nil;
+  SetLength(Sorted, Length(Durations));
+  for i := 0 to High(Durations) do Sorted[i] := Durations[i];
+  //insertion sort ก็พอ: จำนวนบล็อกต่องานอยู่หลักพันอย่างมาก
+  for i := 1 to High(Sorted) do
+  begin
+    T := Sorted[i];
+    j := i - 1;
+    while (j >= 0) and (Sorted[j] > T) do
+    begin
+      Sorted[j + 1] := Sorted[j];
+      Dec(j);
+    end;
+    Sorted[j + 1] := T;
+  end;
+  Result := Sorted[Length(Sorted) div 2];
+end;
+
+function CountTimingOutliers(const Durations: array of cardinal;
+  Factor: cardinal; out Median, Worst: cardinal;
+  out WorstIndex: integer): integer;
+var
+  i: integer;
+begin
+  Result := 0;
+  Worst := 0;
+  WorstIndex := -1;
+  Median := TimingMedian(Durations);
+  if (Median = 0) or (Factor = 0) then Exit;
+  for i := 0 to High(Durations) do
+  begin
+    if Durations[i] > QWord(Median) * Factor then Inc(Result);
+    if Durations[i] > Worst then
+    begin
+      Worst := Durations[i];
+      WorstIndex := i;
+    end;
+  end;
 end;
 
 function CrossCheckIDs(const ID9F: array of byte; Got9F: boolean;

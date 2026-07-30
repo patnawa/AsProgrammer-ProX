@@ -163,6 +163,9 @@ begin
     Rep := ExecuteNANDRead(Chip, Geo, Map, Plan, Back, @StopNever, nil);
     Check('the dump succeeds', Rep.Success);
     Check('one corrected page was counted', Rep.CorrectedPages = 1);
+    Check('the wear map blames block 0 and clears block 1',
+          (Length(Rep.CorrectedPerBlock) = 16) and
+          (Rep.CorrectedPerBlock[0] = 1) and (Rep.CorrectedPerBlock[1] = 0));
 
     //อ่านคลุมบล็อก 3 ต้องพังพร้อมชื่อเพจ
     Check('read plan across the rotten page',

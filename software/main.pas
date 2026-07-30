@@ -2822,6 +2822,10 @@ var
     Probe: array[0..15] of byte;
     ChkOp: byte;
     ChkFast, ReadNative4B: boolean;
+    EraseMs: array of cardinal;
+    T0: QWord;
+    SlowCount, WorstIdx: integer;
+    MedianMs, WorstMs: cardinal;
   begin
   OK := False;
 
@@ -2901,12 +2905,15 @@ var
     if not Enter4B then Exit;
 
   try
+    SetLength(EraseMs, Total);
     for Idx := 0 to Total - 1 do
     begin
       //WEL is cleared by every accepted erase command.  Therefore every
       //sector needs a new WREN followed by an observed WEL=1; checking only
       //the first sector can silently skip all remaining sectors.
       if not WrenOK then Exit;
+
+      T0 := GetTickCount64;
 
       if Native4B then
         Sent := UsbAsp25_EraseSector(Plan[Idx].Opcode4B,
@@ -2924,6 +2931,10 @@ var
 
       if not WaitNotBusy25(EraseTimeoutFor(Plan[Idx].Size)) then Exit;
 
+      //เวลาลบต่อบล็อกได้มาฟรีจากการรอ BUSY แฟลชตายแบบช้าลงก่อนพัง
+      //เก็บไว้แล้วค่อยดูตอนจบว่ามีบล็อกไหนช้าผิดฝูง
+      EraseMs[Idx] := cardinal(GetTickCount64 - T0);
+
       //ชิปแจ้งเองว่าคำสั่งลบล้มเหลวหรือไม่
       if ChipReportedFailure('erase at 0x' + IntToHex(Plan[Idx].Addr, 8)) then Exit;
 
@@ -2931,6 +2942,18 @@ var
       OpProcessMessages;
 
       if UserCancel then Exit;
+    end;
+
+    //บล็อกที่ลบช้ากว่ามัธยฐานเกินห้าเท่าคือบล็อกที่กำลังหมดอายุ ตัวเลข
+    //มัธยฐานต่ำกว่าความละเอียดของนาฬิกา (บล็อกจิ๋วหรือชิปไว) ตัดสินไม่ได้
+    //ก็ไม่ตัดสิน
+    if Total >= 4 then
+    begin
+      SlowCount := CountTimingOutliers(EraseMs, 5, MedianMs, WorstMs,
+                                       WorstIdx);
+      if (MedianMs >= 10) and (SlowCount > 0) and (WorstIdx >= 0) then
+        LogPrint(Format(STR_ERASE_WEAR_WARNING,
+          [SlowCount, WorstMs, Plan[WorstIdx].Addr, MedianMs]));
     end;
 
     //ตรวจว่าคำสั่งลบทำงานจริง
@@ -6268,7 +6291,13 @@ var
   //ของโพรซีเยอร์ชั้นนอกมาเป็นตัวนับ for
   procedure DoWork;
   var
-    i: integer;
+    i, j, kk, ChunkCount: integer;
+    Order: array of cardinal;
+    Seed: cardinal;
+    TIdx: cardinal;
+    Off: QWord;
+    Len: cardinal;
+    StreamBase: int64;
   begin
   if (DataSize = 0) then
   begin
@@ -6291,6 +6320,13 @@ var
   SetProgressPos(0);
   ProgressPos := 0;
   OpStarted := Now;
+  StreamBase := RomStream.Position;
+
+  //รีเซ็ตแบบ JEDEC (66h/99h) ก่อนรอบตรวจ: สิ่งที่เทียบต้องเป็นเนื้อ array
+  //จริง ไม่ใช่สถานะหรือบัฟเฟอร์ค้างของอุปกรณ์ และโหมดค้างที่งานก่อนหน้า
+  //ทิ้งไว้ก็ถูกล้างไปด้วย ชิปที่ไม่รู้จักคำสั่งนี้จะเมินมันอย่างปลอดภัย
+  UsbAsp25_SoftReset;
+  Sleep(1);
 
   //ชิปที่มีคำสั่งอ่านชุด 4 ไบต์ของตัวเอง (13h) ไม่ต้องสลับโหมดเลย
   //
@@ -6306,36 +6342,55 @@ var
 
   PickReadOpcode(Native4B, ReadOp, FastRead);
 
-  try
-  while (Address-StartAddress) < DataSize do
+  //ตรวจแบบสลับลำดับก้อน: อุปกรณ์หรือชิปที่สะท้อนข้อมูลที่เพิ่งผ่านมือ
+  //(บัฟเฟอร์อ่านล่วงหน้า สถานะค้าง) ผ่านการตรวจแบบไล่เรียงได้สบาย ๆ
+  //แต่ผ่านลำดับสุ่มไม่ได้ ลำดับมาจาก LCG ค่าตายตัว ผลจึงทำซ้ำได้เสมอ
+  ChunkCount := integer((QWord(DataSize) + ChunkSize - 1) div ChunkSize);
+  SetLength(Order, ChunkCount);
+  for i := 0 to ChunkCount - 1 do Order[i] := cardinal(i);
+  Seed := $02C7E5A1;
+  for i := ChunkCount - 1 downto 1 do
   begin
-    if ChunkSize > (DataSize - (Address-StartAddress)) then ChunkSize := DataSize - (Address-StartAddress);
+    Seed := Seed * 1103515245 + 12345;
+    j := integer((Seed shr 16) mod cardinal(i + 1));
+    TIdx := Order[i];
+    Order[i] := Order[j];
+    Order[j] := TIdx;
+  end;
 
-    Got := ReadData25(ReadOp, FastRead, Use4B, Address, datachunk, ChunkSize);
-    if Got <> ChunkSize then
+  try
+  for kk := 0 to ChunkCount - 1 do
+  begin
+    Off := QWord(Order[kk]) * ChunkSize;
+    Len := ChunkSize;
+    if Off + Len > DataSize then Len := cardinal(DataSize - Off);
+    Address := StartAddress + cardinal(Off);
+
+    Got := ReadData25(ReadOp, FastRead, Use4B, Address, datachunk,
+                      integer(Len));
+    if Got <> integer(Len) then
     begin
       OpFail(Format('SPI flash short read during verify: received %d of %d bytes',
-                    [Got, ChunkSize]), Address);
+                    [Got, Len]), Address);
       Exit;
     end;
     Inc(BytesRead, Got);
 
-    RomStream.ReadBuffer(DataChunkFile, ChunkSize);
+    RomStream.Position := StreamBase + int64(Off);
+    RomStream.ReadBuffer(DataChunkFile, Len);
 
-    for i := 0 to ChunkSize -1 do
+    for i := 0 to integer(Len) - 1 do
     if DataChunk[i] <> DataChunkFile[i] then
     begin
-      LogPrint(STR_VERIFY_ERROR+IntToHex(Address+i, 8));
+      LogPrint(STR_VERIFY_ERROR+IntToHex(Address+cardinal(i), 8));
       OpFail('the chip does not match the buffer', Address + cardinal(i));
       SetProgressPos(0);
       Exit;
     end;
 
-    Inc(Address, ChunkSize);
-
     Inc(ProgressPos);
     SetProgressPos(ProgressPos);
-    ShowSpeed(Address - StartAddress, DataSize, OpStarted);
+    ShowSpeed(cardinal(BytesRead), DataSize, OpStarted);
     OpProcessMessages;
 
     if UserCancel then Break;
@@ -6345,7 +6400,7 @@ var
     Leave4B;
   end;
 
-  OpProgress(Address - StartAddress, DataSize);
+  OpProgress(cardinal(BytesRead), DataSize);
 
   if (BytesRead <> DataSize) then
   begin

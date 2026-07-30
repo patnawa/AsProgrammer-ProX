@@ -886,8 +886,26 @@ begin
       if not Rep.Success then
         Exit(Fail('the dump failed: ' + Rep.ErrorText));
       if Rep.CorrectedPages > 0 then
+      begin
         Say(Format('the chip corrected bit errors on %d pages; the data ' +
                    'is good but the part is aging', [Rep.CorrectedPages]));
+        //บล็อกที่แก้บิตกระจุกตัวคือบล็อกที่กำลังตาย ชี้ให้เห็นเป็นรายบล็อก
+        BadText := '';
+        for i := 0 to High(Rep.CorrectedPerBlock) do
+          if Rep.CorrectedPerBlock[i] > 0 then
+          begin
+            if BadText <> '' then BadText := BadText + ', ';
+            BadText := BadText + Format('%d (%d pages)',
+                                        [i, Rep.CorrectedPerBlock[i]]);
+            if Length(BadText) > 180 then
+            begin
+              BadText := BadText + ', ...';
+              Break;
+            end;
+          end;
+        if BadText <> '' then
+          Say('  wear map, corrected pages per block: ' + BadText);
+      end;
 
       try
         F := TFileStream.Create(FileName, fmCreate);

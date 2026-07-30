@@ -231,6 +231,25 @@ begin
   Check('the reason is addressing', Pos('4-byte', R.ErrorText) > 0);
 end;
 
+procedure TestTiming;
+var
+  Median, Worst: cardinal;
+  WorstIdx: integer;
+begin
+  WriteLn('Wear timing: median and outliers');
+  Check('uniform timings have no outliers',
+        (CountTimingOutliers([100, 101, 99, 100], 5, Median, Worst,
+                             WorstIdx) = 0) and (Median = 100));
+  Check('one dying block is flagged and named',
+        (CountTimingOutliers([100, 100, 100, 900], 5, Median, Worst,
+                             WorstIdx) = 1) and (WorstIdx = 3) and
+        (Worst = 900));
+  Check('an empty list decides nothing',
+        CountTimingOutliers([], 5, Median, Worst, WorstIdx) = 0);
+  Check('a zero median decides nothing',
+        CountTimingOutliers([0, 0, 0, 50], 5, Median, Worst, WorstIdx) = 0);
+end;
+
 procedure TestCrossCheck;
 var
   Detail: string;
@@ -266,6 +285,7 @@ begin
   TestFailingWrites;
   TestEraseDiesMidway;
   TestRefusals;
+  TestTiming;
   TestCrossCheck;
 
   WriteLn;
