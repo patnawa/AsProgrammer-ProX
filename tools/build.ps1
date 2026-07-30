@@ -105,7 +105,7 @@ Run-Suite "unittests" $logicDir @(
   "$root\software\serialnum.pas", "$root\software\protbits.pas",
   "$root\software\opresult.pas", "$root\software\prodlog.pas",
   "$root\software\fileformats.pas", "$root\software\flashops.pas",
-  "$root\software\imgcheck.pas") -WithSfdpCorpus
+  "$root\software\imgcheck.pas", "$root\software\ifd.pas") -WithSfdpCorpus
 
 # Focused JESD216 sector-map descriptor semantics.  Keep the synthetic spi25
 # provider isolated from the real protocol unit used by the adapter suite.

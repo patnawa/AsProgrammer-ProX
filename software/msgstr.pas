@@ -229,6 +229,8 @@ resourcestring
                          + 'selected clock. Reseat the clip, or keep the '
                          + 'clock at this speed';
   STR_IMG_STATS          = 'Dump: %s';
+  STR_IFD_REGIONS        = 'Intel flash descriptor regions (use --region ' +
+                           'NAME on the command line to work on one):';
   STR_IMG_KIND           = 'The dump looks like a %s';
   STR_IMG_SUSPECT        = 'Suspicious dump: %s';
   STR_TIMEOUT_FROM_CHIP  = 'Busy ceilings taken from the chip: page %d ms, erase %d ms, '

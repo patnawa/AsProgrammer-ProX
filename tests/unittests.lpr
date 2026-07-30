@@ -17,7 +17,7 @@ program unittests;
 
 uses
   SysUtils, Classes, Math, sfdp, jedec, serialnum, spi25, protbits, opresult,
-  prodlog, flashops, imgcheck;
+  prodlog, flashops, imgcheck, ifd;
 
 var
   Failures: integer = 0;
@@ -957,6 +957,77 @@ begin
         (R[1].First = 500) and (R[1].Last = 500));
 end;
 
+// ---------------------------------------------------------------- IFD
+
+procedure TestIFD;
+var
+  Buf: array of byte;
+  Map: TIFDMap;
+  R: TIFDRegion;
+  Txt: string;
+
+  procedure PutDword(Off, V: cardinal);
+  begin
+    Buf[Off]     := byte(V);
+    Buf[Off + 1] := byte(V shr 8);
+    Buf[Off + 2] := byte(V shr 16);
+    Buf[Off + 3] := byte(V shr 24);
+  end;
+
+begin
+  WriteLn('Intel flash descriptor: the region table');
+  SetLength(Buf, 4096);
+  FillByte(Buf[0], 4096, $FF);
+  PutDword($10, IFD_SIGNATURE);
+  PutDword($14, $00040000);      //FRBA = 40h
+  PutDword($40, $00000000);      //fd:   0x000000..0x000FFF
+  PutDword($44, $0FFF0500);      //bios: 0x500000..0xFFFFFF
+  PutDword($48, $04FF0001);      //me:   0x001000..0x4FFFFF
+  PutDword($4C, $00007FFF);      //gbe: unused, by convention
+  PutDword($50, $00007FFF);
+  PutDword($54, $00007FFF);
+  PutDword($58, $00007FFF);
+  PutDword($5C, $00007FFF);
+  PutDword($60, $00007FFF);
+  PutDword($64, $00007FFF);
+
+  Check('a well formed descriptor parses', ParseIFD(@Buf[0], 4096, Map));
+  Check('fd is 0..0xFFF',
+        Map.Regions[0].Used and (Map.Regions[0].Base = 0) and
+        (Map.Regions[0].Limit = $FFF));
+  Check('bios is 0x500000..0xFFFFFF and the name lookup ignores case',
+        IFDRegionByName(Map, 'BIOS', R) and (R.Base = $500000) and
+        (R.Limit = $FFFFFF));
+  Check('me is 0x1000..0x4FFFFF',
+        IFDRegionByName(Map, 'me', R) and (R.Base = $1000) and
+        (R.Limit = $4FFFFF));
+  Check('an unused region is refused by name', not IFDRegionByName(Map, 'gbe', R));
+  Check('an unknown name is refused', not IFDRegionByName(Map, 'bogus', R));
+
+  Txt := IFDDescribe(Map, 16 * 1024 * 1024);
+  Check('the table names bios', Pos('bios', Txt) > 0);
+  Check('nothing exceeds a 16 MB dump', Pos('past the end', Txt) = 0);
+  Txt := IFDDescribe(Map, 8 * 1024 * 1024);
+  Check('a region past an 8 MB dump is flagged',
+        Pos('past the end', Txt) > 0);
+
+  //ดัมป์สั้น (เฉพาะเพจ descriptor) ยังต้องอ่านตารางได้ครบ
+  Check('a 4 KB descriptor-only dump still parses',
+        ParseIFD(@Buf[0], 4096, Map) and IFDRegionByName(Map, 'bios', R));
+
+  Buf[$10] := 0;
+  Check('a broken signature does not parse',
+        not ParseIFD(@Buf[0], 4096, Map));
+  PutDword($10, IFD_SIGNATURE);
+
+  //ตารางที่ไม่มี region ใช้จริงสักช่องคือลายเซ็นที่บังเอิญตรง ไม่ใช่ descriptor
+  PutDword($40, $00007FFF);
+  PutDword($44, $00007FFF);
+  PutDword($48, $00007FFF);
+  Check('a descriptor with no used region does not parse',
+        not ParseIFD(@Buf[0], 4096, Map));
+end;
+
 // -------------------------------- the erase planner, over random inputs
 
 //แผนการลบคือที่ที่บั๊กทำให้ข้อมูลของคนอื่นหายจริง ๆ การทดสอบด้วยตัวอย่าง
@@ -1239,6 +1310,7 @@ begin
   TestClearProtection;
   TestProgEraseFail;
   TestImgCheck;
+  TestIFD;
   TestSFDPCorpus;
 
   WriteLn;

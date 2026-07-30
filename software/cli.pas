@@ -30,7 +30,7 @@ implementation
 
 uses
   Windows, Forms, main, basehw, fileformats, findchip, sfdp, jedec, appver,
-  opresult, prodlog, serialnum, spi25, utilfunc, imgcheck, DateUtils,
+  opresult, prodlog, serialnum, spi25, utilfunc, imgcheck, ifd, DateUtils,
   prodcrypto, prodjob, prodstate, productiongate, electricalpreflight,
   chipprofile, chipsave;
 
@@ -40,11 +40,11 @@ const
   EXIT_USAGE = 2;
 
   //สวิตช์ที่ตามด้วยค่า
-  ValueSwitches: array[0..19] of string = (
+  ValueSwitches: array[0..20] of string = (
     'chip', 'hw', 'read', 'write', 'verify', 'job', 'operator', 'log', 'save-chip',
     'read-passes', 'sfdp-dump', 'sfdp-decode', 'compare', 'scan',
     'prod-job', 'prod-auth', 'prod-key-id', 'prod-key-env', 'evidence-dir',
-    'export-chip'
+    'export-chip', 'region'
   );
 
   //สวิตช์ที่เป็นธงเปล่า ๆ
@@ -186,6 +186,13 @@ begin
   Say('  --plan-only     with --smart: read the chip, print the differential');
   Say('                  plan and the chip-declared worst-case time, write nothing');
   Say('  --verify        verify after writing');
+  Say('  --region NAME   work on one Intel flash descriptor region only.');
+  Say('                  With --read everything outside the region is FF in');
+  Say('                  the file; with --write or --verify only that range');
+  Say('                  is written or checked (offsets stay full-chip).');
+  Say('                  Names: fd, bios, me, gbe, pd, ec. Combine --write');
+  Say('                  --region bios --smart to reflash a BIOS without');
+  Say('                  touching the ME');
   Say('  --detect        report the programmer and the chip, then exit');
   Say('  --force         go ahead even when the target area is write protected');
   Say('                  or when the chip was already programmed');
@@ -727,15 +734,46 @@ begin
   end;
 end;
 
+//--region: หา region ที่ขอจาก descriptor ในภาพ แล้วตรวจว่าอยู่ในภาพจริง
+//พ่นเหตุผลเองเมื่อไม่ผ่าน ผู้เรียกแค่จบงานด้วยรหัสที่เหมาะ
+function FindRegionInStream(Stream: TMemoryStream; const Name: string;
+  out Region: TIFDRegion): boolean;
+var
+  Map: TIFDMap;
+begin
+  Result := False;
+  if not ParseIFD(PByte(Stream.Memory), Stream.Size, Map) then
+  begin
+    Say('the image has no Intel flash descriptor, so --region cannot be used');
+    Exit;
+  end;
+  if not IFDRegionByName(Map, Name, Region) then
+  begin
+    Say('no region named "' + Name + '" is in use in this descriptor. The table:');
+    Say(IFDDescribe(Map, Stream.Size));
+    Exit;
+  end;
+  if QWord(Region.Limit) >= QWord(Stream.Size) then
+  begin
+    Say(Format('region %s (0x%.8x..0x%.8x) extends past the %d-byte image; ' +
+               'the selected chip is smaller than the board this image is for',
+               [string(Region.Name), Region.Base, Region.Limit, Stream.Size]));
+    Exit;
+  end;
+  Result := True;
+end;
+
 function RunCLI: integer;
 var
   ChipName, FileName, HWName, Bad, SaveName: string;
   HW: THardwareList;
-  Stream: TMemoryStream;
+  Stream, Slice: TMemoryStream;
   ErrMsg: string;
   Json: boolean;
   Action: string;
   ProdMode: boolean;
+  RegionName: string;
+  Region: TIFDRegion;
 begin
   Result := EXIT_USAGE;
   Action := 'none';
@@ -758,6 +796,25 @@ begin
 
   Json := HasSwitch('json');
   CLIForce := HasSwitch('force');
+
+  RegionName := SwitchValue('region');
+  if RegionName <> '' then
+  begin
+    //ลบทั้งชิปแล้วเขียนกลับแค่ region เดียวคือการทำลาย region ที่เหลือ
+    if HasSwitch('erase') then
+    begin
+      Say('--region does not combine with --erase: the plain erase is whole-chip.');
+      Say('use --write FILE --region ' + RegionName + ' --smart instead; it plans');
+      Say('and erases only the blocks the region write actually changes');
+      Exit(EXIT_USAGE);
+    end;
+    if (SwitchValue('read') = '') and (SwitchValue('write') = '') and
+       (SwitchValue('verify') = '') then
+    begin
+      Say('--region only means something with --read, --write or --verify');
+      Exit(EXIT_USAGE);
+    end;
+  end;
   ProdMode := ProductionModeRequested;
 
   if ProdMode then
@@ -1089,6 +1146,26 @@ begin
     Stream := TMemoryStream.Create;
     try
       MainForm.MPHexEditorEx.SaveToStream(Stream);
+
+      //--region: เก็บเฉพาะส่วนที่ขอ ที่เหลือเป็น FF ออฟเซ็ตในไฟล์ยังตรง
+      //กับชิปทั้งตัว เอาไปเขียนกลับหรือป้อนเครื่องมือ UEFI ได้เลย
+      if RegionName <> '' then
+      begin
+        if not FindRegionInStream(Stream, RegionName, Region) then
+        begin
+          OpFail('the requested descriptor region is not usable');
+          if Json then SayJson(Action);
+          Exit(EXIT_FAIL);
+        end;
+        if Region.Base > 0 then
+          FillByte(PByte(Stream.Memory)^, Region.Base, $FF);
+        if QWord(Region.Limit) + 1 < QWord(Stream.Size) then
+          FillByte((PByte(Stream.Memory) + Region.Limit + 1)^,
+                   Stream.Size - Region.Limit - 1, $FF);
+        Say(Format('kept region %s 0x%.8x..0x%.8x; the rest of the file is FF',
+                   [string(Region.Name), Region.Base, Region.Limit]));
+      end;
+
       if not SaveFirmware(FileName, Stream, DetectFormat(FileName), ErrMsg) then
       begin
         Say('could not save: ' + ErrMsg);
@@ -1128,8 +1205,32 @@ begin
       Say('could not load: ' + ErrMsg);
       Exit(EXIT_USAGE);
     end;
-    Stream.Position := 0;
-    MainForm.MPHexEditorEx.LoadFromStream(Stream);
+
+    if RegionName <> '' then
+    begin
+      //โหลดเฉพาะช่วงของ region เข้าบัฟเฟอร์ แล้วเลื่อน start address ไปที่
+      //ฐานของมัน เส้นทางเขียนธรรมดา เขียนแบบ smart และตรวจสอบ ล้วนอ่าน
+      //ช่วงงานจากสองค่านี้อยู่แล้ว จึงไม่ต้องมีโค้ดเขียนพิเศษอีกชุด
+      if not FindRegionInStream(Stream, RegionName, Region) then
+        Exit(EXIT_USAGE);
+      Slice := TMemoryStream.Create;
+      try
+        Stream.Position := Region.Base;
+        Slice.CopyFrom(Stream, Region.Limit - Region.Base + 1);
+        Slice.Position := 0;
+        MainForm.MPHexEditorEx.LoadFromStream(Slice);
+      finally
+        Slice.Free;
+      end;
+      MainForm.StartAddressEdit.Text := IntToHex(Region.Base, 8);
+      Say(Format('working only on region %s 0x%.8x..0x%.8x',
+                 [string(Region.Name), Region.Base, Region.Limit]));
+    end
+    else
+    begin
+      Stream.Position := 0;
+      MainForm.MPHexEditorEx.LoadFromStream(Stream);
+    end;
   finally
     Stream.Free;
   end;

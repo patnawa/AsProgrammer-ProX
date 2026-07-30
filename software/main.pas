@@ -12,7 +12,7 @@ uses
   XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
   utilfunc, findchip, DateUtils, lazUTF8, sfdp, opthread, fileformats, prodconfig, serialnum, jedec, protbits,
-  opresult, prodlog, chipsave, flashops, imgcheck,
+  opresult, prodlog, chipsave, flashops, imgcheck, ifd,
   operationmodel, norplanner, norengine, spi25noradapter, prodcrypto,
   prodevidence, eepromengine, eepromadapters,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
@@ -3254,6 +3254,9 @@ var
   S: TImgStats;
   V: TImgVerdict;
   Kind: string;
+  Map: TIFDMap;
+  TableLines: TStringList;
+  i: integer;
 begin
   //ล้างก่อนทุกทางออก ไม่งั้นคำเตือนของงานก่อนหน้าจะไปโผล่ในบรรทัด JSON
   //ของงานถัดไป ซึ่งเป็นงานที่อาจไม่ได้อ่านอะไรมาเลย
@@ -3267,6 +3270,20 @@ begin
 
   Kind := DetectImageKind(PByte(Stream.Memory), Stream.Size);
   if Kind <> '' then LogPrint(Format(STR_IMG_KIND, [Kind]));
+
+  //ภาพที่มี Intel flash descriptor บอกผังส่วนของตัวเองอยู่แล้ว พ่นให้เห็นเลย
+  //งานซ่อมส่วนใหญ่ต้องรู้ว่า BIOS เริ่มตรงไหนโดยไม่แตะ ME
+  if ParseIFD(PByte(Stream.Memory), Stream.Size, Map) then
+  begin
+    LogPrint(STR_IFD_REGIONS);
+    TableLines := TStringList.Create;
+    try
+      TableLines.Text := IFDDescribe(Map, Stream.Size);
+      for i := 0 to TableLines.Count - 1 do LogPrint(TableLines[i]);
+    finally
+      TableLines.Free;
+    end;
+  end;
 
   V := ImageVerdict(S);
   if V <> ivOK then
