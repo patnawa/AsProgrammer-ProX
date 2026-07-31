@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <settings>
   <locale lang="en"/>
-  <options hw="usbasp" verify="0" mw_speed="32Khz" spi_speed="1_5Mhz"/>
+  <options hw="ezp" sendab="0" skipff="0" verify="0" sn_mode="0" sn_step="1" win_max="0" win_top="310" check_id="1" mw_speed="32Khz" sn_value="1" win_left="712" fast_read="1" sn_length="4" spi_speed="1_5Mhz" win_width="1120" dark_theme="0" reset_chip="0" scan_image="1" sn_address="000000" sn_enabled="0" sn_logfile="serials.log" win_height="780" auto_backup="0" double_read="0" batch_target="10" prod_jobfile="" prod_logfile="" sn_bigendian="1" verify_erase="1" batch_enabled="0" check_contact="1" prod_checkuid="0" prod_operator="" auto_detect_hw="1" background_ops="0" arduino_comport="" ch347_spi_speed="60Mhz" serprog_comport="" arduino_baudrate="1000000" auto_detect_chip="1" serprog_baudrate="115200" blank_before_write="0"/>
 </settings>

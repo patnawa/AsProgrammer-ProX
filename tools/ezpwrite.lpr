@@ -1,8 +1,8 @@
 program ezpwrite;
 
-{ Writes one image to an EZP2023+ using exactly the sequence captured from
+{ Programs one ALREADY BLANK chip using exactly the write sequence captured from
   the vendor software, and NOTHING else -- no identification probe, no
-  read-back, no drain. The point is to measure whether the write itself
+  erase, no read-back, no drain. The point is to measure whether the write itself
   lands, without this program's own read path (which has been shown to be
   fed stale data by libusb0 on this stack) being able to lie about it.
 
@@ -10,12 +10,14 @@ program ezpwrite;
   gets a status packet starting 01 EF 40 17, and anything else means the
   firmware and we are out of phase.
 
-  DESTRUCTIVE: it rewrites the whole chip.
+  DESTRUCTIVE LAB TOOL: 0005 programs 1 bits to 0 bits but does not erase.
+  The main application performs native erase plus two blank read-backs first.
+  This tool refuses to run without an explicit --already-blank acknowledgement.
 
   Build and run (32-bit), after a power cycle of the programmer:
     fpc -Twin32 -Pi386 -Mobjfpc -Sh -Fusoftware tools\ezpwrite.lpr
-    ezpwrite <image> <size> <page> <id-hex>
-    ezpwrite dump.bin 8388608 256 EF4017
+    ezpwrite <image> <size> <page> <id-hex> --already-blank
+    ezpwrite dump.bin 8388608 256 EF4017 --already-blank
 }
 
 {$mode objfpc}{$H+}
@@ -137,7 +139,7 @@ end;
 function PrimeCheckChip(ExpectedID: cardinal): boolean;
 var
   Dev: pusb_dev_handle;
-  Rep: array of byte;
+  Rep, Cmd: array of byte;
   k, m: integer;
   Line: string;
   GotID: cardinal;
@@ -146,7 +148,23 @@ begin
   Dev := OpenOnce;
   if Dev = nil then Exit;
   try
-    if not SendCmd(Dev, [$00, $09]) then Exit;
+    //The vendor sends the complete selected-chip descriptor with CHECK_CHIP.
+    //Leaving bytes 13..15 zero still reads the live id, but does not prime the
+    //firmware's subsequent write algorithm.
+    SetLength(Cmd, PACKET);
+    FillChar(Cmd[0], PACKET, 0);
+    Cmd[0] := $00; Cmd[1] := $09;
+    Cmd[4] := byte(Page shr 8);
+    Cmd[5] := byte(Page);
+    Cmd[6] := $03; Cmd[7] := $E8;
+    Cmd[8] := byte(Size shr 24);
+    Cmd[9] := byte(Size shr 16);
+    Cmd[10] := byte(Size shr 8);
+    Cmd[11] := byte(Size);
+    Cmd[13] := byte(ExpectedID shr 16);
+    Cmd[14] := byte(ExpectedID shr 8);
+    Cmd[15] := byte(ExpectedID);
+    if not SendCmd(Dev, Cmd) then Exit;
     SetLength(Rep, PACKET);
     FillChar(Rep[0], PACKET, 0);
     m := usb_bulk_read(Dev, EP_IN, Rep[0], PACKET, 5000);
@@ -174,8 +192,10 @@ begin
 end;
 
 begin
-  if ParamCount < 4 then
-    Fail('usage: ezpwrite <image> <size> <page> <id-hex>');
+  if (ParamCount <> 5) or (ParamStr(5) <> '--already-blank') then
+    Fail('usage: ezpwrite <image> <size> <page> <id-hex> --already-blank; ' +
+         'this lab tool does not erase or verify, so use AsProgrammer for ' +
+         'normal writes');
   Size := StrToInt(ParamStr(2));
   Page := StrToInt(ParamStr(3));
   ChipID := StrToInt('$' + ParamStr(4));

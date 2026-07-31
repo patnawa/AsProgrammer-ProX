@@ -25,11 +25,11 @@
     <VersionInfo>
       <UseVersionInfo Value="True"/>
       <MajorVersionNr Value="4"/>
-      <MinorVersionNr Value="22"/>
-      <RevisionNr Value="0"/>
-      <BuildNr Value="2"/>
+      <MinorVersionNr Value="23"/>
+      <RevisionNr Value="2"/>
+      <BuildNr Value="0"/>
       <Language Value="0409"/>
-      <StringTable CompanyName="AsProgrammer ProX" FileDescription="Serial flash and EEPROM programmer" InternalName="AsProgrammer" LegalCopyright="MIT. Based on AsProgrammer by nofeletru and dregmod by therealdreg" OriginalFilename="AsProgrammer.exe" ProductName="AsProgrammer ProX" ProductVersion="4.22.0.2"/>
+      <StringTable CompanyName="AsProgrammer ProX" FileDescription="Serial flash and EEPROM programmer" InternalName="AsProgrammer" LegalCopyright="MIT. Based on AsProgrammer by nofeletru and dregmod by therealdreg" OriginalFilename="AsProgrammer.exe" ProductName="AsProgrammer ProX" ProductVersion="4.23.2.0"/>
     </VersionInfo>
     <MacroValues Count="2">
       <Macro1 Name="LCLWidgetType" Value="win32"/>

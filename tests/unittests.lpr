@@ -196,16 +196,32 @@ begin
   Check('the whole chip is protected', ProtectedRange(P, MB8, FromA, ToA));
   Check('from the first to the last byte', (FromA = 0) and (ToA = MB8 - 1));
 
+  // BP=7 พร้อม SEC=1 ก็ยังคือทั้งชิป: ตาราง Winbond ระบุ 111 เป็น ALL
+  // ทุกแถว สูตร 4K shl 6 = 256K ที่เคยใช้รายงานพื้นที่เล็กกว่าจริง 32 เท่า
+  P := DecodeProt($5C, $00);
+  Check('BP=7 with SEC set still reads as 7', P.BP = 7);
+  Check('SEC is set', P.SEC);
+  Check('BP=7 with SEC is still the whole chip',
+        ProtectedRange(P, MB8, FromA, ToA));
+  Check('all of it', (FromA = 0) and (ToA = MB8 - 1));
+
   // CMP กลับด้าน BP=0 กลายเป็นล็อกทั้งชิป
   P := DecodeProt($00, $40);
   Check('CMP is set', P.CMP);
   Check('the whole chip is protected', ProtectedRange(P, MB8, FromA, ToA));
   Check('from the first to the last byte', (FromA = 0) and (ToA = MB8 - 1));
 
-  // SRP1 กับ WPS อ่านจากไบต์ที่สอง
+  // SRP1 อ่านจากไบต์ที่สอง
   P := DecodeProt($00, $05);
   Check('SRP1 is set', P.SRP1);
-  Check('WPS is set', P.WPS);
+  // WPS ตัวจริงอยู่ที่ SR3 บิต 2 (อ่านด้วย 15h) ไม่ใช่ SR2 บิต 2 ซึ่งเป็น
+  // บิตสงวนที่อ่านได้ศูนย์เสมอ: การถอดจาก SR2 ทำให้การ์ดบิตล็อกรายบล็อก
+  // ไม่เคยทำงานเลย
+  Check('WPS is not taken from the reserved SR2 bit', not P.WPS);
+  P := DecodeProtVendor($EF, $00, $00, %00000100, True);
+  Check('WPS comes from SR3 bit 2', P.WPS);
+  P := DecodeProtVendor($EF, $00, $00, $00, False);
+  Check('an unread SR3 does not invent WPS', not P.WPS);
 
   // ประกอบกลับได้ค่าเดิม
   P := DecodeProt($64, $00);
@@ -804,11 +820,13 @@ begin
         (N2 and %01000000) = 0);
   Check('and quad enable still survived', (N2 and %00000010) <> 0);
 
-  //WPS ต้องหายไป เพราะไม่งั้นบิต BP ที่เพิ่งล้างไปไม่มีความหมาย
+  //WPS ไม่อยู่ใน SR2 (บิต 2 ของ SR2 เป็นบิตสงวน) การปลดล็อกจึงห้ามไปแตะ
+  //บิตนั้น: ของจริงที่ปลดล็อกตระกูล WPS คือคำสั่ง global unlock 98h
+  //ซึ่งอยู่ในเส้นทางปลดล็อกของ main ไม่ใช่การเขียน status register
   P := DecodeProtEx($EF, %00001100, %00000100, 0);
   ClearProtection(P, %00001100, %00000100, N1, N2);
-  Check('WPS is cleared so the protect bits mean something again',
-        (N2 and %00000100) = 0);
+  Check('the reserved SR2 bit 2 is left untouched',
+        (N2 and %00000100) <> 0);
 
   //Macronix เก็บ QE ไว้ที่บิต 6 ของ SR1 ซึ่งเป็นบิตที่แผนผัง Winbond
   //เรียกว่า SEC และจะล้างทิ้ง การใช้หน้ากากผิดยี่ห้อจึงล้าง QE โดยไม่ตั้งใจ
@@ -834,7 +852,7 @@ begin
   Check('a chip with CMP set is still protected',
         StillProtected(DecodeProt(0, %01000000)));
   Check('a chip with WPS set is still protected',
-        StillProtected(DecodeProt(0, %00000100)));
+        StillProtected(DecodeProtVendor($EF, 0, 0, %00000100, True)));
   Check('a fully cleared chip is not', not StillProtected(DecodeProt(0, 0)));
   Check('quad enable on its own is not protection',
         not StillProtected(DecodeProt(0, %00000010)));

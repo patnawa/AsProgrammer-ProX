@@ -207,6 +207,19 @@ Run-Suite "chipprofile_tests" $profileDir @(
   "$root\tests\chipprofile\chipprofile_tests.lpr",
   "$root\software\chipprofile.pas")
 
+# --- the bench diagnostics in tools\ ---
+# These are the programs someone reaches for when hardware misbehaves; a
+# refactor in software\ (LibUSB.pas and friends) must not be able to break
+# them unnoticed until they are needed at a bench. ezpspy\libusb0.dpr is a
+# Delphi-dialect shim DLL and ch347smoke targets Linux, so both are skipped.
+Step "building the tools"
+foreach ($tool in "ezpsmoke", "ezpwrite", "ezppowercheck") {
+  & "$fpcBin\fpc.exe" -Twin32 -Pi386 -Mobjfpc -Sh "-Fu$root\software" `
+    "$root\tools\$tool.lpr" | Out-Null
+  if (-not (Test-Path "$root\tools\$tool.exe")) { Die "$tool did not compile" }
+  Write-Host "    $tool.exe"
+}
+
 # --- the program ---
 Step "building AsProgrammer.exe"
 & $lazbuild --build-mode=Release "$root\software\AsProgrammer.lpi" | Out-Null

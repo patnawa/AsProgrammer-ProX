@@ -48,6 +48,10 @@ var
   Cfg: array[0..255] of byte;
   n, i, j, k, Devices: integer;
   Code: cardinal;
+  //ค่าจากคำตอบ CHECK_CHIP ต้องถูกเก็บก่อนส่ง RESET: RESET เป็นคำสั่งทางเดียว
+  //การอ่านหลังมันคืนของค้าง/หมดเวลาแล้วทับ Reply ที่ยังต้องใช้ตัดสินใจ
+  ChipPresent: boolean;
+  ChipID0, ChipID1, ChipID2: byte;
 
 procedure Hex(const Title: string; const Buf: array of byte; Len: integer);
 var
@@ -252,16 +256,22 @@ begin
   if Reply[0] = 0 then
     WriteLn('the programmer reports no chip in the socket (that is fine ' +
             'for this test)');
+  ChipPresent := Reply[0] <> 0;
+  ChipID0 := Reply[1];
+  ChipID1 := Reply[2];
+  ChipID2 := Reply[3];
 
+  //RESET เป็นคำสั่งทางเดียว (ezphw.pas): ห้ามอ่านคำตอบหลังมัน การอ่านที่นี่
+  //เคยทับ Reply ด้วยของค้าง แล้วการตัดสิน "มีชิปไหม" กับรหัสชิปในขั้นถัดไป
+  //ก็ไปพึ่งบัฟเฟอร์ที่ถูกทับนั้นโดยบังเอิญ
   FillChar(Pkt, SizeOf(Pkt), 0);
   Pkt[0] := byte(CMD_RESET shr 8);
   Pkt[1] := byte(CMD_RESET and $FF);
   usb_bulk_write(h, EP_CMD, Pkt[0], PACKET, 1000);
-  usb_bulk_read(h, EP_IN, Reply[0], PACKET, 1000);
 
   //ทดลองอ่านจริงหนึ่งก้อน ถ้ามีชิปอยู่: นี่คือขั้นที่ล้มในโปรแกรมหลัก
   //(descriptor -> START -> ก้อนแรก) จึงต้องพิสูจน์ที่นี่ ไม่ใช่เดา
-  if Reply[0] <> 0 then
+  if ChipPresent then
   begin
     WriteLn;
     WriteLn('a chip is present; trying a real read of the first block');
@@ -274,7 +284,7 @@ begin
     Pkt[8] := $00; Pkt[9] := $80;         //size 8 MB = 00800000
     Pkt[10] := $00; Pkt[11] := $00;
     Pkt[12] := 0;                         //chip id from the check above
-    Pkt[13] := Reply[1]; Pkt[14] := Reply[2]; Pkt[15] := Reply[3];
+    Pkt[13] := ChipID0; Pkt[14] := ChipID1; Pkt[15] := ChipID2;
     Pkt[16] := 0;                         //speed index 0
     WriteLn(Format('  descriptor carries chip id %.2x %.2x %.2x',
                    [Pkt[13], Pkt[14], Pkt[15]]));

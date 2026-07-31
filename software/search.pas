@@ -57,9 +57,20 @@ begin
 
  if HexCheckBox.Checked then
  begin
+   //ครึ่งไบต์ที่ค้าง หรือตัวอักษรที่ไม่ใช่ฐานสิบหก ต้องถูกปฏิเสธ ไม่งั้น
+   //จะไปค้นด้วยบัฟเฟอร์ที่ครึ่งหนึ่งไม่เคยถูกเติมค่า แล้ว "เจอ" ตำแหน่งมั่ว
+   if Odd(StrLen) then
+   begin
+     ShowMessage('the hex search pattern has an odd number of digits');
+     Exit;
+   end;
    StrLen := StrLen div 2;
    SetLength(shex, StrLen);
-   HexTobin(s, PChar(shex), StrLen);
+   if HexTobin(s, PChar(shex), StrLen) <> StrLen then
+   begin
+     ShowMessage('the search pattern is not valid hex');
+     Exit;
+   end;
  end;
 
  if ((ReplaceCheckBox.Checked) or (ReplaceAllCheckBox.Checked)) then
@@ -67,9 +78,18 @@ begin
    r := Pchar(UTF8ToAnsi(ReplaceEdit.Text));
    if HexCheckBox.Checked then
    begin
+     if Odd(RStrLen) then
+     begin
+       ShowMessage('the hex replacement has an odd number of digits');
+       Exit;
+     end;
      RStrLen := RStrLen div 2;
      SetLength(rhex, RStrLen);
-     if HexTobin(r, PChar(rhex), RStrLen) < 1 then Exit;
+     if HexTobin(r, PChar(rhex), RStrLen) <> RStrLen then
+     begin
+       ShowMessage('the replacement is not valid hex');
+       Exit;
+     end;
    end;
  end;
 
@@ -92,7 +112,6 @@ begin
        MainForm.MPHexEditorEx.SelStart:= FoundPosition;
        MainForm.MPHexEditorEx.SelEnd:= FoundPosition+StrLen-1;
      end;
-     SearchStartPos := FoundPosition+StrLen+1;
    end
    else
    begin
@@ -106,7 +125,14 @@ begin
        MainForm.MPHexEditorEx.Replace(PChar(rhex), FoundPosition, StrLen, RStrLen)
      else
        MainForm.MPHexEditorEx.Replace(r, FoundPosition, StrLen, RStrLen);
-   end;
+     //Find นับตำแหน่งเริ่มแบบรวมปลายทั้งสองข้าง การบวกเผื่ออีกหนึ่งเคยทำให้
+     //คู่ที่ติดกันถูกข้าม (FF FF FF FF เหลือไบต์ 1 กับ 3 ไม่ถูกแทน) และ
+     //หลังแทนที่แล้วข้อมูลเลื่อนตามขนาดใหม่ จึงต้องไล่ต่อจากท้ายของ
+     //ข้อความใหม่ ไม่ใช่ท้ายของข้อความเก่า
+     SearchStartPos := FoundPosition + RStrLen;
+   end
+   else
+     SearchStartPos := FoundPosition + StrLen;
  until (not ReplaceAllCheckBox.Checked);
 
 end;

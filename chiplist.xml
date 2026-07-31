@@ -833,10 +833,10 @@
       <W25Q40BV id="EF4013" page="256" size="524288"/>
       <W25Q40CL id="EF4013" page="256" size="524288"/>
       <W25Q40EW_1.8V id="EF6013" page="256" size="524288"/>
-      <W25Q64BV id="EF4017" page="256" size="8388608"/>
-      <W25Q64CV id="EF4017" page="256" size="8388608"/>
-      <W25Q64FV id="EF4017" page="256" size="8388608"/>
-	  <W25Q64JV id="EF4017" page="256" size="8388608"/>
+      <W25Q64BV id="EF4017" page="256" size="8388608" vcc="3.3"/>
+      <W25Q64CV id="EF4017" page="256" size="8388608" vcc="3.3"/>
+      <W25Q64FV id="EF4017" page="256" size="8388608" vcc="3.3"/>
+	  <W25Q64JV id="EF4017" page="256" size="8388608" vcc="3.3"/>
 	  <W25Q64JW-IQ_1.8V id="EF6017" page="256" size="8388608"/>
 	  <W25Q64JW-IM_1.8V id="EF8017" page="256" size="8388608"/>
       <W25Q64FW_1.8V id="EF6017" page="256" size="8388608"/>
@@ -893,7 +893,7 @@
       <W25Q256JV-IM-JM id="EF7019" page="256" size="33554432"/>
       <W25Q256JV-IQ-JQ id="EF4019" page="256" size="33554432"/>
       <W25Q64JV-IM-JM id="EF7017" page="256" size="8388608"/>
-      <W25Q64JV-IQ-JQ id="EF4017" page="256" size="8388608"/>
+      <W25Q64JV-IQ-JQ id="EF4017" page="256" size="8388608" vcc="3.3"/>
       <W25Q01JV id="EF4021" page="256" size="134217728"/>
       <W25Q128JV-xM id="EF7018" page="256" size="16777216"/>
       <W25Q128JV-xQ id="EF4018" page="256" size="16777216"/>

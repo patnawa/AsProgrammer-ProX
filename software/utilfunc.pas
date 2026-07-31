@@ -166,12 +166,16 @@ var
   crc: Cardinal;
   index: Integer;
   i: Cardinal;
+  P: PByte;
 begin
   if len < 1 then Exit(0);
   crc := InitCRC;
+  //อ่านทีละไบต์จริง ๆ: ของเดิม cast เป็น Cardinal ทำให้โหลดสี่ไบต์ต่อรอบ
+  //(ค่า CRC ถูกเพราะ and $FF ทิ้งส่วนเกิน) สามรอบท้ายจึงอ่านเลยท้ายบัฟเฟอร์
+  P := PByte(BufPtr);
   for i := 0 to Len - 1 do
   begin
-    index := ( crc xor Cardinal((BufPtr + i)^) ) and $000000FF;
+    index := ( crc xor P[i] ) and $000000FF;
     crc := (crc shr 8) xor CRC32Table[index];
   end;
   Result := not crc;

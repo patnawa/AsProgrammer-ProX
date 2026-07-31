@@ -885,7 +885,20 @@ begin
     // Clear ownership before the call: even an E9h exception/short transfer
     // must not lead to a duplicate command from Close or the destructor.
     FFourByteModeActive := False;
-    ExitModeResult := SendOneByte($E9, 'exit 4-byte address mode');
+    if FConfig.FourByteStrategy = fbsWriteEnableThenB7 then
+    begin
+      // The chips that require WREN before B7h require it before E9h too
+      // (N25Q256A class).  The executor's cleanup has already issued WRDI by
+      // the time StopBus runs, so a bare E9h is accepted and silently ignored
+      // and the chip stays in 4-byte mode for the next tool.  Re-arm WEL for
+      // the exit and let the WRDI below clear it again.
+      FWriteEnableMayBeSet := True;
+      ExitModeResult := SendOneByte($06, 'write enable before exiting 4-byte mode');
+      if ExitModeResult.Success then
+        ExitModeResult := SendOneByte($E9, 'exit 4-byte address mode');
+    end
+    else
+      ExitModeResult := SendOneByte($E9, 'exit 4-byte address mode');
   end;
 
   DisableResult := NORIOSuccess;

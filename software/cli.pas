@@ -983,9 +983,11 @@ var
   ProdMode: boolean;
   RegionName: string;
   Region: TIFDRegion;
+  DidSaveChip: boolean;
 begin
   Result := EXIT_USAGE;
   Action := 'none';
+  DidSaveChip := False;
 
   //ไม่มีใครนั่งอยู่หน้าจอ ทุกด่านที่ปกติจะถามต้องตัดสินใจเอง
   CLIMode := True;
@@ -1150,8 +1152,13 @@ begin
     Action := 'detect';
     MainForm.ButtonReadIDClick(nil);
     DumpLog;
-    if Json then SayJson(Action);
-    Exit(ResultCode);
+    //อย่าจบตรงนี้ถ้ามี --save-chip ต่อท้าย: เดิมทางนี้ Exit ก่อนถึงบล็อก
+    //บันทึกเสมอ "--detect --save-chip NAME" จึงไม่เคยบันทึกอะไรเลย
+    if (SwitchValue('save-chip') = '') or (not OpOK) then
+    begin
+      if Json then SayJson(Action);
+      Exit(ResultCode);
+    end;
   end;
 
   //บันทึกชิปที่เพิ่งตรวจเจอลงตารางของผู้ใช้
@@ -1159,10 +1166,20 @@ begin
   if SaveName <> '' then
   begin
     if SaveCurrentChipToUserList(SaveName) then
-      Say('chip saved as ' + SaveName)
+    begin
+      Say('chip saved as ' + SaveName);
+      //จำไว้เพื่อจบด้วย exit 0 ถ้าคำสั่งนี้เป็นงานสุดท้ายของบรรทัด
+      //(เดิมมันไหลไปชนหน้า usage แล้วออก 2 ทั้งที่บันทึกสำเร็จ)
+      DidSaveChip := True;
+      DumpLog;
+    end
     else
+    begin
       Say('could not save the chip');
-    DumpLog;
+      DumpLog;
+      if Json then SayJson('save-chip');
+      Exit(EXIT_FAIL);
+    end;
   end;
 
   //ส่งออกชิปที่ตรวจเจอเป็นชุดพร้อมแชร์: บรรทัด XML สำหรับ chiplist,
@@ -1440,10 +1457,25 @@ begin
 
   //--verify ทำหน้าที่สองอย่าง ตามด้วยชื่อไฟล์คือสั่งตรวจอย่างเดียว
   //ถ้าเป็นธงเปล่า ๆ คือสั่งตรวจหลังเขียน ซึ่งจัดการอยู่ข้างล่าง
+  //สองความหมายนี้ผสมกันไม่ได้: "--write a.bin --verify b.bin" เคยทิ้ง
+  //b.bin เงียบ ๆ แล้วตรวจกับ a.bin แทน ต้องบอกตรง ๆ ว่าใช้แบบนี้ไม่ได้
+  if (SwitchValue('write') <> '') and (SwitchValue('verify') <> '') then
+  begin
+    Say('--write cannot combine with "--verify FILE": after a write, plain ' +
+        '--verify re-checks the written image; comparing against another ' +
+        'file needs its own verify run');
+    Exit(EXIT_USAGE);
+  end;
   if FileName = '' then FileName := SwitchValue('verify');
 
   if FileName = '' then
   begin
+    //บรรทัดที่จบด้วยการบันทึกชิปสำเร็จ ไม่ใช่บรรทัดที่ใช้ผิด
+    if DidSaveChip then
+    begin
+      if Json then SayJson('save-chip');
+      Exit(EXIT_OK);
+    end;
     Usage;
     Exit(EXIT_USAGE);
   end;

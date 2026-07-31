@@ -120,6 +120,46 @@ begin
   end;
 end;
 
+//A file with no data records at all (empty, truncated at line one, or a
+//binary misnamed .hex) must be rejected: accepting it yields an all-FF
+//image, and the write path would then erase the chip to match it.
+procedure NoDataRecordsTest;
+var
+  F: TextFile;
+  St: TMemoryStream;
+  Err: string;
+begin
+  //an EOF record alone carries no data
+  AssignFile(F, 'empty.hex');
+  Rewrite(F);
+  WriteLn(F, ':00000001FF');
+  CloseFile(F);
+
+  St := TMemoryStream.Create;
+  try
+    Check('hex with no data records rejected',
+          not LoadFirmware('empty.hex', St, 512, $FF, Err));
+    WriteLn('       msg: ', Err);
+  finally
+    St.Free;
+  end;
+
+  //free text that never forms a record parses as "junk between records"
+  AssignFile(F, 'junk.srec');
+  Rewrite(F);
+  WriteLn(F, 'this is not an s-record at all');
+  CloseFile(F);
+
+  St := TMemoryStream.Create;
+  try
+    Check('srec with no data records rejected',
+          not LoadFirmware('junk.srec', St, 512, $FF, Err));
+    WriteLn('       msg: ', Err);
+  finally
+    St.Free;
+  end;
+end;
+
 //Extended linear addressing above 64K
 procedure ExtLinearTest;
 var
@@ -160,6 +200,7 @@ begin
 
   SparseTest;
   BadChecksumTest;
+  NoDataRecordsTest;
   ExtLinearTest;
 
   WriteLn;

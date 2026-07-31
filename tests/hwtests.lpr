@@ -111,12 +111,18 @@ procedure TestEN4BNotNeeded;
 begin
   WriteLn('Enter 4 byte mode: a chip that is already there is left alone');
   Fresh;
-  Chip25Entry4B := E4B_NONE;
+  Chip25Entry4B := E4B_ALWAYS4B;
 
-  UsbAsp25_EN4B;
-  UsbAsp25_EX4B;
-
+  Check('entering reports success', UsbAsp25_EN4B = 1);
+  Check('leaving reports success', UsbAsp25_EX4B = 1);
   Check('nothing was sent at all', Mock.SentCount = 0);
+
+  //E4B_NONE คนละความหมาย: ไม่มีคำสั่งสลับที่ปลอดภัย ต้องล้มเหลวเงียบ ๆ
+  //ห้ามตอบ "สำเร็จ" เพราะผู้เรียกจะส่งเฟรมสี่ไบต์ใส่ชิปที่ยังอยู่สามไบต์
+  Fresh;
+  Chip25Entry4B := E4B_NONE;
+  Check('no safe switch method refuses', UsbAsp25_EN4B = 0);
+  Check('and still sends nothing', Mock.SentCount = 0);
 end;
 
 procedure TestEN4BFromSFDP;

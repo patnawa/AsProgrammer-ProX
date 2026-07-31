@@ -569,9 +569,11 @@ begin
     Check('WREN+B7 session initializes', Adapter.Initialize.Success);
     Check('WREN is immediately followed by B7',
           Hardware.Saw('W1:06;W1:B7;'));
-    Check('close emits E9, clears possible WEL, and deinitializes once',
+    //ชิปที่ต้องมี WREN ก่อน B7h ต้องมี WREN ก่อน E9h ด้วย (ตระกูล N25Q256A)
+    //E9 เดี่ยว ๆ หลัง WRDI ถูกชิปเมินเงียบ ๆ แล้วชิปค้างในโหมด 4 ไบต์
+    Check('close re-arms WEL for E9, clears it, and deinitializes once',
           Adapter.Close.Success and
-          Hardware.Saw('W1:E9;W1:04;DEINIT;CLOSE;') and
+          Hardware.Saw('W1:06;W1:E9;W1:04;DEINIT;CLOSE;') and
           (Hardware.DeinitCalls = 1));
   finally
     Adapter.Free;

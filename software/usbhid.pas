@@ -36,7 +36,7 @@ uses main;
 function usbGetStringAscii(handle: pusb_dev_handle; index: Integer; langid: Integer; var buf: TPString; buflen: Integer): integer;
 var
  buffer: array [0..255] of char;
- rval, i: Integer;
+ rval, i, n: Integer;
 begin
     rval := usb_control_msg(handle, USB_ENDPOINT_IN, USB_REQ_GET_DESCRIPTOR, (USB_DT_STRING shl 8) + index, langid, buffer, sizeof(buffer), 1000);
     result:=rval;
@@ -47,7 +47,11 @@ begin
         rval := BYTE(buffer[0]);
 
     rval:= rval div 2;
-    (* lossy conversion to ISO Latin1 *)
+    (* lossy conversion to ISO Latin1.  n tracks the characters actually
+       written: the value of a for-loop variable after the loop is undefined
+       in Pascal, and with a malformed short descriptor (rval <= 1) the loop
+       never runs at all, so "buf[i-1]" wrote through stack garbage. *)
+    n := 0;
     for i := 1 to rval-1 do
       begin
         if i > buflen then  (* destination buffer overflow *)
@@ -55,9 +59,10 @@ begin
         buf[i-1] := buffer[2 * i];
         if buffer[2 * i + 1] <> #0 then (* outside of ISO Latin1 range *)
             buf[i-1] := char('?');
+        n := i;
       end;
-    buf[i-1] := #0;
-    Result := i-1;
+    buf[n] := #0;
+    Result := n;
 end;
 
 function usbOpenDevice(var device: Pusb_dev_handle; DevDscr: TDeviceDescription): Integer;
@@ -108,8 +113,12 @@ errorCode := USBOPEN_ERR_NOTFOUND;
                  else
                   begin
                     errorCode := USBOPEN_ERR_NOTFOUND;
-                    (* fprintf(stderr, "seen device from vendor ->%s<-\n", string); *)
-                    if StrPas(S)=vendorName then
+                    (* the lowercase "vendorName" used to resolve to
+                       SysUtils.VendorName, which is always an empty string,
+                       so a caller that filled in the names could never match
+                       any device.  Compare against the requested name; the
+                       implicit PChar conversion turns nil into '' safely. *)
+                    if StrPas(S)=DevDscr.nameVendor then
                       begin
                         len := usbGetStringAscii(handle, dev.descriptor.iProduct, $0409,S, sizeof(S));
                         if (len < 0) then
