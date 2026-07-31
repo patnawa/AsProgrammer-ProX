@@ -17,12 +17,19 @@ const
 
   //วิธีเข้าโหมดแอดเดรส 4 ไบต์ ค่ามาจาก SFDP หรือจากรหัสผู้ผลิต
   E4B_UNKNOWN = 0;   //ไม่รู้ ใช้ทางที่ปลอดภัยที่สุด
-  E4B_NONE    = 1;   //ไม่ต้องสลับ ชิปอยู่ที่ 4 ไบต์อยู่แล้วหรือมีชุดคำสั่งเฉพาะ
+  E4B_NONE    = 1;   //ไม่มีคำสั่งสลับโหมดทันทีที่ปลอดภัย (มีแต่ชุดคำสั่ง
+                     //4 ไบต์เฉพาะ หรือมีแต่ B1h ซึ่งเปลี่ยนค่าตั้งต้นตอน
+                     //เปิดไฟ ไม่ใช่โหมดปัจจุบัน) งานที่ต้องสลับต้องถูกปฏิเสธ
   E4B_B7      = 2;   //ส่ง B7h ได้เลย
   E4B_WREN_B7 = 3;   //WREN ก่อนแล้วค่อย B7h
   E4B_BANK17  = 4;   //bank register แบบ Spansion opcode 17h
   E4B_EXTC5   = 5;   //extended address register opcode C5h
-  E4B_NVB1    = 6;   //nonvolatile configuration register opcode B1h
+  //ค่า 6 เคยเป็น B1h (nonvolatile configuration register) ซึ่งถูกถอดออก:
+  //การเขียน B1h ทับทั้ง register ด้วยค่าตายตัวเคยเสี่ยงตั้ง dual/quad
+  //ถาวรบน Micron (ชิปเปิดเครื่องมาแล้วไม่คุยกับ SPI ธรรมดาอีก) และต่อให้
+  //เขียนถูก มันก็เปลี่ยนแค่ค่าตั้งต้นตอนเปิดไฟ ไม่ได้สลับโหมดของ session นี้
+  E4B_ALWAYS4B = 7;  //ชิปทำงานที่ 4 ไบต์ตลอดเวลา ทุกคำสั่งรับแอดเดรสสี่ไบต์
+                     //อยู่แล้ว ไม่มีอะไรต้องส่ง
 
 type
 
@@ -866,6 +873,14 @@ begin
   Result := 0;
 
   case Chip25Entry4B of
+    //ทำงานที่ 4 ไบต์อยู่แล้ว: สำเร็จโดยไม่ต้องส่งอะไร ผู้เรียกใช้เฟรม
+    //สี่ไบต์ต่อได้เลย
+    E4B_ALWAYS4B:
+      Exit(1);
+
+    //ไม่มีคำสั่งสลับที่ปลอดภัย: ล้มเหลวตรง ๆ ห้ามคืน "สำเร็จ" เพราะผู้เรียก
+    //จะส่งเฟรมสี่ไบต์ใส่ชิปที่ยังตีความสามไบต์ แล้วคำสั่งลบ/เขียนจะลง
+    //ผิดเซกเตอร์แบบเงียบ ๆ
     E4B_NONE:
       Exit;
 
@@ -884,17 +899,6 @@ begin
         buff := $C5;
         if SPIWrite(0, 1, buff) <> 1 then Exit(-1);
         buff := 1;              //บิต A24 ของ extended address register
-        Result := SPIWrite(1, 1, buff);
-      end;
-
-    E4B_NVB1:
-      begin
-        if UsbAsp25_Wren <> 1 then Exit(-1);
-        buff := $B1;
-        if SPIWrite(0, 1, buff) <> 1 then Exit(-1);
-        buff := 0;              //บิต 0 = 0 คือโหมด 4 ไบต์บน Micron
-        if SPIWrite(0, 1, buff) <> 1 then Exit(-1);
-        buff := $FF;
         Result := SPIWrite(1, 1, buff);
       end;
 
@@ -919,6 +923,9 @@ begin
   Result := 0;
 
   case Chip25Entry4B of
+    E4B_ALWAYS4B:
+      Exit(1);
+
     E4B_NONE:
       Exit;
 

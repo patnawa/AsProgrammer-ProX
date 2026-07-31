@@ -58,6 +58,8 @@ const
   EZP_CMD_SET_CHIP_DATA = $0007;
   EZP_CMD_START         = $0005;
   EZP_CMD_CHECK_CHIP    = $0009;
+  EZP_CMD_START_ERASE   = $0102;
+  EZP_CMD_ERASE_STATUS  = $000A;
   EZP_CMD_RESET         = $0108;
 
   //ท้ายแพ็กเก็ต CHECK_CHIP มีรหัสสี่ไบต์ของตัวเครื่อง ซึ่ง "ต่างกันไปตาม
@@ -83,6 +85,20 @@ const
   EZP_RECOVERY_DELAY_MS = 2500;
   EZP_STREAM_RETRIES    = 200;
   EZP_RETRY_DELAY_MS    = 2;
+  //The vendor UI polls native erase until the leading status byte changes
+  //from 01 (busy) to 00 (complete).  Ten minutes covers large supported NOR
+  //parts without allowing a disconnected programmer to spin forever.
+  EZP_ERASE_TIMEOUT_MS  = 10 * 60 * 1000;
+  //หลังตอบ 0007 เฟิร์มแวร์ CH552 ใช้เวลาอีกหลาย ms ตั้ง algorithm ของชิป
+  //ที่เพิ่งประกาศ คำสั่งแก้ไข (0102 ลบ, 0005 เขียน) ที่ตามเข้าไปเร็วกว่า
+  //นั้นถูกรับที่ USB แล้วทิ้งเงียบ ๆ: ลบตอบ "เสร็จ" ใน 1 poll โดยชิปไม่ถูก
+  //แตะ เขียนรับภาพครบทั้งก้อนแล้วไม่ลงชิป ไม่มี error ใด ๆ ทั้งสิ้น
+  //
+  //วัดจริง 2026-07-31 ด้วย probe แพ็กเก็ตเหมือนของผู้ผลิตทุกไบต์: เว้น
+  //30 ms ตรงนี้จุดเดียว ลบก็เดิน (34 polls, 8.7 s) ไม่เว้นก็เงียบ ซอฟต์แวร์
+  //ผู้ผลิตไม่เคยพลาดเพราะ overhead ของ GUI มันคือ delay โดยบังเอิญ
+  //ห้าสิบ ms เผื่อ margin ไว้เท่าตัว
+  EZP_ARM_DELAY_MS      = 50;
 
 type
   TEZPHardware = class(TBaseHardware)
@@ -122,7 +138,7 @@ type
     procedure CleanSession;
     function Command(Cmd: word; out Reply: TBytes): boolean;
     function SendReset: boolean;
-    function CheckChip: boolean;
+    function CheckChip(IncludeSelectedID: boolean = False): boolean;
     //รหัส 9Fh จากตารางชิปที่ผู้ใช้เลือก ใส่ลง FChipID ถ้าอ่านได้
     function ChipIDFromTable: boolean;
     function ReadWholeChip: boolean;
@@ -136,6 +152,9 @@ type
     //ไม่ใช่ผ่าน SPIWrite ทีละเพจ ซึ่งโปรโตคอลนี้ทำไม่ได้
     //ผู้เรียกต้องเปิดอุปกรณ์ไว้แล้ว และ Data ต้องยาวเท่าขนาดชิปพอดี
     function WriteWholeChip(const Data: TBytes): boolean;
+    //ลบด้วยคำสั่ง native ของเฟิร์มแวร์ ไม่ใช่การเขียนภาพ FF (เฟิร์มแวร์
+    //ข้ามเพจ FF และวิธีนั้นจึงปล่อยข้อมูลเดิมไว้)
+    function EraseWholeChip: boolean;
     //อ่านทั้งชิปเข้า Data (ยาวเท่าขนาดชิป) ใช้ตรวจหลังเขียน
     function ReadBackWholeChip(out Data: TBytes): boolean;
     //ทิ้งภาพที่แคชไว้ บังคับให้การอ่านครั้งถัดไปไปเอาจากชิปจริง
@@ -283,6 +302,11 @@ function TEZPHardware.Recover: boolean;
 begin
   Result := False;
   if FHandle = nil then Exit;
+  //ทางเลือกสุดท้ายสำหรับเครื่องที่ไม่รับ bulk อะไรแล้วเท่านั้น ซอฟต์แวร์
+  //ผู้ผลิตไม่เรียก usb_reset เลย (จับ 7.5 ชั่วโมงไม่มีสักครั้ง) งานปกติ
+  //ทั้งหมดจึงต้องผ่านระเบียบ session ปกติ ไม่ใช่ทางนี้
+  main.LogPrint('EZP2023+: the device stopped answering; recovering with ' +
+    'a USB reset');
   usb_reset(FHandle);
   usb_close(FHandle);
   FHandle := nil;
@@ -290,7 +314,11 @@ begin
   //ตัวเครื่องหายไปจากบัสชั่วครู่หลังรีเซ็ต ต้องรอให้มันกลับมา
   Sleep(EZP_RECOVERY_DELAY_MS);
   FImageValid := False;
+  FImage := nil;
+  FHaveID := False;
   FIdentityChecked := False;
+  FPendingRead := False;
+  FPendingID := False;
   Result := FindAndOpen;
 end;
 
@@ -346,6 +374,7 @@ function TEZPHardware.BulkOut(Endpoint: longword;
   const Data: TBytes; TimeoutMs: integer; MayRecover: boolean): boolean;
 var
   n, Attempt: integer;
+  Attempted: boolean;
 begin
   Result := False;
   if (not FOpened) or (Length(Data) = 0) then Exit;
@@ -359,7 +388,12 @@ begin
   //ห้ามกู้กลางสตรีมเด็ดขาด: การรีเซ็ตตอนที่เฟิร์มแวร์กำลังรับข้อมูลทั้งชิป
   //ทำให้มันหลุดสถานะ ก้อนที่ส่งต่อจากนั้นลงผิดที่ทั้งหมด ผลคือชิปพัง
   //ทั้งที่รายงานว่าเขียนต่อได้ วัดมาแล้วด้วยการทดลองที่ทำให้ชิปทดสอบเสียหาย
-  if MayRecover and (not FRecovering) then
+  //
+  //และห้ามกู้ระหว่างรอบเขียน/ลบด้วย: usb_reset ล้างสถานะ CH552 แล้วคำสั่ง
+  //แก้ไขทุกคำสั่งหลังจากนั้นถูกทิ้งเงียบ ๆ ล้มเหลวตรง ๆ ให้ผู้ใช้ถอดเสียบ
+  //ดีกว่าเดินต่อบนเครื่องที่ไม่ยอมเขียนแล้ว
+  Attempted := MayRecover and (not FRecovering) and (not FInWriteSession);
+  if Attempted then
   begin
     FRecovering := True;
     try
@@ -380,10 +414,18 @@ begin
     end;
   end;
 
-  FStrError := Format('the EZP2023+ would not accept a command even after ' +
-    '%d USB reset cycles (%d of %d bytes). Unplug it, wait a few seconds and plug ' +
-    'it back in: that power-cycles the CH552, which is what clears one ' +
-    'that is truly stuck', [EZP_RECOVERY_ATTEMPTS, n, Length(Data)]);
+  //ข้อความต้องเล่าสิ่งที่ทำจริง: ทางที่ห้ามกู้ไม่เคยรีเซ็ตสักครั้ง
+  if Attempted then
+    FStrError := Format('the EZP2023+ would not accept a command even after ' +
+      '%d USB reset cycles (%d of %d bytes). Unplug it, wait a few seconds and plug ' +
+      'it back in: that power-cycles the CH552, which is what clears one ' +
+      'that is truly stuck', [EZP_RECOVERY_ATTEMPTS, n, Length(Data)])
+  else
+    FStrError := Format('the EZP2023+ stopped accepting commands (%d of %d ' +
+      'bytes went through). A USB reset in the middle of a write or erase ' +
+      'would desync the firmware, so none was attempted. Unplug the ' +
+      'programmer, wait a few seconds and plug it back in',
+      [n, Length(Data)]);
 end;
 
 //ก้อนข้อมูลกลางสตรีมห้ามเรียก Recover: USB reset จะทำให้เฟิร์มแวร์หลุด
@@ -536,7 +578,7 @@ end;
 
 //CHECK_CHIP: ยืนยันตัวเครื่อง และคายรหัส JEDEC ของชิปในซ็อกเก็ตมาให้ด้วย
 //เรียกครั้งแรกที่มีคนต้องใช้ ไม่ใช่ตอนเปิดอุปกรณ์
-function TEZPHardware.CheckChip: boolean;
+function TEZPHardware.CheckChip(IncludeSelectedID: boolean): boolean;
 var
   Reply, Pkt: TBytes;
   Code: cardinal;
@@ -546,7 +588,10 @@ begin
 
   //ของผู้ผลิตส่ง descriptor เต็มไปพร้อมคำสั่ง 0009 ไม่ใช่แพ็กเก็ตเปล่า
   //(จับมาได้: 00 09 00 00 01 00 03 E8 00 80 00 00 00 EF 40 17)
-  //ตอนกด Read ID อาจยังไม่ได้เลือกชิป ช่องที่ไม่รู้ก็ปล่อยศูนย์ไว้
+  //ตอนกด Read ID อาจยังไม่ได้เลือกชิป ช่องที่ไม่รู้ก็ปล่อยศูนย์ไว้ แต่สอง
+  //session เตรียมเขียนของผู้ผลิตใส่ JEDEC id ที่เลือกไว้ในไบต์ 13..15 ด้วย
+  //การเว้นสามไบต์นั้นเป็นศูนย์ยังอ่าน id ได้ แต่เฟิร์มแวร์ไม่เตรียม write
+  //algorithm และจะรับ data stream ทั้งก้อนแล้วทิ้งเงียบ ๆ
   SetLength(Pkt, EZP_PACKET_LEN);
   FillByte(Pkt[0], EZP_PACKET_LEN, 0);
   Pkt[0] := byte(EZP_CMD_CHECK_CHIP shr 8);
@@ -565,6 +610,18 @@ begin
     Pkt[9] := byte(Size shr 16);
     Pkt[10] := byte(Size shr 8);
     Pkt[11] := byte(Size);
+  end;
+  if IncludeSelectedID then
+  begin
+    if not ChipIDFromTable then
+    begin
+      FStrError := 'the EZP2023+ write/erase preflight needs the selected ' +
+        'chip''s six-digit JEDEC id';
+      Exit;
+    end;
+    Pkt[13] := FChipID[0];
+    Pkt[14] := FChipID[1];
+    Pkt[15] := FChipID[2];
   end;
   Pkt[16] := FSpeed;
   if not BulkOut(EZP_EP_CMD, Pkt) then Exit;
@@ -604,7 +661,7 @@ end;
 function TEZPHardware.SendChipDescriptor: boolean;
 var
   Pkt, Reply: TBytes;
-  Size, Page: cardinal;
+  Size, Page, BlockLen: cardinal;
 begin
   Result := False;
   Size := main.CurrentICParam.Size;
@@ -618,6 +675,19 @@ begin
   if (Size mod Page) <> 0 then
   begin
     FStrError := 'the EZP2023+ works in whole pages only';
+    Exit;
+  end;
+  //สตรีมทั้งอ่านและเขียนเดินเป็นก้อนละ max(Page, 64) ไบต์เป๊ะ ๆ ขนาดชิป
+  //ที่หารก้อนนี้ไม่ลงตัวจะพาก้อนสุดท้ายเลยท้ายบัฟเฟอร์ภาพ จึงต้องปฏิเสธ
+  //ตั้งแต่ตรงนี้ รายการ SPI NOR จริงไม่ชนเงื่อนไขนี้ มีแต่รายการ XML
+  //ที่กรอกผิดเท่านั้นที่ชน
+  BlockLen := Page;
+  if BlockLen < EZP_BLOCK_MIN then BlockLen := EZP_BLOCK_MIN;
+  if (Size mod BlockLen) <> 0 then
+  begin
+    FStrError := Format('the EZP2023+ streams in %d-byte blocks and the ' +
+      'chip size %d is not a whole number of them; fix the size/page in ' +
+      'the chip list entry', [BlockLen, Size]);
     Exit;
   end;
 
@@ -671,6 +741,10 @@ begin
   //ทางเขียนต้อง fail closed: ถ้าได้ข้อมูลเก่าซ้ำแทนสถานะ 01 + JEDEC id
   //แปลว่าฝั่งเครื่องกับฝั่งเราคิดว่าอยู่คนละ session การส่งภาพต่อไปจะถูก
   //ทิ้งหรือวางผิดตำแหน่งโดยไม่มี error จากเฟิร์มแวร์
+  //
+  //ทางอ่านตอบ 00 + JEDEC id ได้ตามปกติ โดยเฉพาะ session แรกหลัง native
+  //erase จึงห้ามใช้เงื่อนไขเดียวกัน การตอบ START ที่ตามมาต่างหากที่ต้องเป็น
+  //01 และถูกตรวจใน ReadWholeChip ก่อนรับข้อมูลภาพ
   if FInWriteSession and
      ((Reply[0] <> 1) or
       (Reply[1] <> FChipID[0]) or
@@ -683,6 +757,10 @@ begin
        FChipID[0], FChipID[1], FChipID[2]]);
     Exit;
   end;
+
+  //ให้เวลาเฟิร์มแวร์ตั้ง algorithm ก่อนคำสั่งถัดไป ไม่งั้นลบ/เขียนถูกทิ้ง
+  //เงียบ ๆ ดูคำอธิบายที่ EZP_ARM_DELAY_MS
+  Sleep(EZP_ARM_DELAY_MS);
   Result := True;
 end;
 
@@ -699,7 +777,7 @@ begin
   begin
     DevClose;
     if not DevOpen then Exit;
-    if not CheckChip then Exit;
+    if not CheckChip(True) then Exit;
     if not FHaveID then
     begin
       FStrError := Format('the EZP2023+ did not detect the expected chip ' +
@@ -729,6 +807,7 @@ function TEZPHardware.ReadWholeChip: boolean;
 var
   Reply, Block: TBytes;
   Size, Page, BlockLen, Got: cardinal;
+  SavedErr: string;
 begin
   Result := False;
   Size := main.CurrentICParam.Size;
@@ -736,6 +815,24 @@ begin
   if not SendChipDescriptor then Exit;
 
   if not Command(EZP_CMD_START, Reply) then Exit;
+  //The read START command has its own 64-byte status reply.  Firmware returns
+  //either 00 or 01 in its first byte depending on the preceding operation;
+  //both states are observed with the correct JEDEC identity.  Validate the
+  //shape and identity before accepting the data stream without inventing a
+  //meaning for that state byte.
+  if FHaveID and
+     (((Reply[0] <> 0) and (Reply[0] <> 1)) or
+      (Reply[1] <> FChipID[0]) or
+      (Reply[2] <> FChipID[1]) or (Reply[3] <> FChipID[2])) then
+  begin
+    FStrError := Format('the EZP2023+ read-start reply was %.2x %.2x %.2x ' +
+      '%.2x, expected state 00/01 plus %.2x %.2x %.2x; the USB stream is ' +
+      'out of phase',
+      [Reply[0], Reply[1], Reply[2], Reply[3],
+       FChipID[0], FChipID[1], FChipID[2]]);
+    SendReset;
+    Exit;
+  end;
 
   BlockLen := Page;
   if BlockLen < EZP_BLOCK_MIN then BlockLen := EZP_BLOCK_MIN;
@@ -749,8 +846,11 @@ begin
     begin
       //เลิกเฉย ๆ ไม่ได้: เฟิร์มแวร์จะสตรีมต่อจนจบชิป แล้วงานหน้าจะไปเจอ
       //ข้อมูลค้างเต็มท่อ ซึ่งเป็นที่มาของบั๊กเฟสทั้งหมดที่ตามหากันมา
+      //สาเหตุแรก (อ่านสั้น) คือคำวินิจฉัยจริง อย่าให้การเก็บกวาดทับมัน
+      SavedErr := FStrError;
       SendReset;
       DrainIn(64);
+      FStrError := SavedErr;
       FImage := nil;
       Exit;
     end;
@@ -760,9 +860,9 @@ begin
     OpProcessMessages;
     if main.UserCancel then
     begin
-      FStrError := 'cancelled while the EZP2023+ was streaming the chip';
       FImage := nil;
       SendReset;
+      FStrError := 'cancelled while the EZP2023+ was streaming the chip';
       Exit;
     end;
   end;
@@ -891,25 +991,81 @@ begin
 end;
 
 function TEZPHardware.ReadBackWholeChip(out Data: TBytes): boolean;
+var
+  ExpectedID, GotID: cardinal;
 begin
   Data := nil;
-  //บังคับอ่านจากชิปจริงใน session ใหม่ ไม่ใช่ภาพหรือสถานะ USB ที่ค้างจาก
-  //รอบเขียน การแยก session นี้เป็นเงื่อนไขเดียวกับที่ทดสอบบนฮาร์ดแวร์จริง
+  //ตามระเบียบ session ของผู้ผลิต: จบงานด้วย 0108 แล้วปิด เปิดใหม่เพื่อ
+  //identify (0009 + 0108) ปิด แล้วเปิดอีก session สำหรับ 0007/0005 ห้ามส่ง
+  //0007 ต่อท้าย 0108 ใน session เดียวกัน และไม่ใช้ usb_reset ในงานปกติ
+  //(log ผู้ผลิต 7.5 ชั่วโมง เปิดอุปกรณ์ 25 รอบ ไม่มี usb_reset สักครั้ง)
+  //probe เมื่อ 2026-07-31 พิสูจน์แล้วว่า session แบบนี้อ่านได้ข้อมูลสด
+  //ถูกต้องเจ็ด session ติดในโปรเซสเดียว ไม่ต้องพึ่ง USB reset
   ForgetImage;
+  main.LogPrint('starting a fresh EZP2023+ identification session before ' +
+                'independent verification');
   DevClose;
-  if not DevOpen then Exit(False);
+  if not DevOpen then
+  begin
+    FStrError := 'the EZP2023+ could not be reopened for an independent ' +
+      'read-back: ' + FStrError;
+    Exit(False);
+  end;
+
+  if not CheckChip(True) then
+  begin
+    FStrError := 'the EZP2023+ identification before the independent ' +
+      'read-back failed: ' + FStrError;
+    Exit(False);
+  end;
+  if not FHaveID then
+  begin
+    FStrError := 'the EZP2023+ reports no chip in the socket before the ' +
+      'independent read-back';
+    Exit(False);
+  end;
+  GotID := (cardinal(FChipID[0]) shl 16) or
+           (cardinal(FChipID[1]) shl 8) or cardinal(FChipID[2]);
+  if not ChipIDFromTable then
+  begin
+    FStrError := 'the independent EZP2023+ read-back needs the selected ' +
+      'chip''s six-digit JEDEC id';
+    Exit(False);
+  end;
+  ExpectedID := (cardinal(FChipID[0]) shl 16) or
+                (cardinal(FChipID[1]) shl 8) or cardinal(FChipID[2]);
+  if GotID <> ExpectedID then
+  begin
+    FStrError := Format('the selected chip is %.6x but the EZP2023+ ' +
+      'detected %.6x before the independent read-back',
+      [ExpectedID, GotID]);
+    Exit(False);
+  end;
+
+  //CheckChip ปิดท้ายด้วย 0108 ต้องเปิด session ใหม่ก่อนส่ง 0007 เหมือน
+  //ที่ผู้ผลิตทำทุกครั้ง
+  DevClose;
+  if not DevOpen then
+  begin
+    FStrError := 'the EZP2023+ could not be reopened for the read-back ' +
+      'data session: ' + FStrError;
+    Exit(False);
+  end;
+
   Result := ReadWholeChip;
   if Result then Data := Copy(FImage, 0, Length(FImage));
 end;
 
-//เขียนทั้งชิป: เฟิร์มแวร์จัดการลบและเขียนตามอัลกอริทึมของมันเอง เราแค่
-//ป้อนภาพให้ครบ ลำดับต่างจากทางอ่านสองจุด และทั้งสองจุดสำคัญ: หลัง START
+//เขียนทั้งชิป: ผู้เรียกต้องลบและตรวจ blank ให้เสร็จก่อน ตามคู่มือผู้ผลิต
+//คำสั่งนี้รับข้อมูลไป program อย่างเดียว (ทดสอบจริง: FF -> FE ได้ แต่
+//FE -> FF ไม่ได้) ลำดับต่างจากทางอ่านสองจุด และทั้งสองจุดสำคัญ: หลัง START
 //ไม่มีคำตอบกลับ (รออยู่ก็ค้าง) และก้อนข้อมูลไปที่ปลายทาง OUT|1 ไม่ใช่ OUT|2
 function TEZPHardware.WriteWholeChip(const Data: TBytes): boolean;
 var
   Block: TBytes;
   Size, Page, BlockLen, Sent, ExpectedID: cardinal;
   Pkt: TBytes;
+  SavedErr: string;
 begin
   Result := False;
   if not FOpened then
@@ -948,12 +1104,15 @@ begin
     Pkt[0] := byte(EZP_CMD_START shr 8);
     Pkt[1] := byte(EZP_CMD_START and $FF);
     if not BulkOut(EZP_EP_CMD, Pkt, TIMEOUT_MS, False) then Exit;
+    //ก้อนข้อมูลแรกต้องไม่ไล่ทัน START ด้วยเหตุเดียวกับหลัง 0007: เครื่องมือ
+    //ezpwrite ที่เคยเขียนสำเร็จมี WriteLn คั่นตรงนี้โดยบังเอิญ
+    Sleep(EZP_ARM_DELAY_MS);
 
     BlockLen := Page;
     if BlockLen < EZP_BLOCK_MIN then BlockLen := EZP_BLOCK_MIN;
 
-    main.LogPrint('the firmware erases the chip before it takes data; the ' +
-                  'first block can take a minute on a large part');
+    main.LogPrint('streaming the image to the already verified blank flash; ' +
+                  'the first block can take longer while programming starts');
     SetLength(Block, BlockLen);
     Sent := 0;
     while Sent < Size do
@@ -962,10 +1121,12 @@ begin
       if not BulkOutStream(EZP_EP_DATA, Block, TIMEOUT_WRITE_MS) then
       begin
         //ครึ่ง ๆ กลาง ๆ คือชิปที่เนื้อในผสมกันอยู่ ต้องบอกให้ชัดว่าถึงไหน
-        FStrError := FStrError + Format(' (stopped %d bytes into the write; ' +
+        //และคำวินิจฉัยนี้ต้องรอด SendReset ที่อาจล้มและตั้งข้อความของมันเอง
+        SavedErr := FStrError + Format(' (stopped %d bytes into the write; ' +
           'the chip now holds part of the new image and part of the old)',
           [Sent]);
         SendReset;
+        FStrError := SavedErr;
         ForgetImage;
         Exit;
       end;
@@ -974,9 +1135,9 @@ begin
       OpProcessMessages;
       if main.UserCancel then
       begin
+        SendReset;
         FStrError := Format('cancelled %d bytes into the write; the chip now ' +
           'holds part of the new image and part of the old', [Sent]);
-        SendReset;
         ForgetImage;
         Exit;
       end;
@@ -993,6 +1154,210 @@ begin
     ForgetImage;
     Result := True;
   finally
+    FInWriteSession := False;
+  end;
+end;
+
+//Native whole-chip erase, captured from EZP2023+ vendor software 3.0 on the
+//real 1FC8:310B / EF4017 hardware:
+//
+//  CHECK_CHIP + RESET in its own session
+//  fresh session: descriptor, 0102 with byte 26 = 80
+//  000A/status repeatedly: 01 + JEDEC id while busy, 00 + id when complete
+//  RESET
+//
+//Writing an all-FF image is not an erase substitute.  The firmware skips FF
+//pages during programming, so old zero bits survive and verification fails.
+function TEZPHardware.EraseWholeChip: boolean;
+var
+  Pkt, Reply: TBytes;
+  ExpectedID, GotID, Size: cardinal;
+  Started: QWord;
+  Polls, Outstanding: integer;
+  Finished: boolean;
+  SavedErr: string;
+
+  //ส่งคำถามสถานะหนึ่งครั้ง นับคำถามที่ยังไม่มีคำตอบไว้ด้วย: ทุกคำถาม 000A
+  //มีคำตอบของตัวเองตามมาเสมอ ถ้าส่งซ้ำตอนคำตอบมาช้าแล้วไม่เก็บคำตอบส่วน
+  //เกินออก แพ็กเก็ตค้างจะไปโผล่เป็น "คำตอบ" ของคำสั่งแรกใน session ถัดไป
+  //แล้วทุกอย่างเลื่อนเฟส ซึ่งเป็นตระกูลบั๊กที่ไล่กันมาทั้งไฟล์นี้
+  function SendPoll: boolean;
+  begin
+    Pkt[0] := byte(EZP_CMD_ERASE_STATUS shr 8);
+    Pkt[1] := byte(EZP_CMD_ERASE_STATUS);
+    Result := BulkOut(EZP_EP_CMD, Pkt, TIMEOUT_MS, False);
+    if Result then Inc(Outstanding);
+  end;
+
+  //รอคำตอบสถานะหนึ่งชุดภายในกรอบเวลาใหญ่ ระหว่างลบจริงเฟิร์มแวร์ตอบช้า
+  //กว่า 5 วินาทีได้ (เจอบนเครื่องจริงตอน erase เพิ่งเริ่ม) timeout ของการ
+  //อ่านหนึ่งครั้งจึงไม่ใช่ความล้มเหลว: ถามซ้ำ (คำถามสถานะไม่มีผลข้างเคียง)
+  //แล้วรอต่อ ห้ามหลุดไปทาง Recover เด็ดขาด: usb_reset กลางการลบทำให้
+  //เครื่องค้างจนต้องถอดเสียบ
+  function AwaitStatus: boolean;
+  begin
+    Result := False;
+    while not BulkIn(Reply, EZP_PACKET_LEN, TIMEOUT_MS) do
+    begin
+      if GetTickCount64 - Started >= QWord(EZP_ERASE_TIMEOUT_MS) then
+      begin
+        FStrError := Format('the EZP2023+ native erase gave no status ' +
+          'reply within %d seconds (%d polls were answered)',
+          [EZP_ERASE_TIMEOUT_MS div 1000, Polls]);
+        Exit;
+      end;
+      OpProcessMessages;
+      if main.UserCancel then
+      begin
+        FStrError := 'cancelled while waiting for the EZP2023+ native ' +
+          'erase status; the chip contents are indeterminate';
+        Exit;
+      end;
+      main.LogPrint('EZP2023+: the erase status reply is late; asking again');
+      if not SendPoll then Exit;
+    end;
+    Dec(Outstanding);
+    Inc(Polls);
+    Result := True;
+  end;
+
+begin
+  Result := False;
+  if not FOpened then
+  begin
+    FStrError := 'the EZP2023+ is not open';
+    Exit;
+  end;
+  Size := main.CurrentICParam.Size;
+  if not ChipIDFromTable then
+  begin
+    FStrError := 'the EZP2023+ erase path needs a six-digit JEDEC id from ' +
+      'the selected chip entry';
+    Exit;
+  end;
+  ExpectedID := (cardinal(FChipID[0]) shl 16) or
+                (cardinal(FChipID[1]) shl 8) or cardinal(FChipID[2]);
+
+  //The vendor performs one complete identification session before opening a
+  //new descriptor/erase session.  Keeping those sessions separate is
+  //necessary: RESET terminates the CHECK_CHIP transaction.
+  DevClose;
+  if not DevOpen then Exit;
+  if not CheckChip(True) then Exit;
+  if not FHaveID then
+  begin
+    FStrError := Format('the EZP2023+ did not detect the expected chip %.6x ' +
+      'before native erase', [ExpectedID]);
+    Exit;
+  end;
+  GotID := (cardinal(FChipID[0]) shl 16) or
+           (cardinal(FChipID[1]) shl 8) or cardinal(FChipID[2]);
+  if GotID <> ExpectedID then
+  begin
+    FStrError := Format('the selected chip is %.6x but the EZP2023+ detected ' +
+      '%.6x before native erase', [ExpectedID, GotID]);
+    Exit;
+  end;
+  main.LogPrint(Format('EZP2023+: native erase preflight detected %.6x',
+                       [GotID]));
+  DevClose;
+  if not DevOpen then Exit;
+
+  FInWriteSession := True;
+  Finished := False;
+  try
+    if not ChipIDFromTable then Exit;
+    if not SendChipDescriptor then Exit;
+
+    SetLength(Pkt, EZP_PACKET_LEN);
+    FillByte(Pkt[0], EZP_PACKET_LEN, 0);
+    Pkt[0] := byte(EZP_CMD_START_ERASE shr 8);
+    Pkt[1] := byte(EZP_CMD_START_ERASE and $FF);
+    //Captured erase-mode flag.  This byte is deliberately retained in the
+    //first 000A poll packet exactly as the vendor sends it.
+    Pkt[26] := $80;
+    if not BulkOut(EZP_EP_CMD, Pkt, TIMEOUT_MS, False) then Exit;
+
+    Started := GetTickCount64;
+    Polls := 0;
+    Outstanding := 0;
+
+    //poll แรกคือแพ็กเก็ต 0102 เดิมที่เปลี่ยนคำสั่งเป็น 000A (คง byte 26
+    //ไว้ตามผู้ผลิต) poll ถัดไปคือคำตอบล่าสุดที่เปลี่ยนคำสั่งกลับเป็น 000A
+    //ตามที่จับมาจากผู้ผลิตเช่นกัน
+    if not SendPoll then Exit;
+    if not AwaitStatus then Exit;
+
+    while True do
+    begin
+      if (Reply[1] <> FChipID[0]) or (Reply[2] <> FChipID[1]) or
+         (Reply[3] <> FChipID[2]) then
+      begin
+        FStrError := Format('the EZP2023+ native erase status changed chip ' +
+          'identity to %.2x%.2x%.2x; expected %.2x%.2x%.2x',
+          [Reply[1], Reply[2], Reply[3],
+           FChipID[0], FChipID[1], FChipID[2]]);
+        Exit;
+      end;
+
+      if Reply[0] = 0 then Break;
+      if Reply[0] <> 1 then
+      begin
+        FStrError := Format('the EZP2023+ returned unknown native erase ' +
+          'status %.2x after %d polls', [Reply[0], Polls]);
+        Exit;
+      end;
+      if GetTickCount64 - Started >= QWord(EZP_ERASE_TIMEOUT_MS) then
+      begin
+        FStrError := Format('the EZP2023+ native erase was still busy after ' +
+          '%d seconds and %d status polls',
+          [EZP_ERASE_TIMEOUT_MS div 1000, Polls]);
+        Exit;
+      end;
+
+      OpProcessMessages;
+      if main.UserCancel then
+      begin
+        FStrError := 'cancelled while the EZP2023+ native erase was busy; ' +
+          'the chip contents are indeterminate';
+        Exit;
+      end;
+
+      //The vendor copies the preceding status reply, changes only the command
+      //word to 000A, and sends the full packet back as the next poll.  Poll
+      //at the vendor's observed cadence instead of hammering the firmware.
+      Sleep(250);
+      Pkt := Copy(Reply, 0, Length(Reply));
+      if not SendPoll then Exit;
+      if not AwaitStatus then Exit;
+    end;
+
+    //คำถามที่ส่งซ้ำตอนคำตอบมาช้ายังมีคำตอบของตัวเองค้างทางอยู่ เก็บออก
+    //ให้หมดก่อนปิด session (ปกติ Outstanding เป็นศูนย์และลูปนี้ไม่ทำอะไร)
+    while (Outstanding > 0) and BulkIn(Reply, EZP_PACKET_LEN, TIMEOUT_MS) do
+      Dec(Outstanding);
+    if Outstanding > 0 then DrainIn(8);
+
+    Finished := True;
+    if not SendReset then Exit;
+    ForgetImage;
+    OpProgress(Size, Size);
+    main.LogPrint(Format('EZP2023+: native erase completed after %d status ' +
+                         'polls', [Polls]));
+    Result := True;
+  finally
+    //เลิกกลางคัน (ยกเลิก/สถานะเพี้ยน/หมดเวลา): ปิดงานด้วย 0108 แบบเดียว
+    //กับที่ทางอ่านและทางเขียนทำเมื่อเลิกกลางสตรีม แล้วดูดของค้างทิ้ง
+    //ไม่งั้น status ที่ยังวิ่งอยู่จะไปหลอก session ถัดไป (สิ่งที่ห้ามกลาง
+    //การลบคือ usb_reset ไม่ใช่คำสั่งจบงานปกติของเฟิร์มแวร์)
+    if not Finished then
+    begin
+      //ความผิดพลาดแรกคือความจริง อย่าให้การเก็บกวาดทับข้อความของมัน
+      SavedErr := FStrError;
+      SendReset;
+      DrainIn(8);
+      FStrError := SavedErr;
+    end;
     FInWriteSession := False;
   end;
 end;

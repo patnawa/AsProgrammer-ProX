@@ -66,13 +66,14 @@ var
   S: string;
   Len, RecType, B, Sum: byte;
   Offset, Base, Addr: cardinal;
-  Truncated: boolean;
+  Truncated, SawData: boolean;
 begin
   Result := False;
   ErrMsg := '';
   HighAddr := 0;
   Base := 0;
   Truncated := False;
+  SawData := False;
 
   for i := 0 to Lines.Count - 1 do
   begin
@@ -125,6 +126,7 @@ begin
     case RecType of
       $00:  //ข้อมูล
         begin
+          if Len > 0 then SawData := True;
           for j := 0 to Len - 1 do
           begin
             HexByte(S, 10 + j * 2, B);
@@ -160,6 +162,15 @@ begin
     end;
   end;
 
+  //ไฟล์ที่แยกจนจบโดยไม่เจอเรคอร์ดข้อมูลสักอัน (ไฟล์ว่าง ไฟล์ที่ถูกตัด
+  //บรรทัดแรก หรือไบนารีที่ตั้งชื่อ .hex) ห้ามนับว่าโหลดสำเร็จ: ภาพที่ได้
+  //คือ FF ทั้งก้อน แล้วขั้นถัดไปจะลบชิปทิ้งเพื่อ "เขียน" ภาพว่างนั้น
+  if not SawData then
+  begin
+    ErrMsg := 'Intel HEX: the file contains no data records';
+    Exit;
+  end;
+
   if Truncated then
     ErrMsg := 'Some records were outside the chip size and were skipped';
 
@@ -175,12 +186,13 @@ var
   S: string;
   Count, B, Sum: byte;
   Addr: cardinal;
-  Truncated: boolean;
+  Truncated, SawData: boolean;
 begin
   Result := False;
   ErrMsg := '';
   HighAddr := 0;
   Truncated := False;
+  SawData := False;
 
   for i := 0 to Lines.Count - 1 do
   begin
@@ -239,6 +251,7 @@ begin
 
     //count = แอดเดรส + ข้อมูล + checksum
     DataLen := Count - AddrLen - 1;
+    if DataLen > 0 then SawData := True;
 
     for j := 0 to DataLen - 1 do
     begin
@@ -253,6 +266,14 @@ begin
       Buf[Addr + cardinal(j)] := B;
       if (Addr + cardinal(j)) > HighAddr then HighAddr := Addr + cardinal(j);
     end;
+  end;
+
+  //เหตุผลเดียวกับฝั่ง Intel HEX: ไม่มีเรคอร์ดข้อมูลเลย = ไม่ใช่ไฟล์ที่
+  //โหลดสำเร็จ ไม่ใช่ภาพ FF ทั้งก้อน
+  if not SawData then
+  begin
+    ErrMsg := 'S-record: the file contains no data records';
+    Exit;
   end;
 
   if Truncated then

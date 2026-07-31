@@ -328,10 +328,22 @@ type
     FWorkflowSmart: TButton;
     FWorkflowRead: TButton;
     FWorkflowVerify: TButton;
+    FTelemetryPanel: TPanel;
+    FTelemetryCards: array[0..3] of TPanel;
+    FTelemetryTitles: array[0..3] of TLabel;
+    FTelemetryValues: array[0..3] of TLabel;
+    FOperationStartedAt: TDateTime;
+    FLastOperationText: string;
+    FLastOperationHint: string;
     procedure CreateWorkflowBar;
     procedure LayoutWorkflowBar;
     procedure UpdateWorkflowText;
     procedure UpdateWorkflowState;
+    procedure CreateTelemetryPanel;
+    procedure LayoutTelemetryPanel(Sender: TObject);
+    procedure UpdateTelemetry;
+    procedure BeginOperationTelemetry;
+    procedure FinishOperationTelemetry;
   public
     { ส่วนประกาศแบบ public }
 
@@ -362,7 +374,7 @@ type
   procedure RunChipSurfaceScan;
 
   //งานทั้งชิปของ EZP2023+ เฟิร์มแวร์ตัวนั้นทำงานเป็นชิปทั้งตัว ไม่ใช่เพจ
-  //Blank = True คือเขียน FF ทั้งชิป ซึ่งเทียบเท่าการลบ
+  //Blank = True คือใช้คำสั่ง native erase แล้วอ่านกลับตรวจ FF ทุกไบต์
   procedure RunEZPWholeChipWrite(Blank: boolean);
 
   //อ่านเลขประจำตัวของชิปที่เสียบอยู่ ต้องเรียกตอนอยู่ในโหมดโปรแกรม
@@ -466,6 +478,9 @@ var
   //หน้าต่างหลักขึ้นแล้วหรือยัง ตรวจชิปอัตโนมัติอาจเปิดไดอะล็อก
   //ซึ่งห้ามเกิดตอนที่หน้าต่างยังสร้างไม่เสร็จ
   AppReady: boolean = False;
+  //แยกการตรวจที่เกิดจาก startup/hot-plug ออกจากการกด Read ID ด้วยมือ
+  //เพื่อไม่ให้หน้าต่างเลือกรุ่นเด้งขึ้นเองเมื่อ JEDEC ID ใช้ร่วมกันหลาย suffix
+  AutomaticChipDetection: boolean = False;
 
   //ทำงานจากบรรทัดคำสั่ง ไม่มีคนนั่งอยู่หน้าจอที่จะตอบไดอะล็อกได้
   //ทุกจุดที่ปกติจะถาม ต้องตัดสินใจเองแบบปลอดภัยไว้ก่อน
@@ -721,6 +736,41 @@ begin
     UIProxy.Status('')
   else
     MainForm.StatusBar.Panels.Items[1].Text := '';
+end;
+
+//The telemetry cards deliberately use IEC units for byte counts and rates.
+//They describe measured application throughput, not an inferred SPI clock.
+function FormatTelemetryBytes(Value: QWord): string;
+begin
+  if Value >= QWord(1024) * 1024 * 1024 then
+    Result := Format('%.2f GiB', [Value / (1024.0 * 1024 * 1024)])
+  else if Value >= QWord(1024) * 1024 then
+    Result := Format('%.2f MiB', [Value / (1024.0 * 1024)])
+  else if Value >= 1024 then
+    Result := Format('%.2f KiB', [Value / 1024.0])
+  else
+    Result := IntToStr(Value) + ' B';
+end;
+
+function FormatTelemetryRate(BytesPerSecond: double): string;
+begin
+  if BytesPerSecond >= 1024 * 1024 then
+    Result := Format('%.2f MiB/s', [BytesPerSecond / (1024 * 1024)])
+  else if BytesPerSecond >= 1024 then
+    Result := Format('%.1f KiB/s', [BytesPerSecond / 1024])
+  else
+    Result := Format('%.0f B/s', [BytesPerSecond]);
+end;
+
+function FormatTelemetryElapsed(Milliseconds: int64): string;
+begin
+  if Milliseconds < 1000 then
+    Result := IntToStr(Milliseconds) + ' ms'
+  else if Milliseconds < 60000 then
+    Result := Format('%.1f s', [Milliseconds / 1000.0])
+  else
+    Result := Format('%d:%.2d', [Milliseconds div 60000,
+                                 (Milliseconds div 1000) mod 60]);
 end;
 
 //ตั้งค่า progress แบบปลอดภัยต่อ thread
@@ -1186,6 +1236,8 @@ end;
 
 //ตัวช่วยที่แถบ Safe workflow ต้องใช้ แต่นิยามอยู่ท้ายไฟล์
 function IsEEPROMSmartWriteTarget: boolean; forward;
+function CurrentSectorSize: cardinal; forward;
+function CurrentSectorOpcode: byte; forward;
 
 //กุญแจของ "ชิปตัวที่ตั้งค่าไว้ตอนนี้"
 //
@@ -1405,6 +1457,19 @@ begin
     //ไม่ใช่ตั้งค้างไว้ที่ Smart write ตลอดเวลา
     MainForm.LayoutWorkflowBar;
     MainForm.UpdateWorkflowState;
+  end;
+
+  if MainForm.FTelemetryPanel <> nil then
+  begin
+    MainForm.FTelemetryPanel.Color := ChromeColor;
+    for i := 0 to High(MainForm.FTelemetryCards) do
+    begin
+      MainForm.FTelemetryCards[i].Color := SurfaceColor;
+      MainForm.FTelemetryTitles[i].Font.Color := AccentColor;
+      MainForm.FTelemetryValues[i].Font.Color := TextColor;
+    end;
+    MainForm.LayoutTelemetryPanel(nil);
+    MainForm.UpdateTelemetry;
   end;
 end;
 
@@ -1790,6 +1855,304 @@ begin
   FWorkflowState.Hint := StateText;
   FWorkflowState.Font.Color := StateColor;
   FWorkflowState.Font.Style := [fsBold];
+  UpdateTelemetry;
+end;
+
+//Four persistent cards keep engineering facts visible after the transient
+//status-bar rate has disappeared.  The clock card always says "requested" or
+//"selected" because the programmers do not measure the physical SCK waveform.
+procedure TMainForm.CreateTelemetryPanel;
+const
+  PanelHeight = 112;
+  Titles: array[0..3] of string = (
+    'CONNECTION', 'INTERFACE / CLOCK', 'CHIP PROFILE', 'LAST OPERATION'
+  );
+var
+  i: integer;
+begin
+  if FTelemetryPanel <> nil then Exit;
+
+  FTelemetryPanel := TPanel.Create(Self);
+  FTelemetryPanel.Parent := Self;
+  FTelemetryPanel.Name := 'TelemetryPanel';
+  FTelemetryPanel.Caption := '';
+  FTelemetryPanel.BevelOuter := bvNone;
+  FTelemetryPanel.ParentColor := False;
+  FTelemetryPanel.DoubleBuffered := True;
+  FTelemetryPanel.Height := PanelHeight;
+  if FWorkflowPanel <> nil then
+    FTelemetryPanel.Top := FWorkflowPanel.Top + FWorkflowPanel.Height;
+  FTelemetryPanel.Align := alTop;
+  FTelemetryPanel.OnResize := @LayoutTelemetryPanel;
+
+  for i := 0 to High(FTelemetryCards) do
+  begin
+    FTelemetryCards[i] := TPanel.Create(Self);
+    FTelemetryCards[i].Parent := FTelemetryPanel;
+    FTelemetryCards[i].Caption := '';
+    FTelemetryCards[i].BevelOuter := bvLowered;
+    FTelemetryCards[i].ParentColor := False;
+
+    FTelemetryTitles[i] := TLabel.Create(Self);
+    FTelemetryTitles[i].Parent := FTelemetryCards[i];
+    FTelemetryTitles[i].Caption := Titles[i];
+    FTelemetryTitles[i].AutoSize := False;
+    FTelemetryTitles[i].Font.Style := [fsBold];
+    FTelemetryTitles[i].Transparent := True;
+
+    FTelemetryValues[i] := TLabel.Create(Self);
+    FTelemetryValues[i].Parent := FTelemetryCards[i];
+    FTelemetryValues[i].AutoSize := False;
+    FTelemetryValues[i].Transparent := True;
+    FTelemetryValues[i].WordWrap := True;
+    FTelemetryValues[i].ShowHint := True;
+  end;
+
+  FOperationStartedAt := 0;
+  FLastOperationText := 'No completed operation yet' + LineEnding +
+                        'Live effective rate and ETA appear in the status bar';
+  FLastOperationHint := FLastOperationText;
+  LayoutTelemetryPanel(nil);
+  UpdateTelemetry;
+end;
+
+procedure TMainForm.LayoutTelemetryPanel(Sender: TObject);
+const
+  Gap = 6;
+  Outer = 8;
+var
+  i, X, W, LastW: integer;
+begin
+  if FTelemetryPanel = nil then Exit;
+
+  W := (FTelemetryPanel.ClientWidth - (Outer * 2) -
+        (Gap * High(FTelemetryCards))) div Length(FTelemetryCards);
+  if W < 90 then W := 90;
+  X := Outer;
+  for i := 0 to High(FTelemetryCards) do
+  begin
+    if i = High(FTelemetryCards) then
+      LastW := FTelemetryPanel.ClientWidth - Outer - X
+    else
+      LastW := W;
+    if LastW < 90 then LastW := 90;
+    FTelemetryCards[i].SetBounds(X, 5, LastW,
+      FTelemetryPanel.ClientHeight - 10);
+    FTelemetryTitles[i].SetBounds(10, 7,
+      FTelemetryCards[i].ClientWidth - 20, 18);
+    FTelemetryValues[i].SetBounds(10, 27,
+      FTelemetryCards[i].ClientWidth - 20,
+      FTelemetryCards[i].ClientHeight - 33);
+    Inc(X, W + Gap);
+  end;
+end;
+
+procedure TMainForm.UpdateTelemetry;
+var
+  ConnectionText, InterfaceText, ChipText, IDText, IdentityText: string;
+  ClockText, TransportText, AddressText, VoltageText: string;
+  ChipSize: QWord;
+  ClockMenu: TMenuItem;
+
+  function CheckedCaption(Root: TMenuItem): string;
+  var
+    n: integer;
+  begin
+    Result := '';
+    if Root = nil then Exit;
+    for n := 0 to Root.Count - 1 do
+      if Root.Items[n].Checked then
+        Exit(StringReplace(Root.Items[n].Caption, '&', '', [rfReplaceAll]));
+  end;
+
+begin
+  //Programmer เป็น nil ได้ตอน Current_HW = CHW_NONE แผงข้อมูลห้ามพาแอป
+  //ล้มเพราะเรื่องแค่นี้
+  if (FTelemetryPanel = nil) or (AsProgrammer = nil) or
+     (AsProgrammer.Programmer = nil) then Exit;
+
+  case AsProgrammer.Current_HW of
+    CHW_EZP:
+      begin
+        TransportText := 'USB 1FC8:310B | libusb-win32 1.4.0.2';
+        ClockText := '12 MHz requested (firmware setting)';
+        InterfaceText := 'SPI NOR | ' + ClockText + LineEnding +
+          'Native erase | whole-chip read/write | full read-back verify';
+        FTelemetryValues[1].Hint := '12 MHz is the configured EZP2023+ ' +
+          'firmware clock. It is not a measured oscilloscope frequency. ' +
+          'Measured effective operation throughput is shown separately.';
+      end;
+    CHW_SERPROG:
+      begin
+        TransportText := 'Serial/USB-CDC transport';
+        InterfaceText := 'SPI | clock controlled by serprog firmware';
+        FTelemetryValues[1].Hint := InterfaceText;
+      end;
+    CHW_ARDUINO, CHW_BUZZPIRAT, CHW_AVRISP:
+      TransportText := 'Serial transport';
+  else
+    TransportText := 'USB transport';
+  end;
+
+  if AsProgrammer.Current_HW <> CHW_EZP then
+  begin
+    ClockMenu := nil;
+    case AsProgrammer.Current_HW of
+      CHW_CH341, CHW_USBASP: ClockMenu := MenuSPIClock;
+      CHW_CH347: ClockMenu := MenuCH347SPIClock;
+      CHW_FT232H: ClockMenu := MenuFT232SPIClock;
+      CHW_AVRISP: ClockMenu := MenuAVRISPSPIClock;
+      CHW_ARDUINO: ClockMenu := MenuArduinoSPIClock;
+      CHW_BUZZPIRAT:
+        if FindComponent('MenuBuzzpiratSPIClock') is TMenuItem then
+          ClockMenu := TMenuItem(FindComponent('MenuBuzzpiratSPIClock'));
+    end;
+    ClockText := CheckedCaption(ClockMenu);
+    if ClockText = '' then ClockText := 'firmware/default';
+    if InterfaceText = '' then
+    begin
+      InterfaceText := 'SPI | ' + ClockText + ' selected' + LineEnding +
+        'Measured effective throughput is reported per operation';
+      //เขียน hint เฉพาะตอนที่ประกอบข้อความเองตรงนี้ ตัวที่มีคำอธิบายเฉพาะ
+      //ของมันแล้ว (เช่น serprog) ต้องไม่โดนทับ
+      FTelemetryValues[1].Hint := 'The menu value is the requested bus ' +
+        'clock, not a measured waveform. Operation speed is measured from ' +
+        'bytes and time.';
+    end;
+  end;
+
+  if ProgrammerPresent then
+    ConnectionText := 'CONNECTED | ' + AsProgrammer.Programmer.HardwareName
+  else
+    ConnectionText := 'DISCONNECTED | ' + AsProgrammer.Programmer.HardwareName;
+  ConnectionText := ConnectionText + LineEnding + TransportText;
+  FTelemetryValues[0].Caption := ConnectionText;
+  FTelemetryValues[0].Hint := ConnectionText;
+  FTelemetryValues[1].Caption := InterfaceText;
+
+  ChipSize := CurrentICParam.Size;
+  if (ChipSize = 0) and IsNumber(ComboChipSize.Text) then
+    ChipSize := StrToQWordDef(ComboChipSize.Text, 0);
+
+  if LastID9F <> '' then
+  begin
+    IDText := LastID9F;
+    if ChipIdentityConfirmed or
+       SameText(LastID9F, CurrentICParam.ID) then
+      IdentityText := 'live confirmed'
+    else
+      IdentityText := 'live read';
+  end
+  else if CurrentICParam.ID <> '' then
+  begin
+    IDText := CurrentICParam.ID;
+    IdentityText := 'selected, not read';
+  end
+  else
+  begin
+    IDText := 'ID unavailable';
+    IdentityText := 'unconfirmed';
+  end;
+
+  if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) then
+  begin
+    if ChipSize > QWord(16) * 1024 * 1024 then
+      AddressText := '4-byte address'
+    else
+      AddressText := '3-byte address';
+  end
+  else
+    AddressText := 'addressing by selected protocol';
+
+  VoltageText := Trim(CurrentICParam.Vcc);
+  if VoltageText = '' then
+    VoltageText := 'VCC not specified'
+  else if Pos('V', UpperCase(VoltageText)) = 0 then
+    VoltageText := VoltageText + ' V';
+
+  if CurrentICParam.Name <> '' then
+    ChipText := CurrentICParam.Name
+  else
+    ChipText := STR_NO_CHIP_SELECTED;
+  ChipText := ChipText + ' | ' + IDText + ' (' + IdentityText + ')';
+  if ChipSize > 0 then
+  begin
+    ChipText := ChipText + LineEnding + FormatTelemetryBytes(ChipSize);
+    if CurrentICParam.Page > 0 then
+      ChipText := ChipText + ' | page ' + IntToStr(CurrentICParam.Page) + ' B';
+    if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) then
+      ChipText := ChipText + ' | sector ' +
+        FormatTelemetryBytes(CurrentSectorSize) + '/' +
+        IntToHex(CurrentSectorOpcode, 2) + 'h';
+    ChipText := ChipText + ' | ' + AddressText + ' | ' + VoltageText;
+  end;
+  FTelemetryValues[2].Caption := ChipText;
+  FTelemetryValues[2].Hint := ChipText;
+
+  if OperationRunning then
+  begin
+    FTelemetryValues[3].Caption := UpperCase(OpKindName(LastOp.Kind)) +
+      ' RUNNING' + LineEnding +
+      'Live effective rate and ETA: status bar';
+    FTelemetryValues[3].Hint := FTelemetryValues[3].Caption;
+  end
+  else
+  begin
+    FTelemetryValues[3].Caption := FLastOperationText;
+    FTelemetryValues[3].Hint := FLastOperationHint;
+  end;
+end;
+
+procedure TMainForm.BeginOperationTelemetry;
+begin
+  FOperationStartedAt := Now;
+  UpdateTelemetry;
+end;
+
+procedure TMainForm.FinishOperationTelemetry;
+var
+  ElapsedMs: int64;
+  Bytes: QWord;
+  StateText, DetailText: string;
+begin
+  if FOperationStartedAt = 0 then
+  begin
+    UpdateTelemetry;
+    Exit;
+  end;
+
+  ElapsedMs := Abs(MilliSecondsBetween(Now, FOperationStartedAt));
+  Bytes := LastOp.BytesDone;
+  if (Bytes = 0) and (not LastOp.Failed) then Bytes := LastOp.BytesTotal;
+
+  if LastOp.Cancelled then
+    StateText := 'CANCELLED'
+  else if LastOp.Failed then
+    StateText := 'FAILED'
+  else
+    StateText := 'OK';
+
+  DetailText := FormatTelemetryElapsed(ElapsedMs);
+  if Bytes > 0 then
+  begin
+    DetailText := FormatTelemetryBytes(Bytes) + ' | ' + DetailText;
+    if ElapsedMs > 0 then
+      DetailText := DetailText + ' | ' +
+        FormatTelemetryRate(Bytes / (ElapsedMs / 1000.0)) +
+        ' effective';
+  end;
+
+  FLastOperationText := UpperCase(OpKindName(LastOp.Kind)) + ' ' +
+                        StateText + LineEnding + DetailText;
+  FLastOperationHint := FLastOperationText;
+  if LastOp.Failed and (LastOp.ErrorText <> '') then
+    FLastOperationHint := FLastOperationHint + LineEnding + LastOp.ErrorText;
+  if LastOp.FailAddress >= 0 then
+    FLastOperationHint := FLastOperationHint + LineEnding + 'Failure address 0x' +
+      IntToHex(QWord(LastOp.FailAddress), 8);
+
+  FOperationStartedAt := 0;
+  UpdateTelemetry;
 end;
 
 //------------------------------------------------------------------------
@@ -2402,6 +2765,17 @@ end;
 function Enter4B: boolean;
 begin
   if Mode4BActive then Exit(True);
+  if Chip25Entry4B = E4B_NONE then
+  begin
+    //ชิปไม่ประกาศคำสั่งสลับโหมดทันทีเลย (SFDP มีแต่ dedicated 4-byte set
+    //หรือ B1h) การเดา B7h ใส่แล้วเชื่อว่าสลับสำเร็จจะพาเฟรมสี่ไบต์ไปลง
+    //ชิปที่ยังตีความสามไบต์ ซึ่งคือการลบ/เขียนผิดตำแหน่งแบบเงียบ ๆ
+    OpFail('this chip advertises no immediate 4-byte-address switch; the ' +
+      'area past 16 MB is reachable only through its dedicated 4-byte ' +
+      'opcodes, which this operation path does not have for every command ' +
+      'it needs');
+    Exit(False);
+  end;
   if UsbAsp25_EN4B() <> 1 then
   begin
     OpFail('the SPI NOR did not accept an exact enter-4-byte-address command');
@@ -3604,6 +3978,10 @@ begin
   Result := True;
 end;
 
+procedure LockControl; forward;
+procedure UnlockControl; forward;
+function VoltageWarningOK: boolean; forward;
+
 procedure RunChipCapacityTest;
 var
   R: TCapacityResult;
@@ -3641,6 +4019,9 @@ begin
     OpFail('the programmer could not be opened');
     Exit;
   end;
+  //งานนี้ลบและเขียนจริงหลายนาที ปุ่มกับเมนูทั้งหน้าต่างต้องถูกล็อกเหมือน
+  //งานเขียนปกติ ไม่งั้นคลิกระหว่างสแกนจะยิงงานซ้อนใส่อุปกรณ์ตัวเดียวกัน
+  LockControl;
   try
     if not EnterProgModeSPI25 then
     begin
@@ -3682,6 +4063,8 @@ begin
     ChipTestEnd4B;
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
+    LogPrint(STR_OP_RESULT + OpSummary);
+    UnlockControl;
   end;
 end;
 
@@ -3729,6 +4112,8 @@ begin
     OpFail('the programmer could not be opened');
     Exit;
   end;
+  //ลบทั้งชิปจริง ต้องล็อกหน้าจอเต็มรูปแบบเหมือนงานลบปกติ
+  LockControl;
   try
     if not EnterProgModeSPI25 then
     begin
@@ -3765,25 +4150,114 @@ begin
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
     SetProgressPos(0);
+    LogPrint(STR_OP_RESULT + OpSummary);
+    UnlockControl;
   end;
 end;
 
-//เขียนทั้งชิปผ่าน EZP2023+ แล้วอ่านกลับมาเทียบทุกไบต์
+//เขียนหรือลบทั้งชิปผ่าน EZP2023+ แล้วอ่านกลับมาเทียบทุกไบต์
 //
 //เฟิร์มแวร์ของเครื่องนี้ไม่รับคำสั่ง SPI ดิบ ๆ จึงเขียนทีละเพจแบบเส้นทาง
-//ปกติไม่ได้ แต่การเขียนทั้งชิปมันทำได้เอง และเพราะมันอ่านได้ด้วย เราจึง
-//ตรวจผลได้เต็มร้อย ซึ่งดีกว่าเชื่อคำว่า "สำเร็จ" ของเฟิร์มแวร์
+//ปกติไม่ได้ แต่มีคำสั่ง native แยกสำหรับเขียนทั้งชิปกับลบทั้งชิป และเพราะ
+//มันอ่านได้ด้วย เราจึงตรวจผลได้เต็มร้อยแทนการเชื่อสถานะของเฟิร์มแวร์
 procedure RunEZPWholeChipWrite(Blank: boolean);
 var
   Dev: TEZPHardware;
-  Image, Back: TBytes;
+  Image, BlankImage, Back, BackConfirm: TBytes;
   Size: cardinal;
-  i: SizeInt;
   Stream: TMemoryStream;
+  ControlsLocked: boolean;
+
+  function VerifyPhysicalImage(const Expected: TBytes;
+    EraseContext: boolean): boolean;
+  var
+    i: SizeInt;
+  begin
+    Result := False;
+    LogPrint('reading the chip back to check every byte');
+    if not Dev.ReadBackWholeChip(Back) then
+    begin
+      if EraseContext then
+        OpFail('the erase finished but the read-back failed: ' +
+               Dev.GetLastError)
+      else
+        OpFail('the write finished but the read-back failed: ' +
+               Dev.GetLastError);
+      Exit;
+    end;
+    if cardinal(Length(Back)) <> Size then
+    begin
+      OpFail(Format('the read-back returned %d bytes, expected %d',
+                    [Length(Back), Size]));
+      Exit;
+    end;
+
+    //A marginal clip can return one apparently valid all-FF page without any
+    //USB error.  One real EF4017 run differed in only 171 bytes of one
+    //256-byte page, then read correctly in a fresh process.  Never call a
+    //destructive operation verified until two session-separated reads agree
+    //across the entire array.  Sessions, not usb_reset: the vendor software
+    //never uses USB resets, and session-separated reads were measured to
+    //return fresh correct data seven sessions in a row in one process.
+    LogPrint('reading a second independent pass to prove connection stability');
+    if not Dev.ReadBackWholeChip(BackConfirm) then
+    begin
+      OpFail('the first read-back completed but the independent confirmation ' +
+             'read failed: ' + Dev.GetLastError);
+      Exit;
+    end;
+    if cardinal(Length(BackConfirm)) <> Size then
+    begin
+      OpFail(Format('the confirmation read-back returned %d bytes, expected %d',
+                    [Length(BackConfirm), Size]));
+      Exit;
+    end;
+    for i := 0 to SizeInt(Size) - 1 do
+      if BackConfirm[i] <> Back[i] then
+      begin
+        LogPrint(Format('EZP2023+ independent read-backs disagree at %.8x ' +
+          '(first %.2x, second %.2x)',
+          [cardinal(i), Back[i], BackConfirm[i]]));
+        OpFail(Format('the two reset-separated verification reads disagree ' +
+          'at 0x%.8x (%.2x versus %.2x). The clip/socket connection is ' +
+          'intermittent; reseat or isolate the chip before trusting any ' +
+          'erase or write result',
+          [cardinal(i), Back[i], BackConfirm[i]]), i);
+        Exit;
+      end;
+
+    for i := 0 to SizeInt(Size) - 1 do
+      if Back[i] <> Expected[i] then
+      begin
+        LogPrint(Format('%s%s (chip %.2x, expected %.2x)',
+          [STR_VERIFY_ERROR, IntToHex(cardinal(i), 8),
+           Back[i], Expected[i]]));
+        if EraseContext then
+          OpFail(Format('the firmware reported erase complete, but the ' +
+            'flash still holds %.2x at 0x%.8x, so no image data was sent. ' +
+            'The chip is rejecting erase: fully power down the target, ' +
+            'isolate the chip from the board, check the clip/socket ' +
+            'contacts, and ensure WP# (pin 3) is high and status-register ' +
+            'protection is not locked',
+            [Back[i], cardinal(i)]), i)
+        else
+          OpFail(Format('the programmer accepted the complete image, but ' +
+            'the flash still holds %.2x instead of %.2x at 0x%.8x. Reads ' +
+            'can work while programming is blocked: fully power down the ' +
+            'target, isolate the chip from the board, check the clip/socket ' +
+            'contacts, and ensure WP# (pin 3) is high and status-register ' +
+            'protection is not locked',
+            [Back[i], Expected[i], cardinal(i)]), i);
+        Exit;
+      end;
+    Result := True;
+  end;
 begin
+  if OperationRunning then Exit;
   if Blank then OpBegin(opkErase) else OpBegin(opkWrite);
   ForgetChipContent;
-
+  ControlsLocked := False;
+try
   if AsProgrammer.Current_HW <> CHW_EZP then
   begin
     OpFail('this path is only for the EZP2023+');
@@ -3793,6 +4267,14 @@ begin
           (MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25)) then
   begin
     OpFail('the EZP2023+ backend drives 25-series SPI NOR only');
+    Exit;
+  end;
+
+  //เส้นทางลบ/เขียนปกติผ่านด่านแรงดันก่อนแตะชิปทุกครั้ง เส้นทาง EZP ก็ต้อง
+  //ผ่านเหมือนกัน: เครื่องนี้จ่ายราง 3.3 V เสมอ ชิป 1.8 V โดน 3.3 V คือพัง
+  if not VoltageWarningOK then
+  begin
+    OpFail('aborted because of the supply voltage');
     Exit;
   end;
 
@@ -3837,51 +4319,57 @@ begin
     OpFail('the programmer could not be opened');
     Exit;
   end;
-  try
+    LockControl;
+    ControlsLocked := True;
     Dev := TEZPHardware(AsProgrammer.Programmer);
     if Blank then
-      LogPrint(Format('EZP2023+: erasing the whole chip by writing FF to ' +
-                      'all %d bytes', [Size]))
+      LogPrint(Format('EZP2023+: erasing all %d bytes with the firmware''s ' +
+                      'native erase command', [Size]))
     else
-      LogPrint(Format('EZP2023+: writing all %d bytes (the firmware erases ' +
-                      'as it goes)', [Size]));
+      LogPrint(Format('EZP2023+: erasing and blank-checking all %d bytes ' +
+                      'before writing, as required for 25-series SPI flash',
+                      [Size]));
     SetProgressMax(integer(Size));
 
-    if not Dev.WriteWholeChip(Image) then
+    //The vendor manual is explicit: its Write command does not erase a
+    //25-series SPI flash.  "Auto" is three separate operations: Erase, Write,
+    //Verify.  A real EF4017 probe confirmed that 0005 can program FF -> FE but
+    //cannot restore FE -> FF.  Therefore every write must native-erase and
+    //prove the entire chip blank before sending even the first image page.
+    if not Dev.EraseWholeChip then
     begin
       OpFail(Dev.GetLastError);
       Exit;
     end;
 
-    //อ่านกลับทั้งชิปแล้วเทียบ: เครื่องนี้อ่านได้ จึงไม่มีเหตุผลจะไม่ตรวจ
-    LogPrint('reading the chip back to check every byte');
-    if not Dev.ReadBackWholeChip(Back) then
+    if Blank then
+      BlankImage := Image
+    else
     begin
-      OpFail('the write finished but the read-back failed: ' +
-             Dev.GetLastError);
-      Exit;
+      SetLength(BlankImage, Size);
+      FillByte(BlankImage[0], Size, $FF);
     end;
-    if cardinal(Length(Back)) <> Size then
+    if not VerifyPhysicalImage(BlankImage, True) then Exit;
+    LogPrint('the chip is erased and verified blank');
+
+    if not Blank then
     begin
-      OpFail(Format('the read-back returned %d bytes, expected %d',
-                    [Length(Back), Size]));
-      Exit;
-    end;
-    for i := 0 to SizeInt(Size) - 1 do
-      if Back[i] <> Image[i] then
+      LogPrint(Format('EZP2023+: writing all %d bytes to the verified blank ' +
+                      'flash', [Size]));
+      if not Dev.WriteWholeChip(Image) then
       begin
-        LogPrint(STR_VERIFY_ERROR + IntToHex(cardinal(i), 8));
-        OpFail(Format('the chip does not match what was written: at ' +
-          '0x%.8x it holds %.2x, not %.2x', [cardinal(i), Back[i], Image[i]]),
-          i);
+        OpFail(Dev.GetLastError);
         Exit;
       end;
-
-    if Blank then LogPrint('the chip is erased and verified blank')
-    else LogPrint('the whole chip was written and verified byte for byte');
+      if not VerifyPhysicalImage(Image, False) then Exit;
+      LogPrint('the whole chip was written and verified byte for byte');
+    end;
+    OpProgress(Size, Size);
   finally
     AsProgrammer.Programmer.DevClose;
     SetProgressPos(0);
+    LogPrint(STR_OP_RESULT + OpSummary);
+    if ControlsLocked then UnlockControl;
   end;
 end;
 
@@ -3932,6 +4420,8 @@ begin
     OpFail('the programmer could not be opened');
     Exit;
   end;
+  //งานอ่านหลายนาทีบนอุปกรณ์ตัวเดียว ต้องล็อกหน้าจอกันคลิกซ้อนเหมือนงานอื่น
+  LockControl;
   try
     if not EnterProgModeSPI25 then
     begin
@@ -4035,6 +4525,8 @@ begin
   finally
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
+    LogPrint(STR_OP_RESULT + OpSummary);
+    UnlockControl;
   end;
 end;
 
@@ -4333,18 +4825,28 @@ begin
   if Info.SRWriteEnableOpcode <> 0 then
     Chip25SRWrenOpcode := Info.SRWriteEnableOpcode;
 
-  if not SFDPNeeds4BSwitch(Info) then
-    Chip25Entry4B := E4B_NONE
+  //ลำดับสำคัญ: ชิปที่ประกาศ "มีชุดคำสั่ง 4 ไบต์เฉพาะ" มัก ประกาศวิธีสลับ
+  //โหมดมาด้วย (เช่น W25Q256JV ประกาศทั้ง dedicated set และ WREN+B7)
+  //เดิมทางนี้จับ dedicated set ก่อนแล้วตั้ง "ไม่ต้องสลับ" ซึ่งทำให้เส้นทาง
+  //ที่ต้องสลับจริง (ลบเป็นช่วงด้วย opcode ธรรมดา) ล้มเหลวทั้งที่ชิปสลับได้
+  if Info.Entry4B.Always4B then
+    //ไม่มีโหมดให้สลับ ทุกคำสั่งรับสี่ไบต์อยู่แล้ว
+    Chip25Entry4B := E4B_ALWAYS4B
   else if Info.Entry4B.WrenB7 then
     Chip25Entry4B := E4B_WREN_B7
   else if Info.Entry4B.B7NoWren then
     Chip25Entry4B := E4B_B7
   else if Info.Entry4B.BankReg17 then
     Chip25Entry4B := E4B_BANK17
-  else if Info.Entry4B.ExtAddrReg then
-    Chip25Entry4B := E4B_EXTC5
-  else if Info.Entry4B.NvConfigB1 then
-    Chip25Entry4B := E4B_NVB1;
+  else if Info.Entry4B.DedicatedSet or Info.Entry4B.NvConfigB1 then
+    //ชิปประกาศชัดว่ามีแต่ชุดคำสั่ง 4 ไบต์เฉพาะ หรือมีแต่ B1h (nonvolatile
+    //config ซึ่งเปลี่ยนค่าตั้งต้นตอนเปิดไฟ ไม่ใช่โหมดของ session นี้ และ
+    //การเขียนทับทั้ง register เสี่ยงตั้ง dual/quad ถาวร): ไม่มีทางสลับ
+    //ที่ปลอดภัย งานอ่าน/เขียนใช้ opcode สี่ไบต์เฉพาะได้ ส่วนงานที่ต้อง
+    //สลับโหมดจะถูกปฏิเสธพร้อมเหตุผลใน Enter4B
+    Chip25Entry4B := E4B_NONE;
+  //ไม่มีบิตไหนตั้งเลย: คงค่าเดิม (E4B_UNKNOWN) ให้ทางเดาที่ปลอดภัยที่สุด
+  //คือ WREN + B7h ทำงานเหมือนที่ผ่านมา
 end;
 
 //ให้แน่ใจว่ารู้จักผู้ผลิตก่อนส่งคำสั่งที่ต่างกันตามยี่ห้อ
@@ -4431,16 +4933,31 @@ var
     if A > B then Result := A else Result := B;
   end;
 
+var
+  Entered4B: boolean;
 begin
   Result := False;
   LockedAt := 0;
   AnyReadable := False;
+  Entered4B := False;
 
   GuardUse4B := ChipSize > 16777216;
 
   if (StartAddr >= ChipSize) or (Len > ChipSize - StartAddr) then Exit;
   EndAddr := StartAddr + Len;
   if EndAddr <= StartAddr then Exit;
+
+  //คำสั่ง 3Dh กับเฟรมสี่ไบต์ใช้ได้ก็ต่อเมื่อชิปอยู่ในโหมดสี่ไบต์จริง
+  //ด่านนี้วิ่งก่อน Enter4B ของตัวงาน จึงต้องพาชิปเข้าโหมดเองชั่วคราว
+  //เข้าไม่ได้ = อ่านบิตล็อกไม่ได้ = AnyReadable ค้าง False ให้ผู้เรียก
+  //รายงานว่า "ไม่รู้" ตามระเบียบเดิม ไม่ใช่สแกนด้วยเฟรมผิดแล้วได้คำตอบมั่ว
+  if GuardUse4B and (not Mode4BActive) then
+  begin
+    if Chip25Entry4B = E4B_NONE then Exit;
+    if UsbAsp25_EN4B() <> 1 then Exit;
+    Entered4B := True;
+  end;
+  try
 
   //บล็อกหัวและบล็อกท้ายของชิป ซึ่งล็อกกันทีละ 4K
   LoEnd := BOOT;
@@ -4458,6 +4975,12 @@ begin
   //ท้ายชิป
   if EndAddr > HiStart then
     if Scan(HigherOf(StartAddr, HiStart), EndAddr, FINE) then Exit(True);
+  finally
+    if Entered4B then
+      if UsbAsp25_EX4B() <> 1 then
+        LogPrint('the chip did not leave 4-byte-address mode cleanly after ' +
+                 'the block-lock scan');
+  end;
 end;
 
 //อ่านค่า configuration register ที่ DecodeProtVendor ต้องใช้ตามยี่ห้อ
@@ -4482,6 +5005,15 @@ begin
       begin
         if SR2 = $FF then Exit;
         CR := SR2;
+        Result := True;
+      end;
+    plWinbond:
+      begin
+        //ตระกูล Winbond: 15h อ่าน Status Register 3 ซึ่งบิต 2 คือ WPS
+        //ตัวจริง (บิต 2 ของ SR2 เป็นบิตสงวน) ชิปรุ่นเก่าที่ไม่มี SR3
+        //ปล่อยสายลอยตอบ FF ซึ่งห้ามเชื่อ ไม่งั้น WPS จะดูเหมือนติด
+        if UsbAsp25_ReadSR(CR, $15) <> 1 then Exit;
+        if CR = $FF then begin CR := 0; Exit; end;
         Result := True;
       end;
   else
@@ -5381,6 +5913,9 @@ function SetSPISpeed(OverrideSpeed: byte): integer;
 var
   Speed: byte;
 begin
+  //Some backends (including EZP2023+) use firmware defaults and have no menu
+  //branch below.  Never leak an uninitialized stack byte into SPIInit.
+  Speed := 0;
   if AsProgrammer.Current_HW = CHW_ARDUINO then
   begin
     if MainForm.MenuArduinoISP8Mhz.Checked then Speed := MainForm.MenuArduinoISP8Mhz.Tag;
@@ -7645,7 +8180,14 @@ begin
   //และทำเฉพาะโหมด SPI เพราะคำสั่งอ่านรหัสเป็นของ SPI
   if AppReady and ProgrammerPresent and (not Was) and
      MainForm.MenuAutoDetectChip.Checked and MainForm.RadioSPI.Checked then
-    MainForm.ButtonReadIDClick(nil);
+  begin
+    AutomaticChipDetection := True;
+    try
+      MainForm.ButtonReadIDClick(nil);
+    finally
+      AutomaticChipDetection := False;
+    end;
+  end;
 end;
 
 procedure LockControl;
@@ -7668,12 +8210,14 @@ begin
 
   MainForm.GroupChipSettings.Enabled := false;
   MainForm.MPHexEditorEx.Enabled := false;
+  MainForm.BeginOperationTelemetry;
   MainForm.UpdateWorkflowState;
 end;
 
 procedure UnlockControl;
 begin
   OperationRunning := False;
+  MainForm.FinishOperationTelemetry;
 
   MainForm.MPHexEditorEx.Enabled := true;
   MainForm.GroupChipSettings.Enabled := true;
@@ -7750,6 +8294,7 @@ procedure TMainForm.ComboItem1Click(Sender: TObject);
 var
   CheckTemp: Boolean;
 begin
+  if OperationRunning then Exit;
   if MessageDlg('AsProgrammer', STR_COMBO_WARN, mtConfirmation, [mbYes, mbNo], 0)
     <> mrYes then Exit;
 
@@ -7883,11 +8428,14 @@ end;
 
 procedure TMainForm.MenuChipDoctorClick(Sender: TObject);
 begin
+  //เมนูไม่ถูกปิดตอนงานเดิน คลิกซ้อนแล้วอุปกรณ์ตัวเดียวกันโดนสองงานพร้อมกัน
+  if OperationRunning then Exit;
   RunChipDoctor;
 end;
 
 procedure TMainForm.MenuCapacityTestClick(Sender: TObject);
 begin
+  if OperationRunning then Exit;
   //เขียนจริง (สำรองและกู้คืนให้) แต่ไฟดับกลางคันคือข้อมูลบางเซกเตอร์หาย
   //ให้ผู้ใช้ตัดสินใจเองก่อนเสมอ
   if MessageDlg('True capacity test',
@@ -7901,6 +8449,7 @@ end;
 
 procedure TMainForm.MenuSurfaceScanClick(Sender: TObject);
 begin
+  if OperationRunning then Exit;
   if MessageDlg('Surface scan',
        'This scan ERASES THE ENTIRE CHIP and leaves it blank. Every ' +
        'block is erased and rewritten several times with test patterns ' +
@@ -7918,11 +8467,15 @@ var
   timeval: integer;
   ms, sec, d: word;
 begin
+  if OperationRunning then Exit;
+  //ไม่มี OpBegin = แผง telemetry จะเอา LastOp ของงานก่อนหน้ามาหารเวลาของ
+  //งานนี้ กลายเป็นสถิติที่ไม่เคยเกิดขึ้นจริง
+  OpBegin(opkNone);
   ButtonCancel.Tag := 0;
   if not OpenDevice() then exit;
   EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
   LockControl();
-
+try
   if (AsProgrammer.Current_HW = CHW_CH341) or (AsProgrammer.Current_HW = CHW_AVRISP) or (AsProgrammer.Current_HW = CHW_CH347)
     or (AsProgrammer.Current_HW = CHW_FT232H) then
     cycles := 256
@@ -7971,9 +8524,13 @@ begin
   LogPrint(STR_TIME + TimeToStr(t)+' '+
     IntToStr( Trunc(((cycles*sizeof(buffer)) / timeval) * 1000)) +' bytes/s');
 
+finally
+  //ข้อยกเว้นระหว่างวัด (ไดรเวอร์อนุกรมโยนได้จริง) ต้องไม่ทิ้ง
+  //OperationRunning ค้าง True: ปุ่มทุกปุ่มจะตายและหน้าต่างปิดไม่ได้อีกเลย
   ExitProgMode25;
   AsProgrammer.Programmer.DevClose;
   UnlockControl();
+end;
 end;
 
 procedure TMainForm.MenuItemEditSregClick(Sender: TObject);
@@ -7986,6 +8543,8 @@ procedure TMainForm.MenuItemLockFlashClick(Sender: TObject);
 var
   sreg: byte;
 begin
+  if OperationRunning then Exit;
+  OpBegin(opkNone);
   try
   ButtonCancel.Tag := 0;
   if not OpenDevice() then exit;
@@ -8036,6 +8595,8 @@ procedure TMainForm.MenuItemReadSregClick(Sender: TObject);
 var
   sreg, sreg2, sreg3: byte;
 begin
+  if OperationRunning then Exit;
+  OpBegin(opkNone);
   try
   ButtonCancel.Tag := 0;
   if not OpenDevice() then exit;
@@ -8505,6 +9066,7 @@ var
   i: Longword;
   BlankByte: byte;
 begin
+  if OperationRunning then Exit;
   I2C_ChunkSize := 65535;
   if BlankCheck then OpBegin(opkBlankCheck) else OpBegin(opkVerify);
 try
@@ -8672,10 +9234,11 @@ end;
 function UnlockCurrentSPI25: boolean;
 var
   SR1, SR2, CR, NewSR1, NewSR2: byte;
-  HaveCR: boolean;
+  HaveCR, Unlocked98: boolean;
   P: TProtInfo;
 begin
   Result := False;
+  Unlocked98 := False;
   EnsureChipHints;
   SR1 := 0;
   SR2 := 0;
@@ -8726,6 +9289,7 @@ begin
       Exit;
     end;
     if not WaitNotBusy25(BUSY_TIMEOUT_SECTOR) then Exit;
+    Unlocked98 := True;
   end;
 
   if UsbAsp25_ReadSR(SR1, $05) <> 1 then
@@ -8737,6 +9301,11 @@ begin
   HaveCR := ReadVendorCR(Chip25ManufID, SR2, CR);
   if SR2 = $FF then SR2 := 0;
   P := DecodeProtVendor(Chip25ManufID, SR1, SR2, CR, HaveCR);
+  //ธง WPS เป็นตัวเลือกโหมด ไม่ใช่ตัวล็อก และ 98h ไม่ได้ล้างมัน สิ่งที่ 98h
+  //ปลดคือบิตล็อกรายบล็อก ซึ่งด่านสแกน 3Dh ก่อนเขียนจะตรวจซ้ำอีกชั้นอยู่แล้ว
+  //ถ้ายังนับ WPS เป็น "ยังล็อกอยู่" ตรงนี้ การปลดล็อกที่สำเร็จจริงจะถูก
+  //รายงานว่าล้มเหลวทุกครั้ง
+  if Unlocked98 then P.WPS := False;
   if StillProtected(P) then
   begin
     OpFail('the chip accepted the unlock command and stayed protected');
@@ -8981,6 +9550,8 @@ var
   Page45: word;
   Total45: cardinal;
   Err45, Mode45: string;
+  FamilyName, MatchVendor: string;
+  VendorMatchCount, VendorMatchIndex, p: integer;
 begin
   OpBegin(opkDetect);
   //เริ่มตรวจใหม่ = ลืมของเก่าไว้ก่อน ถ้าตรวจไม่สำเร็จก็ต้องไม่เหลือสถานะ
@@ -9076,6 +9647,11 @@ begin
 
     Matches := TStringList.Create;
     try
+      //The same model can exist in the native, imported EZP and IMSProg
+      //catalogues.  Count physical model names, not source-file duplicates.
+      Matches.CaseSensitive := False;
+      Matches.Sorted := True;
+      Matches.Duplicates := dupIgnore;
       //ไล่จาก 9F ก่อน แล้วค่อยลองโอปโค้ดเก่ากว่าถ้ายังไม่เจอ
       //ค้นทั้งไฟล์หลักและไฟล์เสริมพร้อมกัน
       FindChipInto(ChipListFile, '', IDstr9FH, Matches);
@@ -9125,9 +9701,87 @@ begin
       else if Matches.Count > 1 then
       begin
         LogPrint(Format(STR_DETECT_MANY, [Matches.Count]));
-        ChipSearchForm.EditSearch.Text := '';
-        ChipSearchForm.ListBoxChips.Items.Assign(Matches);
-        ChipSearchForm.Show;
+        //One JEDEC code commonly covers several die revisions/suffixes.  On
+        //automatic EZP startup, opening a modal-looking chooser defeats
+        //automatic detection even though the common programming geometry is
+        //known.  Prefer an entry in the JEDEC manufacturer group, apply its
+        //compatible geometry, and label it honestly as a family—not an exact
+        //suffix.  A manual Read ID still shows every candidate.
+        if (AsProgrammer.Current_HW = CHW_EZP) and
+           (AutomaticChipDetection or CLIMode) then
+        begin
+          VendorMatchCount := 0;
+          VendorMatchIndex := -1;
+          MatchVendor := ' (' + UpperCase(Vendor) + ')';
+          for p := 0 to Matches.Count - 1 do
+            if EndsText(MatchVendor, UpperCase(Matches[p])) then
+            begin
+              Inc(VendorMatchCount);
+              if VendorMatchIndex < 0 then VendorMatchIndex := p;
+            end;
+          if VendorMatchIndex < 0 then
+          begin
+            VendorMatchIndex := 0;
+            VendorMatchCount := Matches.Count;
+          end;
+
+          ChipName := Matches[VendorMatchIndex];
+          p := Pos(' (', ChipName);
+          if p > 0 then ChipName := Copy(ChipName, 1, p - 1);
+          if SelectChipAny(ChipName) then
+          begin
+            if Vendor = '' then Vendor := 'JEDEC';
+            FamilyName := Format('%s %s compatible family (%d profiles)',
+              [Vendor, IDstr9FH, VendorMatchCount]);
+            CurrentICParam.Name := FamilyName;
+            LabelChipName.Caption := FamilyName;
+            //แรงดันเอาจากโปรไฟล์ที่เพิ่งโหลด: รหัส JEDEC แยกตระกูลแรงดัน
+            //อยู่แล้ว (เช่น EF40xx = 3.3 V, EF60xx = 1.8 V) ห้ามเขียนทับ
+            //ด้วยค่าตายตัว ไม่งั้นชิป 1.8 V หลุดด่าน VoltageWarningOK แล้ว
+            //โดนราง 3.3 V ของ EZP พังคาซ็อกเก็ต ถ้าโปรไฟล์ตัวแทนไม่ระบุ
+            //ให้ดูชื่อสมาชิกตระกูลทั้งหมด: มีใครบอก 1.8 ก็ถือว่า 1.8 ไว้
+            //ก่อน (เตือนเกินดีกว่าเตือนขาด)
+            if CurrentICParam.Vcc = '' then
+              for p := 0 to Matches.Count - 1 do
+                if Pos('1.8', Matches[p]) > 0 then
+                begin
+                  CurrentICParam.Vcc := '1.8';
+                  Break;
+                end;
+            CurrentICParam.Note := Format(
+              'JEDEC %s does not distinguish the exact package/die suffix. ' +
+              'Compatible programming geometry was loaded from %s.',
+              [IDstr9FH, ChipName]);
+            ChipIdentityConfirmed := True;
+            UpdateChipInfo;
+            LogPrint('Automatic family profile: ' + FamilyName + '; exact ' +
+                     'suffix remains intentionally unspecified');
+          end
+          else
+          begin
+            //โปรไฟล์ตัวแทนโหลดไม่ขึ้น อย่าแปะป้าย family ทับค่าของชิปตัว
+            //เก่าที่ยังค้างอยู่ เปิดหน้าต่างเลือกเองตามปกติแทน
+            LogPrint('the family representative "' + ChipName + '" could ' +
+                     'not be loaded from the chip lists; pick the part ' +
+                     'manually');
+            if not CLIMode then
+            begin
+              ChipSearchForm.EditSearch.Text := '';
+              ChipSearchForm.ListBoxChips.Items.Assign(Matches);
+              ChipSearchForm.Show;
+            end;
+          end;
+        end
+        else if CLIMode then
+          //โหมดบรรทัดคำสั่งไม่มีใครอยู่คลิกหน้าต่างเลือก บอกทางแก้ใน log แทน
+          LogPrint('several chips share this id; pass --chip <name> to pick ' +
+                   'the exact part')
+        else
+        begin
+          ChipSearchForm.EditSearch.Text := '';
+          ChipSearchForm.ListBoxChips.Items.Assign(Matches);
+          ChipSearchForm.Show;
+        end;
       end
       else
       begin
@@ -9173,6 +9827,9 @@ begin
       Chip25SFDPRead := True;
 
   finally
+    //ทางออกกลางคัน (KB9012, ไม่มีชิปตอบ) เคยทิ้งอุปกรณ์เปิดค้างไว้จนงาน
+    //ถัดไปมาเปิดทับ DevClose ซ้ำบนอุปกรณ์ที่ปิดแล้วไม่มีผลข้างเคียง
+    AsProgrammer.Programmer.DevClose;
     UnlockControl();
   end;
 
@@ -9446,6 +10103,8 @@ var
   Size: integer;
 begin
   if OperationRunning then Exit;
+  //ไม่มี OpBegin = แผง telemetry จะยืม LastOp ของงานก่อนมาคิดสถิติผิด ๆ
+  OpBegin(opkNone);
 
   S1 := TMemoryStream.Create;
   S2 := TMemoryStream.Create;
@@ -10595,10 +11254,25 @@ end;
 procedure TMainForm.StartAddressEditChange(Sender: TObject);
 var
   Parsed: QWord;
+  Cleaned: string;
+  c: char;
 begin
-  if StartAddressEdit.Text = '' then StartAddressEdit.Text := '0';
   //Hex2Dec ยกข้อยกเว้นเมื่อเจอข้อความที่ไม่ใช่เลขฐานสิบหก ซึ่งเข้ามาได้ทาง
-  //การวาง (ตัวกรองปุ่มกดกันได้แค่การพิมพ์)
+  //การวาง (ตัวกรองปุ่มกดกันได้แค่การพิมพ์) แล้วข้อยกเว้นที่หลุดหลัง OpBegin
+  //จะจบงานโดยไม่มี OpFail = สรุป "OK" + แถว PASS ใน production log ทั้งที่
+  //ไม่ได้เขียนอะไรเลย จึงล้างทิ้งที่ต้นทางที่เดียว: เก็บเฉพาะเลขฐานสิบหก
+  //และจำกัดแปดหลัก ซึ่งครอบแอดเดรส 32 บิตทั้งหมดแล้ว
+  Cleaned := '';
+  for c in UpperCase(Trim(StartAddressEdit.Text)) do
+    if (c in ['0'..'9', 'A'..'F']) and (Length(Cleaned) < 8) then
+      Cleaned := Cleaned + c;
+  if Cleaned = '' then Cleaned := '0';
+  if Cleaned <> StartAddressEdit.Text then
+  begin
+    //การแก้ Text เรียก OnChange ซ้ำหนึ่งรอบ ซึ่งรอบนั้นไม่มีอะไรให้แก้แล้ว
+    StartAddressEdit.Text := Cleaned;
+    Exit;
+  end;
   if not TryStrToQWord('$' + Trim(StartAddressEdit.Text), Parsed) then
     Parsed := 0;
   if Parsed > 0 then
@@ -10710,6 +11384,7 @@ begin
 
   LoadModernIcons;
   CreateWorkflowBar;
+  CreateTelemetryPanel;
   LayoutLeftPanel;
   ApplyTheme(MenuDarkTheme.Checked);
   UpdateChipInfo;
@@ -10784,7 +11459,14 @@ begin
   //จึงต้องตรวจชิปให้หนึ่งครั้งตรงนี้เอง
   AppReady := True;
   if ProgrammerPresent and MenuAutoDetectChip.Checked and RadioSPI.Checked then
-    ButtonReadIDClick(nil);
+  begin
+    AutomaticChipDetection := True;
+    try
+      ButtonReadIDClick(nil);
+    finally
+      AutomaticChipDetection := False;
+    end;
+  end;
 end;
 
 //ลากไฟล์มาวางบนหน้าต่างแล้วโหลดเข้าเอดิเตอร์ได้เลย
@@ -11093,15 +11775,18 @@ end;
 
 procedure TMainForm.FormCloseQuery(Sender: TObject; var CanClose: boolean);
 begin
-  ButtonCancel.Tag := 1;
-  RequestOperationCancellation;
-  if ActiveNORCancellation <> nil then
-    ActiveNORCancellation.RequestCancellation;
-
-  //ในโหมดเบื้องหลังหน้าต่างยังใช้งานได้ จึงปิดได้ทั้งที่ยังคุยกับชิปอยู่
-  //ต้องรอให้งานที่ทำอยู่จบก่อน
+  //ขอยกเลิกเฉพาะเมื่อมีงานเดินอยู่จริง: CancelEvent เป็นแบบ manual-reset
+  //และถูกล้างแค่ตอน LockControl การตั้งมันตอนไม่มีงาน (เช่นปิดหน้าต่าง
+  //แล้วเปลี่ยนใจ) จะทำให้งานถัดไปเจอ "ผู้ใช้ยกเลิก" ค้างอยู่ตั้งแต่วินาทีแรก
   if OperationRunning then
   begin
+    ButtonCancel.Tag := 1;
+    RequestOperationCancellation;
+    if ActiveNORCancellation <> nil then
+      ActiveNORCancellation.RequestCancellation;
+
+    //ในโหมดเบื้องหลังหน้าต่างยังใช้งานได้ จึงปิดได้ทั้งที่ยังคุยกับชิปอยู่
+    //ต้องรอให้งานที่ทำอยู่จบก่อน
     CanClose := False;
     Exit;
   end;
@@ -11113,8 +11798,8 @@ procedure TMainForm.ButtonEraseClick(Sender: TObject);
 var
   I2C_DevAddr: byte;
 begin
-  //EZP2023+ ลบด้วยการเขียน FF ทั้งชิป ซึ่งเป็นสิ่งเดียวที่เฟิร์มแวร์ทำได้
-  //และผลลัพธ์เหมือนกันทุกไบต์ อ่านกลับตรวจให้ด้วย
+  //EZP2023+ มีคำสั่ง native erase ของเฟิร์มแวร์เอง แล้วอ่านกลับตรวจ FF
+  //ทุกไบต์ การเขียนภาพ FF ใช้แทนไม่ได้เพราะเฟิร์มแวร์ข้ามเพจ FF
   if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) and
      (AsProgrammer.Current_HW = CHW_EZP) then
   begin

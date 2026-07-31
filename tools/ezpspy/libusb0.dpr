@@ -379,12 +379,15 @@ begin
   if Assigned(r_free_async) then Result := r_free_async(ctx);
 end;
 
+//สี่ตัวนี้ยิง control transfer จริงบนบัส เคยส่งต่อเงียบ ๆ ซึ่งทำให้ log
+//สองฝั่ง "เหมือนกันทุกไบต์" ทั้งที่ของจริงอาจต่างกันตรงนี้พอดี
 function usb_get_descriptor(dev: pointer; t, i: longint; buf: pointer;
   size: longint): longint; cdecl;
 begin
   Result := 0;
   if Assigned(r_get_descriptor) then
     Result := r_get_descriptor(dev, t, i, buf, size);
+  Say(Format('GETDESC type=%d idx=%d size=%d -> %d', [t, i, size, Result]));
 end;
 
 function usb_get_descriptor_by_endpoint(dev: pointer; ep, t, i: longint;
@@ -393,6 +396,8 @@ begin
   Result := 0;
   if Assigned(r_get_descriptor_by_endpoint) then
     Result := r_get_descriptor_by_endpoint(dev, ep, t, i, buf, size);
+  Say(Format('GETDESC-EP ep=0x%.2x type=%d idx=%d size=%d -> %d',
+             [ep, t, i, size, Result]));
 end;
 
 function usb_get_string(dev: pointer; idx, lang: longint; buf: pointer;
@@ -400,6 +405,7 @@ function usb_get_string(dev: pointer; idx, lang: longint; buf: pointer;
 begin
   Result := 0;
   if Assigned(r_get_string) then Result := r_get_string(dev, idx, lang, buf, len);
+  Say(Format('GETSTR idx=%d lang=%d len=%d -> %d', [idx, lang, len, Result]));
 end;
 
 function usb_get_string_simple(dev: pointer; idx: longint; buf: pointer;
@@ -408,6 +414,7 @@ begin
   Result := 0;
   if Assigned(r_get_string_simple) then
     Result := r_get_string_simple(dev, idx, buf, len);
+  Say(Format('GETSTR-S idx=%d len=%d -> %d', [idx, len, Result]));
 end;
 
 function usb_get_version: pointer; cdecl;

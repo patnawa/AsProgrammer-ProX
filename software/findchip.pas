@@ -64,6 +64,20 @@ begin
   else
     Result := Pos(UpCase(Query), UpCase(ChipName)) > 0;
 end;
+
+//แอตทริบิวต์ตัวเลขที่พิมพ์ผิดในตารางชิป (รวมตารางผู้ใช้ซึ่งแก้ด้วยมือได้)
+//ต้องไม่พาโปรแกรมล้มทั้งตัว: StrToInt ที่ไม่มีการ์ดยกข้อยกเว้น แล้วโหมด
+//บรรทัดคำสั่งจะตายด้วย runtime error 217 แทน exit code อ่านไม่ออกก็ถือว่า
+//ไม่ได้ระบุ
+function AttrInt(Node: TDOMNode; const AttrName: string; Def: integer): integer;
+var
+  S: string;
+begin
+  Result := Def;
+  if Node.Attributes.GetNamedItem(AttrName) = nil then Exit;
+  S := UTF16ToUTF8(Node.Attributes.GetNamedItem(AttrName).NodeValue);
+  if not TryStrToInt(S, Result) then Result := Def;
+end;
 procedure FindChipInto(XMLfile: TXMLDocument; chipname, chipid: string; Dest: TStrings);
 var
   Node, ChipNode: TDOMNode;
@@ -83,6 +97,9 @@ begin
         for i := 0 to (Item[j].ChildNodes.Count - 1) do
         begin
           ChipNode := Item[j].ChildNodes.Item[i];
+          //คอมเมนต์ในไฟล์ XML ก็เป็นโหนดลูกเหมือนกัน ต้องไม่ถูกนับเป็นชิป
+          //(เคยเห็นแถว "#comment (ZEMPRO)" โผล่ในหน้าต่างค้นหา)
+          if ChipNode.NodeType <> ELEMENT_NODE then Continue;
 
           if chipid <> '' then
           begin
@@ -91,15 +108,15 @@ begin
               begin
                 cs := UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('id').NodeValue);
                 if UpCase(cs) = UpCase(chipid) then
-                  Dest.Append(UTF16ToUTF8(ChipNode.NodeName) + ' (' +
-                              UTF16ToUTF8(Item[j].NodeName) + ')');
+                  Dest.Add(UTF16ToUTF8(ChipNode.NodeName) + ' (' +
+                           UTF16ToUTF8(Item[j].NodeName) + ')');
               end;
           end
           else
           begin
             cs := UTF16ToUTF8(ChipNode.NodeName);
             if ChipNameMatches(cs, chipname) then
-              Dest.Append(cs + ' (' + UTF16ToUTF8(Item[j].NodeName) + ')');
+              Dest.Add(cs + ' (' + UTF16ToUTF8(Item[j].NodeName) + ')');
           end;
         end;
     finally
@@ -135,6 +152,7 @@ begin
          begin
 
            ChipNode := Item[j].ChildNodes.Item[i];
+           if ChipNode.NodeType <> ELEMENT_NODE then Continue;
            if chipid <> '' then
            begin
              if (ChipNode.HasAttributes) then
@@ -193,13 +211,18 @@ begin
 
          for i := 0 to (Item[j].ChildNodes.Count - 1) do
          begin
+           if Item[j].ChildNodes.Item[i].NodeType <> ELEMENT_NODE then
+             Continue;
            cs := UTF16ToUTF8(Item[j].ChildNodes.Item[i].NodeName); //ชิป
            if Upcase(chipname) = Upcase(cs) then
            begin
              ChipNode := Item[j].ChildNodes.Item[i];
-             Main.CurrentICParam.Name:= UTF16ToUTF8(ChipNode.NodeName);
              if (ChipNode.HasAttributes) then
              begin
+               //ชื่อถูกตั้งเฉพาะเมื่อโหนดใช้ได้จริง: โหนดที่ไม่มีแอตทริบิวต์
+               //ทำให้ฟังก์ชันตอบ "ไม่พบ" และห้ามทิ้งชื่อใหม่ค้างไว้บน
+               //พารามิเตอร์ของชิปตัวเก่า
+               Main.CurrentICParam.Name := UTF16ToUTF8(ChipNode.NodeName);
 
                //หมายเหตุของชิป เช่นข้อควรระวังเรื่องแรงดัน
                if ChipNode.Attributes.GetNamedItem('note') <> nil then
@@ -248,13 +271,9 @@ begin
                         MainForm.RadioSPIChange(MainForm);
                      end;
 
-               if ChipNode.Attributes.GetNamedItem('addrbitlen') <> nil then
-               begin
-                 MainForm.RadioMw.Checked:= true;
-                 Main.CurrentICParam.MWAddLen := StrToInt(UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('addrbitlen').NodeValue));
-               end
-               else
-                 Main.CurrentICParam.MWAddLen := 0;
+               Main.CurrentICParam.MWAddLen := AttrInt(ChipNode, 'addrbitlen', 0);
+               if Main.CurrentICParam.MWAddLen > 0 then
+                 MainForm.RadioMw.Checked := true;
 
                if ChipNode.Attributes.GetNamedItem('addrtype') <> nil then
                  if IsNumber(UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('addrtype').NodeValue)) then
@@ -270,15 +289,12 @@ begin
                  else if UpCase(UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('page').NodeValue)) = 'SSTW' then
                    Main.CurrentICParam.Page := -2
                  else
-                   Main.CurrentICParam.Page := StrToInt(UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('page').NodeValue));
+                   Main.CurrentICParam.Page := AttrInt(ChipNode, 'page', 0);
                end
                else
                  Main.CurrentICParam.Page := 0;
 
-               if ChipNode.Attributes.GetNamedItem('size') <> nil then
-                 Main.CurrentICParam.Size:= StrToInt(UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('size').NodeValue))
-               else
-                 Main.CurrentICParam.Size := 0;
+               Main.CurrentICParam.Size := AttrInt(ChipNode, 'size', 0);
 
                //ขนาดเซกเตอร์สำหรับลบ ถ้าไม่ระบุจะใช้ 4096
                if ChipNode.Attributes.GetNamedItem('sector') <> nil then

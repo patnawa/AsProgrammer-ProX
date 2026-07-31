@@ -515,7 +515,7 @@
       <W25Q40BW id="EF6013" page="256" size="524288" vcc="1.8" />
       <W25Q40EW id="EF6013" page="256" size="524288" vcc="1.8" />
       <W25Q512NW id="EF8020" page="256" size="67108864" vcc="1.8" />
-      <W25Q64 id="EF4017" page="256" size="8388608" />
+      <W25Q64 id="EF4017" page="256" size="8388608" vcc="3.3" />
       <W25Q64DW id="EF6017" page="256" size="8388608" vcc="1.8" />
       <W25Q64FW id="EF6017" page="256" size="8388608" vcc="1.8" />
       <W25Q80 id="EF4014" page="256" size="1048576" />

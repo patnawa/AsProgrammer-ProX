@@ -76,7 +76,7 @@ programmers, while staying free and open source.
 | **AVRISP (LUFA)** | ● | | | |
 | **Arduino** | ● | | | |
 | **serprog** | ● | | | Any board speaking flashrom's serial protocol: Raspberry Pi Pico (pico-serprog), STM32, ESP32, frser-duino. Set the COM port under *Settings*. |
-| **EZP2023+** | ◐ | | | Identify, read, whole-chip write and erase. Every write is read back in a fresh USB session and compared byte for byte. SFDP, protection decoding, Smart write and the chip health tests cannot work through it — those need raw SPI commands, which the firmware has no way to send. Uses libusb-win32 1.4.0.2; the device-mode driver must be installed once. |
+| **EZP2023+** | ◐ | | | Identify, read, whole-chip write and erase. Write is the vendor-documented sequence: native erase, two session-separated blank read-backs, program, then two session-separated byte comparisons. SFDP, protection decoding, Smart write and the chip health tests cannot work through it — those need raw SPI commands, which the firmware has no way to send. Uses libusb-win32 1.4.0.2; the device-mode driver must be installed once. |
 
 Chip families: 25-series SPI NOR, 45-series DataFlash, 95-series SPI EEPROM, 24-series I²C EEPROM,
 93-series MicroWire EEPROM, KB9012 EC, and SPI NAND (W25N / GD5F / MX35 / TC58 — read and
@@ -504,6 +504,158 @@ tied together, enable pull-ups, set SPI output to open-drain and the clock to 30
 ---
 
 ## Changelog
+
+### 4.23.2.0 — a full-codebase bug hunt
+
+A systematic audit of the flash engines, the operation lifecycle, the EZP
+backend, the CLI and the support units, with every finding verified against
+the code before it was fixed.
+
+Safety and correctness:
+
+- The EZP2023+ whole-chip write/erase path now passes the same supply-voltage
+  gate as every other destructive path, and the automatic family profile no
+  longer overwrites the catalogue voltage with a hardcoded 2.7–3.6 V — a
+  1.8 V family (EF60xx) detected at startup kept its warning suppressed while
+  the EZP drives a 3.3 V rail.
+- WPS (individual block locks) was decoded from a reserved bit of SR2, where
+  it always reads 0; it lives in SR3 bit 2 (opcode 15h). The block-lock scan
+  and the 98h global unlock existed but could never trigger. SR3 is now read
+  for the Winbond family and the whole path works; the scan also switches to
+  4-byte addressing on >16 MB chips instead of sending misframed commands.
+- `BP=7` with `SEC=1` reported 256 KB locked instead of the whole chip, so
+  the write guard let doomed writes through on fully-protected parts.
+- The SFDP 4-byte-entry mapping preferred "dedicated instruction set" over an
+  actually-declared switch method, so range erase on a W25Q256JV-class chip
+  failed before touching the flash; and the B1h nonvolatile-config entry
+  wrote fixed bytes over the whole register — on Micron parts that
+  permanently enables quad protocol (the chip stops answering plain SPI
+  after the next power cycle). B1h entry is removed entirely; chips that
+  really are 4-byte-only now fail closed with an explanation.
+- The transactional writer's cleanup sent a bare E9h after WRDI; N25Q256A-
+  class chips (the WREN+B7 strategy) ignore it and stay in 4-byte mode for
+  the next tool. Cleanup now re-arms WEL before E9h.
+- A HEX/S-record file containing no data records (empty, truncated, or a
+  binary misnamed .hex) loaded "successfully" as an all-FF image — which the
+  write path would then erase a chip to match. Both parsers now refuse.
+- A pasted non-hex start address raised an exception that escaped the
+  operation frame: the run ended with no failure recorded, a "write: OK"
+  summary, and a PASS row in the production log for a chip that was never
+  written. The address field now sanitizes itself on every change.
+- Erase status polling on the EZP2023+ accounts for every re-sent 000A poll
+  and drains the extra replies; an aborted erase terminates the firmware
+  session (0108) instead of leaving stale status packets to phase-shift the
+  next session. The stream-block guard also refuses geometry that would
+  overrun the image buffer.
+
+Lifecycle and UI:
+
+- Chip Doctor, True capacity test and Surface scan now lock the window like
+  every other operation; seven always-enabled menu entries gained re-entrancy
+  guards, so a click during a long job can no longer start a second
+  interleaved operation on the same device (which ended with DevClose under
+  a running write). Benchmark survives an exception without permanently
+  wedging every button and the close box.
+- Closing the window no longer latches a cancellation that aborts the *next*
+  operation when the close was vetoed; Read ID closes the device on its
+  early exits; replace-all in the hex search no longer skips adjacent
+  matches, and invalid hex patterns are rejected instead of searching
+  uninitialized memory.
+- Chip-list numeric attributes are parsed defensively (a typo in
+  chiplist-user.xml crashed chip selection; in CLI mode with runtime error
+  217 instead of an exit code), XML comment nodes no longer appear as
+  selectable "#comment" chips, and a failed selection no longer half-renames
+  the previously selected chip.
+- CLI: `--detect --save-chip` actually saves now (it exited before the save
+  block), a successful save exits 0 instead of printing usage and exiting 2,
+  a failed save exits 1, `--write a.bin --verify b.bin` is rejected instead
+  of silently verifying against the wrong file, and multi-match detection no
+  longer pops a chooser window in headless mode.
+- CRC32 no longer reads up to 3 bytes past the end of the buffer, USB string
+  descriptors from misbehaving devices can no longer write through an
+  uninitialized index, and vendor-name device matching compares against the
+  requested name instead of an RTL function that always returns ''.
+- tools\build.ps1 now compiles ezpsmoke, ezpwrite and ezppowercheck so a
+  refactor in software\ cannot break the bench diagnostics unnoticed, and
+  ezpsmoke no longer reads a reply after RESET (one-way command) into the
+  buffer it then makes decisions from.
+
+### 4.23.1.0 — 50 ms that make erase and write real
+
+Root cause of every "erase reports complete but the chip is untouched" and
+"the programmer accepted the whole image and discarded it" failure: after
+answering the `0007` chip descriptor, the CH552 firmware spends several
+milliseconds configuring its erase/program algorithm, and any modification
+command (`0102` erase, `0005` write) that arrives inside that window is
+accepted at the USB layer and silently dropped — the erase status poll then
+answers "complete" after one poll, and no error is ever raised.
+Identification and reads are immune, which made the failure masquerade as
+chip protection.
+
+Proven by byte-level differential capture against the vendor software using
+the ezpspy shim: with packet streams identical to the byte, our
+back-to-back command timing failed while the vendor's GUI — which pauses
+for milliseconds between calls simply by being a GUI — succeeded. Pausing
+30 ms at exactly one point, between the descriptor reply and the erase
+command, made the same probe erase run its real 34 busy polls. This also
+explains why `tools\ezpwrite` always validated: its console prints between
+steps were accidental arming delays. The backend now waits a deliberate
+50 ms after every descriptor reply and after the write-start command,
+documented as `EZP_ARM_DELAY_MS`.
+
+The write/verify path also now mirrors the vendor's session discipline
+exactly: sessions end with the `0108` firmware reset, close, reopen,
+identify, close, reopen — and never a USB port reset (a 7.5-hour vendor
+capture with 25 device opens contains not a single `usb_reset`).
+Independent verification read-backs use those session boundaries instead of
+USB resets — measured to return fresh, correct data seven consecutive
+sessions in one process — which also removes four ~2.5 s re-enumeration
+waits from every verified write. `usb_reset` remains only as last-resort
+recovery for a device that has stopped answering, and write-session
+commands fail closed rather than auto-recovering mid-operation. The ezpspy
+shim now also logs `usb_get_descriptor`/`usb_get_string` calls it
+previously forwarded invisibly, so future captures cannot hide EP0
+traffic.
+
+### 4.23.0.0 — native EZP erase and professional live telemetry
+
+EZP2023+ Erase now uses the firmware's real `0102` start command and `000A`
+busy/completion polling protocol. Writing an all-`FF` image was not an erase:
+the firmware skips blank pages, so old zero bits survived and verification
+failed at address zero. Native erase is followed by two independent full-chip
+read-backs, each separated by a real USB reset; the operation succeeds only
+when both reads agree and every byte is `FF`.
+
+Write now follows the vendor manual's actual three-step workflow: Erase, Write,
+Verify. A controlled EF4017 probe proved that the `0005` data stream programs
+`FF` to `FE` but cannot restore `FE` to `FF`; it does not erase automatically.
+AsProgrammer therefore refuses to send any image page until native erase has
+passed both complete blank read-backs. After programming, the same two-pass
+connection-stability gate compares every byte with the image.
+
+Verification now performs a real USB device reset, waits for re-enumeration,
+then re-primes the firmware with a complete `0009` identification transaction
+before every read-back. A close/reopen pair was not enough to flush stale
+libusb-win32 endpoint data, while a second reset/read without re-priming
+returned `FF FF FF FF`. If the firmware accepts every page or reports erase
+complete but the reset read-back still contains old data, the result identifies
+likely status-register/WP# protection, supply-voltage trouble, or in-circuit
+bus contention, with isolation guidance, instead of reporting a generic
+mismatch or false success.
+
+The main window now keeps four engineering cards visible for connection and
+transport, interface and requested clock, chip profile, and the last measured
+operation. EZP reports `USB 1FC8:310B`, libusb-win32 `1.4.0.2`, and `12 MHz
+requested (firmware setting)` without pretending it measured the physical SCK
+waveform. Completed operations retain byte count, elapsed time, and effective
+throughput, including verification time.
+
+Startup detection now reads the live JEDEC ID and automatically loads a safe
+compatible family profile when several exact suffixes share one ID. The UI
+states that the suffix remains ambiguous instead of claiming false precision.
+For the connected `EF4017` family it exposes the confirmed 8 MiB capacity,
+256-byte page, 4 KiB/`20h` sector geometry, three-byte addressing, and the
+manufacturer-specified 2.7–3.6 V range.
 
 ### 4.22.0.2 — release driver bundle stays byte-exact
 
