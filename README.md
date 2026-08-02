@@ -4,12 +4,13 @@
 
 **Safe, open-source flash and EEPROM programming for affordable USB hardware**
 
-SPI NOR · SPI NAND reads · I²C · MicroWire · DataFlash · Windows GUI · headless Linux CLI
+SPI NOR · SPI NAND reads · gated NAND mutation · I²C · MicroWire · DataFlash · Windows GUI · headless Windows/Linux CLI
 
-![latest release](https://img.shields.io/github/v/release/patnawa/AsProgrammer-ProX?display_name=tag&sort=semver&style=flat-square&color=2BB3F3)
+[![latest release](https://img.shields.io/github/v/release/patnawa/AsProgrammer-ProX?display_name=tag&sort=semver&style=flat-square&color=2BB3F3)](https://github.com/patnawa/AsProgrammer-ProX/releases/latest)
+[![build](https://github.com/patnawa/AsProgrammer-ProX/actions/workflows/build.yml/badge.svg)](https://github.com/patnawa/AsProgrammer-ProX/actions/workflows/build.yml)
 ![platform](https://img.shields.io/badge/GUI-Windows%20x86-94A3B8?style=flat-square)
-![cli](https://img.shields.io/badge/headless-Linux%20CH347-3DD68C?style=flat-square)
-![built with](https://img.shields.io/badge/Lazarus%20%2F%20FPC-3.2.2-F5A524?style=flat-square)
+![cli](https://img.shields.io/badge/headless-Windows%20%2F%20Linux%20CH347-3DD68C?style=flat-square)
+![toolchain](https://img.shields.io/badge/toolchain-Lazarus%204.8%20%2F%20FPC%203.2.2-F5A524?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
 
 </div>
@@ -23,14 +24,27 @@ and verifies every affected block.
 > 3.3 V. Confirm the part, orientation, adapter, voltage, and common ground
 > before connecting power. Start with a read-only ID check.
 
+## Current release: 4.24.0.0
+
+[Download the Windows ZIP](https://github.com/patnawa/AsProgrammer-ProX/releases/download/v4.24.0.0/AsProgrammer-ProX-4.24.0.0.zip) ·
+[SHA-256 checksums](https://github.com/patnawa/AsProgrammer-ProX/releases/download/v4.24.0.0/SHA256SUMS.txt) ·
+[release notes](https://github.com/patnawa/AsProgrammer-ProX/releases/tag/v4.24.0.0)
+
+Released 2 August 2026. The bundle contains the Windows GUI and the LCL-free
+`AsProgrammerCLI.exe`. Version 4.24 adds Smart Write preview, the shared
+operation runner, gated SPI NAND erase/write, hardened release and HIL
+automation, and 17 aligned hardware-free test suites. The published ZIP is
+checksummed and carries GitHub build-provenance attestation.
+
 ## Choose a task
 
 | I want to… | Start here |
 |---|---|
+| Download the current release | [4.24.0.0 release and assets](https://github.com/patnawa/AsProgrammer-ProX/releases/tag/v4.24.0.0) |
 | Read or recover a chip | [Five-minute safe start](#five-minute-safe-start) |
 | Preview or write an image | [Safe write workflow](#safe-write-workflow) |
 | Automate a bench | [Command line](#command-line) |
-| Use Linux without a GUI | [Headless Linux CLI](#headless-linux-cli) |
+| Use Windows or Linux without a GUI | [Headless CLI](#headless-cli-windows-and-linux) |
 | Add a chip or translation | [Contributing](CONTRIBUTING.md) |
 | Build or run tests | [Testing guide](docs/testing.md) |
 | Validate real programmers | [Hardware-in-loop guide](docs/hardware-in-loop.md) |
@@ -47,7 +61,7 @@ fail-closed transaction rather than a sequence of unrelated buttons.
 | **Smart Write preview and execution** | Shows erase blocks/opcodes, program pages, preserved bytes, verification coverage, backup policy, and worst-case time before confirmation. The GUI previews and executes the shared planner/engine output directly; the LCL-free CLI and tests exercise those layers through a presentation-neutral runner. |
 | **Preservation-aware SPI NOR updates** | A `0→1` change erases only its containing block and restores untouched neighbours from the trusted snapshot. Pure `1→0` changes skip erase. |
 | **Differential EEPROM updates** | 24Cxx, 93xx, and 95xx write only differing pages, then verify every touched page. |
-| **Trusted snapshots and backups** | Two full reads must match before existing content is trusted. Destructive workflows back up nonblank supported chips and stop if the backup cannot be committed. |
+| **Trusted snapshots and backups** | Two full reads must match before existing content is trusted. Smart Write and gated NAND mutation require durable backups; explicitly destructive diagnostics such as Surface scan remain opt-in and are not recoverable. |
 | **Identity and electrical gates** | Repeated JEDEC identity, typed programmer capabilities, voltage policy, WEL/BUSY checks, protection decoding, exact transfer counts, and cleanup all fail closed. |
 | **SFDP and four-byte support** | Uses JESD216 geometry, timings, erase maps, and address strategies instead of guessing from capacity. |
 | **Dump and chip diagnostics** | Detects blank/silent buses, repeating wrapped dumps, unstable contacts, remarked capacity, slow-wearing blocks, and uncorrectable NAND ECC. |
@@ -80,9 +94,11 @@ is no GUI NAND workflow yet. See
 
 ## Five-minute safe start
 
-1. Download the latest ZIP from
-   [GitHub Releases](https://github.com/patnawa/AsProgrammer-ProX/releases),
-   extract the complete folder, and run `AsProgrammer.exe`.
+1. Download the
+   [4.24.0.0 Windows ZIP](https://github.com/patnawa/AsProgrammer-ProX/releases/download/v4.24.0.0/AsProgrammer-ProX-4.24.0.0.zip)
+   and its [checksum file](https://github.com/patnawa/AsProgrammer-ProX/releases/download/v4.24.0.0/SHA256SUMS.txt),
+   verify the SHA-256 value, extract the complete folder, and run
+   `AsProgrammer.exe`.
 2. Select the programmer under **Hardware**. For EZP2023+, install the signed
    device-mode package described in `drivers/EZP2023Plus/README.md`.
 3. Confirm the chip voltage and pin 1. Connect the chip with target power off.
@@ -163,12 +179,13 @@ evidence-directory switches. Those are security controls, not convenience
 flags; read [the production security model](docs/production-job-security.md)
 before deploying them.
 
-## Headless Linux CLI
+## Headless CLI: Windows and Linux
 
 `software/AsProgrammerCLI.lpr` is LCL-free and uses the CH347 libusb backend.
-It supports stable read-only detection/read, offline scan/SFDP decoding, Smart
-Write preview, and a separately gated sacrificial-chip write path while live
-validation is still being completed.
+The Windows release ships `AsProgrammerCLI.exe`; Linux users build the same
+entrypoint from source. It supports stable read-only detection/read, offline
+scan/SFDP decoding, Smart Write preview, and a separately gated
+sacrificial-chip write path while live validation is still being completed.
 
 ```bash
 fpc -Mobjfpc -Sh -Fusoftware software/AsProgrammerCLI.lpr
@@ -200,18 +217,21 @@ application from starting.
 | `libusb-1.0.dll` | Headless CH347 CLI on Windows |
 | `buzzpirathlp.dll`, `libiconv2.dll`, `libintl3.dll` | Buzzpirat / Bus Pirate |
 
-Release packaging downloads these from one pinned upstream archive, verifies
-the archive and every exact DLL with SHA-256, and fails if anything is missing.
-It never reuses an unverified temporary cache. The release also includes chip
-lists, translations, scripts, icons, the signed EZP driver bundle, its
-checksums, this README, the changelog, licenses, and
+Release packaging admits runtime files only from the checked-in `libusb0.dll`,
+one pinned upstream archive for the six legacy/vendor DLLs, and the official
+libusb archive for `libusb-1.0.dll`. It verifies every archive and exact DLL
+with SHA-256, fails if anything is missing, and never reuses an unverified
+temporary cache. The release also includes chip lists, translations, scripts,
+icons, the signed EZP driver bundle, its checksums, this README, the changelog,
+licenses, and
 [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Chip database
 
 Chip definitions are plain XML. The master `chiplist.xml` is supplemented at
 run time by separately licensed/imported lists and the update-safe local
-`chiplist-user.xml`.
+`chiplist-user.xml`. The four shipped catalogs currently contain 1,751 entries
+that pass the structural validator.
 
 ```xml
 <W25Q64BV id="EF4017" page="256" size="8388608" sector="4096" sectorcmd="20"/>
@@ -240,7 +260,8 @@ For hardware-free POSIX tests and a compile check of the headless CLI:
 ./tools/build.sh
 ```
 
-The authoritative suite catalog and test responsibilities are in
+The current Windows and POSIX builds agree on 17 hardware-free suites. The
+authoritative catalog and test responsibilities are in
 [docs/testing.md](docs/testing.md).
 
 ## Project documentation
