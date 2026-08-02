@@ -46,6 +46,8 @@ type
     destructor Destroy; override;
 
     function GetLastError: string; override;
+    function GetMemoryCapabilities(
+      out Capabilities: TProgrammerMemoryCapabilities): boolean; override;
     function DevOpen: boolean; override;
     procedure DevClose; override;
 
@@ -80,10 +82,14 @@ implementation
 
 const
   BULK_TIMEOUT_MS = 1000;
-  {$IFDEF DARWIN}
-  LIBUSB_NAME = 'libusb-1.0.dylib';
+  {$IFDEF WINDOWS}
+  LIBUSB_NAME = 'libusb-1.0.dll';
   {$ELSE}
-  LIBUSB_NAME = 'libusb-1.0.so.0';
+    {$IFDEF DARWIN}
+    LIBUSB_NAME = 'libusb-1.0.dylib';
+    {$ELSE}
+    LIBUSB_NAME = 'libusb-1.0.so.0';
+    {$ENDIF}
   {$ENDIF}
 
 type
@@ -136,6 +142,16 @@ end;
 function TCH347USBHardware.GetLastError: string;
 begin
   Result := FStrError;
+end;
+
+function TCH347USBHardware.GetMemoryCapabilities(
+  out Capabilities: TProgrammerMemoryCapabilities): boolean;
+begin
+  FillChar(Capabilities, SizeOf(Capabilities), 0);
+  Capabilities.Known := True;
+  Capabilities.Protocols := [mpSPI];
+  Capabilities.RawSPICommands := True;
+  Result := True;
 end;
 
 function TCH347USBHardware.BindLibUSB: boolean;

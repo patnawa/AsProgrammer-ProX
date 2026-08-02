@@ -132,6 +132,7 @@ type
     MenuEraseSeparator: TMenuItem;
     MenuEraseChip: TMenuItem;
     MenuSmartWrite: TMenuItem;
+    MenuSmartWritePreview: TMenuItem;
     MenuChecksum: TMenuItem;
     MenuSFDPDetect: TMenuItem;
     MenuBackgroundOps: TMenuItem;
@@ -141,6 +142,7 @@ type
     MenuSwapBytes: TMenuItem;
     MenuCheckIDBefore: TMenuItem;
     MenuAutoBackup: TMenuItem;
+    MenuConnectionDoctor: TMenuItem;
     MenuCompareChip: TMenuItem;
     MenuCompareFiles: TMenuItem;
     MenuCompareChips: TMenuItem;
@@ -235,6 +237,7 @@ type
     procedure BlankCheckMenuItemClick(Sender: TObject);
     procedure MenuEraseRangeClick(Sender: TObject);
     procedure MenuSmartWriteClick(Sender: TObject);
+    procedure MenuSmartWritePreviewClick(Sender: TObject);
     procedure SmartWriteEEPROM(Sender: TObject);
     procedure MenuChecksumClick(Sender: TObject);
     procedure MenuSFDPDetectClick(Sender: TObject);
@@ -246,6 +249,7 @@ type
     procedure MenuCompareChipClick(Sender: TObject);
     procedure MenuCompareFilesClick(Sender: TObject);
     procedure MenuCompareChipsClick(Sender: TObject);
+    procedure MenuConnectionDoctorClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
     procedure MenuCreditsClick(Sender: TObject);
     procedure VersionCopyClick(Sender: TObject);
@@ -573,6 +577,13 @@ implementation
 var
   TimeCounter: TDateTime;
   CurrentLang: string = 'en';
+  //Set only after a trusted snapshot has been atomically published.  Plan
+  //previews use this to distinguish an in-memory safety snapshot from a
+  //recoverable backup file without ever promising a file that was not saved.
+  LastBackupFileName: string = '';
+  //Older settings files have no marker, so existing users see the new doctor
+  //once.  Afterwards it remains available from Options.
+  ConnectionDoctorSeen: boolean = False;
 
 {$R *.lfm}
 
@@ -1809,20 +1820,7 @@ begin
     begin
       //ชิปมีข้อมูลอยู่จริง และกำลังจะถูกเขียนทับด้วยของจากที่อื่น
       //นี่คือจุดที่ผู้ใช้เสียข้อมูลถาวรได้ ต้องบอกว่าจะมีสำเนาไว้หรือไม่
-      if not MenuAutoBackup.Checked then
-      begin
-        StateText := STR_WF_HASDATA_NOBAK;
-        StateColor := TColor($C0392B);
-      end
-      else if not (RadioSPI.Checked and
-                   (ComboSPICMD.ItemIndex = SPI_CMD_25)) then
-      begin
-        //AutoBackupChip สำรองได้เฉพาะ SPI25 ตระกูลอื่นจะข้ามไปเงียบ ๆ
-        StateText := STR_WF_HASDATA_NOBAK2;
-        StateColor := TColor($C0392B);
-      end
-      else
-        StateText := STR_WF_HASDATA_BACKUP;
+      StateText := STR_WF_HASDATA_BACKUP;
     end;
 
     //บอกด้วยว่าของที่จะเขียนมาจากไหน คนละความเสี่ยงกันโดยสิ้นเชิง
@@ -3503,6 +3501,17 @@ end;
 
 //ตัวจริงอยู่ถัดลงไปในไฟล์ ประกาศไว้ก่อนเพราะการสำรองข้อมูลอัตโนมัติต้องใช้
 procedure ReadFlash25(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal); forward;
+procedure ReadFlash95(var RomStream: TMemoryStream; StartAddress,
+  ChipSize: cardinal); forward;
+procedure ReadFlash45(var RomStream: TMemoryStream; StartAddress, PageSize,
+  ChipSize: cardinal); forward;
+procedure ReadFlashKB(var RomStream: TMemoryStream; StartAddress,
+  ChipSize: cardinal); forward;
+procedure ReadFlashI2C(var RomStream: TMemoryStream; StartAddress,
+  ChipSize: cardinal; ChunkSize: Word; DevAddr: byte); forward;
+procedure ReadFlashMW(var RomStream: TMemoryStream; AddrBitLen: byte;
+  StartAddress, ChipSize: cardinal); forward;
+function SetI2CDevAddr(): byte; forward;
 
 //อ่านซ้ำอีกหลายรอบแล้วเทียบกับรอบแรก
 //
@@ -3612,7 +3621,7 @@ begin
 end;
 
 function ReadPassesAgree(First: TMemoryStream; StartAddress, Size: cardinal;
-  Passes: integer): boolean;
+  Passes: integer; AcceptedSPISpeed: PInteger = nil): boolean;
 var
   Again: TMemoryStream;
   Diff: cardinal;
@@ -3683,7 +3692,11 @@ begin
     LogPrint(STR_READ_STABLE);
     //ตรงกันก็จริง แต่ตรงกันที่ความเร็วต่ำกว่าที่ผู้ใช้เลือก บอกให้รู้ว่า
     //งานหน้าจะช้าอีกถ้าไม่แก้หน้าสัมผัสหรือปรับเมนูความเร็วลง
-    if Dropped then LogPrint(Format(STR_READ_STABLE_SLOWER, [SpeedName]));
+    if Dropped then
+    begin
+      LogPrint(Format(STR_READ_STABLE_SLOWER, [SpeedName]));
+      if AcceptedSPISpeed <> nil then AcceptedSPISpeed^ := SpeedTag;
+    end;
   finally
     Again.Free;
   end;
@@ -4155,6 +4168,11 @@ begin
   end;
 end;
 
+//Implemented with the other backup helpers below.  EZP whole-chip operations
+//live earlier in this unit and use the same atomic publication contract.
+function PersistTrustedBackup(Backup: TMemoryStream;
+  ExpectedSize: cardinal): boolean; forward;
+
 //เขียนหรือลบทั้งชิปผ่าน EZP2023+ แล้วอ่านกลับมาเทียบทุกไบต์
 //
 //เฟิร์มแวร์ของเครื่องนี้ไม่รับคำสั่ง SPI ดิบ ๆ จึงเขียนทีละเพจแบบเส้นทาง
@@ -4252,6 +4270,57 @@ var
       end;
     Result := True;
   end;
+
+  function BackupPhysicalImage: boolean;
+  var
+    i: SizeInt;
+    BackupStream: TMemoryStream;
+  begin
+    Result := True;
+    LastBackupFileName := '';
+    LogPrint(STR_BACKUP_MAKING);
+    if not Dev.ReadBackWholeChip(Back) then
+    begin
+      OpFail('the EZP2023+ could not read the pre-operation backup: ' +
+             Dev.GetLastError);
+      Exit(False);
+    end;
+    if cardinal(Length(Back)) <> Size then
+    begin
+      OpFail(Format('the EZP2023+ backup returned %d bytes, expected %d',
+                    [Length(Back), Size]));
+      Exit(False);
+    end;
+
+    if not Dev.ReadBackWholeChip(BackConfirm) then
+    begin
+      OpFail('the EZP2023+ could not confirm the pre-operation backup: ' +
+             Dev.GetLastError);
+      Exit(False);
+    end;
+    if cardinal(Length(BackConfirm)) <> Size then
+    begin
+      OpFail(Format('the EZP2023+ backup confirmation returned %d bytes, ' +
+                    'expected %d', [Length(BackConfirm), Size]));
+      Exit(False);
+    end;
+    for i := 0 to SizeInt(Size) - 1 do
+      if Back[i] <> BackConfirm[i] then
+      begin
+        OpFail(Format('the two EZP2023+ backup reads disagree at 0x%.8x',
+                      [cardinal(i)]), i);
+        Exit(False);
+      end;
+
+    BackupStream := TMemoryStream.Create;
+    try
+      if Size > 0 then BackupStream.WriteBuffer(Back[0], Size);
+      BackupStream.Position := 0;
+      Result := PersistTrustedBackup(BackupStream, Size);
+    finally
+      BackupStream.Free;
+    end;
+  end;
 begin
   if OperationRunning then Exit;
   if Blank then OpBegin(opkErase) else OpBegin(opkWrite);
@@ -4322,6 +4391,11 @@ try
     LockControl;
     ControlsLocked := True;
     Dev := TEZPHardware(AsProgrammer.Programmer);
+    if not BackupPhysicalImage then
+    begin
+      LogPrint(STR_BACKUP_FAILED);
+      Exit;
+    end;
     if Blank then
       LogPrint(Format('EZP2023+: erasing all %d bytes with the firmware''s ' +
                       'native erase command', [Size]))
@@ -5562,35 +5636,167 @@ begin
   end;
 end;
 
+//Publish only an already trusted, complete snapshot.  The final name is never
+//visible until the complete temporary file has been size-checked and renamed.
+function PersistTrustedBackup(Backup: TMemoryStream;
+  ExpectedSize: cardinal): boolean;
+var
+  Dir, FileName, ChipName, ErrMsg: string;
+  Data: TBytes;
+  i: integer;
+begin
+  Result := False;
+  LastBackupFileName := '';
+  if (Backup = nil) or (ExpectedSize = 0) or
+     (Backup.Size <> int64(ExpectedSize)) or
+     (QWord(ExpectedSize) > QWord(High(SizeInt))) then
+  begin
+    OpFail('the trusted backup snapshot is missing or has the wrong size');
+    LogPrint(STR_BACKUP_FAILED);
+    Exit;
+  end;
+
+  Dir := 'backup' + DirectorySeparator;
+  if not DirectoryExists(Dir) then
+    if not CreateDir(Dir) then
+    begin
+      OpFail('the backup directory could not be created');
+      LogPrint(STR_BACKUP_FAILED);
+      Exit;
+    end;
+
+  ChipName := CurrentICParam.Name;
+  if ChipName = '' then ChipName := 'chip';
+  for i := 1 to Length(ChipName) do
+    if not (ChipName[i] in
+            ['0'..'9', 'A'..'Z', 'a'..'z', '_', '-', '.']) then
+      ChipName[i] := '_';
+
+  FileName := Dir + ChipName + '_' +
+              FormatDateTime('yyyymmdd-hhnnss-zzz', Now) + '-' +
+              IntToHex(GetTickCount64 and $FFFF, 4) + '.bin';
+  try
+    SetLength(Data, SizeInt(ExpectedSize));
+    Backup.Position := 0;
+    Backup.ReadBuffer(Data[0], SizeInt(ExpectedSize));
+  except
+    on E: Exception do
+    begin
+      Data := nil;
+      OpFail('the trusted backup snapshot could not be captured: ' + E.Message);
+      LogPrint(STR_BACKUP_FAILED);
+      Exit;
+    end;
+  end;
+
+  ErrMsg := '';
+  if not AtomicWriteDurable(FileName, Data, False, ErrMsg) then
+  begin
+    Data := nil;
+    OpFail('the completed backup file could not be published durably: ' + ErrMsg);
+    LogPrint(STR_BACKUP_FAILED);
+    Exit;
+  end;
+  Data := nil;
+  if (not FileExists(FileName)) or
+     (FileSizeUtf8(FileName) <> int64(ExpectedSize)) then
+  begin
+    OpFail('the durable backup file is missing or has the wrong size');
+    LogPrint(STR_BACKUP_FAILED);
+    Exit;
+  end;
+  LastBackupFileName := FileName;
+  LogPrint(STR_BACKUP_DONE + FileName);
+  Result := True;
+end;
+
 //สำรองเนื้อหาชิปก่อนเขียนหรือลบ
 //คืน False เมื่อสำรองไม่สำเร็จ ซึ่งแปลว่าห้ามทำต่อ
-function AutoBackupChip(TrustedCopy: TMemoryStream = nil): boolean;
+function AutoBackupChip(TrustedCopy: TMemoryStream = nil;
+  AcceptedSPISpeed: PInteger = nil): boolean;
 var
-  Backup: TMemoryStream;
-  Dir, FileName, TempName, ChipName: string;
-  i, RequiredPasses: integer;
-  SaveFile: boolean;
+  Backup, Again: TMemoryStream;
+  RequiredPasses, PassNo: integer;
+  Diff: cardinal;
+  At: int64;
+
+  function ReadFamilyPass(Stream: TMemoryStream): boolean;
+  var
+    ChunkSize: word;
+  begin
+    Result := False;
+    Stream.Clear;
+    if MainForm.RadioI2C.Checked then
+    begin
+      if MainForm.ComboAddrType.ItemIndex < 0 then
+      begin
+        OpFail('auto-backup needs a selected I2C address type');
+        Exit;
+      end;
+      ChunkSize := 65535;
+      if MainForm.CheckBox_I2C_ByteRead.Checked then ChunkSize := 1;
+      ReadFlashI2C(Stream, 0, OpUI.ChipSize, ChunkSize, SetI2CDevAddr());
+    end
+    else if MainForm.RadioMW.Checked then
+    begin
+      if not IsNumber(MainForm.ComboMWBitLen.Text) then
+      begin
+        OpFail('auto-backup needs a valid MicroWire address bit length');
+        Exit;
+      end;
+      ReadFlashMW(Stream, StrToInt(MainForm.ComboMWBitLen.Text), 0,
+                  OpUI.ChipSize);
+    end
+    else if MainForm.RadioSPI.Checked then
+      case MainForm.ComboSPICMD.ItemIndex of
+        SPI_CMD_25:
+          ReadFlash25(Stream, 0, OpUI.ChipSize);
+        SPI_CMD_95:
+          ReadFlash95(Stream, 0, OpUI.ChipSize);
+        SPI_CMD_45:
+          begin
+            if not IsNumber(MainForm.ComboPageSize.Text) then
+            begin
+              OpFail('auto-backup needs a numeric DataFlash page size');
+              Exit;
+            end;
+            ReadFlash45(Stream, 0, StrToInt(MainForm.ComboPageSize.Text),
+                        OpUI.ChipSize);
+          end;
+        SPI_CMD_KB:
+          ReadFlashKB(Stream, 0, OpUI.ChipSize);
+      else
+        begin
+          LogPrint(STR_BACKUP_SKIPPED);
+          OpFail('auto-backup has no safe reader for the selected SPI family');
+          Exit;
+        end;
+      end
+    else
+    begin
+      LogPrint(STR_BACKUP_SKIPPED);
+      OpFail('auto-backup has no safe reader for the selected protocol');
+      Exit;
+    end;
+
+    Result := OpOK and (Stream.Size = int64(OpUI.ChipSize));
+    if not Result and OpOK then
+      OpFail(Format('the backup read returned %d bytes, expected %d',
+                    [Stream.Size, OpUI.ChipSize]));
+  end;
+
 begin
   Result := True;
-  FileName := '';
-  TempName := '';
-  SaveFile := MainForm.MenuAutoBackup.Checked;
+  LastBackupFileName := '';
 
-  //A caller asking for TrustedCopy is the transactional planner, not merely
-  //the optional backup-file feature.  It always needs two matching full-chip
-  //reads even when the user chose not to publish a backup file.
-  if (not SaveFile) and (TrustedCopy = nil) then Exit;
-  if (not MainForm.RadioSPI.Checked) or
-     (MainForm.ComboSPICMD.ItemIndex <> SPI_CMD_25) or
-     (OpUI.ChipSize = 0) then
+  //Every destructive path requires both a stable full-chip read and a
+  //durably published recovery file.  TrustedCopy additionally returns the
+  //same admitted bytes to a transactional planner.
+  if OpUI.ChipSize = 0 then
   begin
-    //ผู้เรียกที่ขอ TrustedCopy คือตัววางแผนธุรกรรมซึ่งเป็น SPI25 เท่านั้น
-    //มาถึงตรงนี้ได้แปลว่าผิดจริงและต้องล้ม ส่วนฟีเจอร์สำรองไฟล์อัตโนมัติ
-    //บนตระกูลอื่น (95/45/KB/I2C/MW) ต้องข้ามแบบบอกกล่าวเหมือนเดิม ไม่ใช่
-    //ล้มงานเขียนทั้งงานด้วยข้อความที่โทษ backup ทั้งที่ปัญหาคือตระกูลชิป
-    if TrustedCopy <> nil then Exit(False);
-    LogPrint(STR_BACKUP_SKIPPED);
-    Exit;
+    OpFail('auto-backup needs a non-zero selected chip size');
+    LogPrint(STR_BACKUP_FAILED);
+    Exit(False);
   end;
 
   RequiredPasses := 2;
@@ -5605,53 +5811,54 @@ begin
     RequiredPasses := StrictProductionReadPasses;
   end;
 
-  if SaveFile then
-  begin
-    Dir := 'backup' + DirectorySeparator;
-    if not DirectoryExists(Dir) then
-      if not CreateDir(Dir) then
+  LogPrint(STR_BACKUP_MAKING);
+  Backup := TMemoryStream.Create;
+  Again := TMemoryStream.Create;
+  try
+    if not ReadFamilyPass(Backup) then
+    begin
+      LogPrint(STR_BACKUP_FAILED);
+      Exit(False);
+    end;
+
+    //SPI NOR keeps its measured clock-fallback behavior.  Other families use
+    //their established full-chip reader twice and fail closed on any mismatch.
+    if MainForm.RadioSPI.Checked and
+       (MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25) then
+    begin
+      if not ReadPassesAgree(Backup, 0, OpUI.ChipSize,
+                             RequiredPasses, AcceptedSPISpeed) then
       begin
         LogPrint(STR_BACKUP_FAILED);
         Exit(False);
       end;
+    end
+    else
+      for PassNo := 2 to RequiredPasses do
+      begin
+        LogPrint(Format(STR_READ_PASS, [PassNo, RequiredPasses]));
+        if not ReadFamilyPass(Again) then
+        begin
+          LogPrint(STR_BACKUP_FAILED);
+          Exit(False);
+        end;
+        At := FirstDifference(PByte(Backup.Memory), PByte(Again.Memory),
+                              Backup.Size);
+        if At >= 0 then
+        begin
+          Diff := CountDifferences(PByte(Backup.Memory), PByte(Again.Memory),
+                                   Backup.Size);
+          LogPrint(Format(STR_READ_UNSTABLE, [Diff, cardinal(At)]));
+          OpFail(Format('two backup reads disagree in %d bytes', [Diff]), At);
+          LogPrint(STR_BACKUP_FAILED);
+          Exit(False);
+        end;
+      end;
 
-    //ชื่อชิปจะไปอยู่ในชื่อไฟล์ ต้องล้างอักขระที่ใช้ไม่ได้ออกก่อน
-    ChipName := CurrentICParam.Name;
-    if ChipName = '' then ChipName := 'chip';
-    for i := 1 to Length(ChipName) do
-      if not (ChipName[i] in
-              ['0'..'9', 'A'..'Z', 'a'..'z', '_', '-', '.']) then
-        ChipName[i] := '_';
+    if not (MainForm.RadioSPI.Checked and
+            (MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25)) then
+      LogPrint(STR_READ_STABLE);
 
-    FileName := Dir + ChipName + '_' +
-                FormatDateTime('yyyymmdd-hhnnss-zzz', Now) + '-' +
-                IntToHex(GetTickCount64 and $FFFF, 4) + '.bin';
-    TempName := FileName + '.tmp';
-  end;
-
-  LogPrint(STR_BACKUP_MAKING);
-
-  Backup := TMemoryStream.Create;
-  try
-    ReadFlash25(Backup, 0, OpUI.ChipSize);
-
-    if (not OpOK) or (Backup.Size <> OpUI.ChipSize) then
-    begin
-      LogPrint(STR_BACKUP_FAILED);
-      Exit(False);
-    end;
-
-    //A full-size wrong read is possible with a marginal clip, so a backup is
-    //trusted only after an independent second pass matches byte-for-byte.
-    if not ReadPassesAgree(Backup, 0, OpUI.ChipSize, RequiredPasses) then
-    begin
-      LogPrint(STR_BACKUP_FAILED);
-      Exit(False);
-    end;
-
-    //The differential programmer needs the exact trusted bytes used for the
-    //backup so it can restore neighbours in every erased block.  Return a
-    //copy only after both independent reads agreed.
     if TrustedCopy <> nil then
     begin
       TrustedCopy.Clear;
@@ -5660,39 +5867,48 @@ begin
       TrustedCopy.Position := 0;
     end;
 
-    if SaveFile then
-    begin
-      //Publish atomically.  A crash or full disk may leave a .tmp file, but can
-      //never leave a truncated file carrying the final backup name.
-      Backup.SaveToFile(TempName);
-      if (not FileExists(TempName)) or
-         (FileSizeUtf8(TempName) <> int64(OpUI.ChipSize)) then
-      begin
-        DeleteFile(TempName);
-        LogPrint(STR_BACKUP_FAILED);
-        Exit(False);
-      end;
-      if not RenameFile(TempName, FileName) then
-      begin
-        DeleteFile(TempName);
-        LogPrint(STR_BACKUP_FAILED);
-        Exit(False);
-      end;
-      LogPrint(STR_BACKUP_DONE + FileName);
-    end;
+    if not PersistTrustedBackup(Backup, OpUI.ChipSize) then Exit(False);
+    Result := True;
   finally
-    if (TempName <> '') and FileExists(TempName) then DeleteFile(TempName);
+    Again.Free;
     Backup.Free;
+  end;
+end;
+
+//Publish the allocation only after the user has accepted the physical plan.
+//A preview may calculate and display the personalized bytes, but it must not
+//append evidence or consume the counter merely because the user inspected it.
+function PublishCurrentSerialEvidence: boolean;
+var
+  LogF: TextFile;
+begin
+  Result := True;
+  if (not ProdSettings.SNEnabled) or (not CurrentSerialValid) or
+     (ProdSettings.SNLogFile = '') then Exit;
+
+  try
+    AssignFile(LogF, ProdSettings.SNLogFile);
+    if FileExists(ProdSettings.SNLogFile) then Append(LogF) else Rewrite(LogF);
+    WriteLn(LogF, FormatDateTime('yyyy-mm-dd hh:nn:ss', Now) + #9 +
+                  CurrentICParam.Name + #9 + CurrentSerial.Text);
+    CloseFile(LogF);
+  except
+    on E: Exception do
+    begin
+      LogPrint('Cannot write the serial number log file');
+      OpFail('the serial-number evidence could not be written: ' + E.Message);
+      Result := False;
+    end;
   end;
 end;
 
 //ใส่เลขรันนิ่งตัวถัดไปลงในสตรีมก่อนเขียน และถ้ากำหนดไฟล์บันทึกไว้
 //ก็เขียนเลขที่จ่ายไปต่อท้ายไฟล์นั้นด้วย
-function ApplySerialToStream(Stream: TMemoryStream): boolean;
+function ApplySerialToStream(Stream: TMemoryStream;
+  PublishEvidence: boolean = True): boolean;
 var
   Data: array of byte;
   Size: integer;
-  LogF: TextFile;
 begin
   //ทุกทางออกที่ล้มเหลวต้อง OpFail ด้วย: ผู้เรียกทำแค่ `if not ... then Exit`
   //ถ้าคืน False เงียบ ๆ งานเขียนจะถูกยกเลิกทั้งที่ LastOp ยังไม่ถูกทำเครื่องหมาย
@@ -5738,25 +5954,14 @@ begin
   if ApplyAllocatedSerial(CurrentSerial, ProdSettings.SNAddress,
                           Data, cardinal(Size)) then
   begin
-    LogPrint(STR_SERIAL_WRITTEN + CurrentSerial.Text +
-             ' @ 0x' + IntToHex(ProdSettings.SNAddress, 6));
+    if PublishEvidence then
+      LogPrint(STR_SERIAL_WRITTEN + CurrentSerial.Text +
+               ' @ 0x' + IntToHex(ProdSettings.SNAddress, 6))
+    else
+      LogPrint('Preview serial number: ' + CurrentSerial.Text +
+               ' @ 0x' + IntToHex(ProdSettings.SNAddress, 6));
 
-    if ProdSettings.SNLogFile <> '' then
-      try
-        AssignFile(LogF, ProdSettings.SNLogFile);
-        if FileExists(ProdSettings.SNLogFile) then Append(LogF) else Rewrite(LogF);
-        WriteLn(LogF, FormatDateTime('yyyy-mm-dd hh:nn:ss', Now) + #9 +
-                      CurrentICParam.Name + #9 + CurrentSerial.Text);
-        CloseFile(LogF);
-      except
-        on E: Exception do
-        begin
-          LogPrint('Cannot write the serial number log file');
-          OpFail('the serial-number evidence could not be written: ' +
-                 E.Message);
-          Exit(False);
-        end;
-      end;
+    if PublishEvidence and (not PublishCurrentSerialEvidence) then Exit(False);
 
     Stream.Position := 0;
     Stream.WriteBuffer(Data[0], Size);
@@ -8295,16 +8500,18 @@ var
   CheckTemp: Boolean;
 begin
   if OperationRunning then Exit;
-  if MessageDlg('AsProgrammer', STR_COMBO_WARN, mtConfirmation, [mbYes, mbNo], 0)
-    <> mrYes then Exit;
 
   //SPI NOR uses the preservation-aware single-owner service.  Other legacy
-  //protocols retain their protocol-specific sequence below.
+  //protocols retain their protocol-specific sequence below.  The NOR path
+  //asks only once, after its exact live-chip plan is visible.
   if RadioSPI.Checked and (ComboSPICMD.ItemIndex = SPI_CMD_25) then
   begin
-    MenuSmartWriteClick(ComboItem1);
+    MenuSmartWriteClick(MenuSmartWrite);
     Exit;
   end;
+
+  if MessageDlg('AsProgrammer', STR_COMBO_WARN, mtConfirmation,
+                [mbYes, mbNo], 0) <> mrYes then Exit;
 
   if ButtonBlock.Enabled then
   begin
@@ -8431,6 +8638,319 @@ begin
   //เมนูไม่ถูกปิดตอนงานเดิน คลิกซ้อนแล้วอุปกรณ์ตัวเดียวกันโดนสองงานพร้อมกัน
   if OperationRunning then Exit;
   RunChipDoctor;
+end;
+
+procedure TMainForm.MenuConnectionDoctorClick(Sender: TObject);
+var
+  DoctorForm: TForm;
+  Results: TMemo;
+  Footer: TPanel;
+  CloseButton: TButton;
+  Lines: TStringList;
+  Caps: TProgrammerMemoryCapabilities;
+  Protocol: TMemoryProtocol;
+  ProtocolText, LiveID, ExpectedID, ErrorText: string;
+  ID: MEMORY_ID;
+  Opened, BusInitialized, BusTouched, CapsKnown, ProtocolSupported: boolean;
+  LiveCheckAllowed: boolean;
+  SavedManuf: byte;
+
+  function DriverGuidance: string;
+  begin
+    case AsProgrammer.Current_HW of
+      CHW_CH341:
+        Result := 'Install drivers\CH341\CH341PAR.EXE (WCH CH341PAR).';
+      CHW_CH347:
+        Result := 'Install drivers\CH343\CH343 (WCH CH347PAR).';
+      CHW_FT232H:
+        Result := 'Install drivers\FT232\CDM212364_Setup.exe (FTDI D2XX).';
+      CHW_USBASP, CHW_AVRISP:
+        Result := 'Use Zadig from drivers\usbasp to install libusb-win32.';
+      CHW_ARDUINO, CHW_BUZZPIRAT, CHW_SERPROG:
+        Result := 'Check the selected COM port and close any other program ' +
+                  'that may own it.';
+    else
+      Result := 'Check the USB cable, driver, and that no other program owns ' +
+                'the device.';
+    end;
+  end;
+
+  procedure AddWiringGuidance;
+  begin
+    Lines.Add('');
+    Lines.Add('Wiring checklist (power off before changing wires):');
+    if RadioSPI.Checked then
+    begin
+      Lines.Add('  - Pin 1/orientation is correct; GND is common; VCC matches ' +
+                'the chip.');
+      Lines.Add('  - CS#, CLK, MOSI and MISO are not swapped; WP# and HOLD# ' +
+                'are held high.');
+    end
+    else if RadioI2C.Checked then
+    begin
+      Lines.Add('  - GND is common; SDA/SCL have suitable pull-ups to the ' +
+                'correct voltage.');
+      Lines.Add('  - A0/A1/A2 match the address switches; WP is low only ' +
+                'when writing is intended.');
+    end
+    else
+    begin
+      Lines.Add('  - GND is common; CS, SK, DI and DO are not swapped.');
+      Lines.Add('  - Check the organization pin and the selected MicroWire ' +
+                'address-bit length.');
+    end;
+    Lines.Add('  - For in-circuit work, remove board power and prevent the ' +
+              'board from driving the same pins.');
+  end;
+
+begin
+  if OperationRunning then
+  begin
+    MessageDlg(STR_DOCTOR_TITLE,
+      'Finish or cancel the current operation before running connection checks.',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+
+  ConnectionDoctorSeen := True;
+  Lines := TStringList.Create;
+  Opened := False;
+  BusInitialized := False;
+  BusTouched := False;
+  LiveCheckAllowed := False;
+  SavedManuf := Chip25ManufID;
+  try
+    Lines.Add('These checks are non-destructive: no write-enable, status ' +
+              'register, program, or erase command is sent.');
+    Lines.Add('');
+
+    if (AsProgrammer = nil) or (AsProgrammer.Programmer = nil) then
+    begin
+      Lines.Add('[FAIL] No programmer is selected. Choose one from the ' +
+                'Programmer menu.');
+      CapsKnown := False;
+      ProtocolSupported := False;
+    end
+    else
+    begin
+      Lines.Add('[INFO] Selected programmer: ' +
+                AsProgrammer.Programmer.HardwareName);
+      CapsKnown := AsProgrammer.Programmer.GetMemoryCapabilities(Caps);
+
+      if RadioI2C.Checked then
+      begin
+        Protocol := mpI2C;
+        ProtocolText := 'I2C EEPROM';
+      end
+      else if RadioMW.Checked then
+      begin
+        Protocol := mpMicroWire;
+        ProtocolText := 'MicroWire EEPROM';
+      end
+      else
+      begin
+        Protocol := mpSPI;
+        ProtocolText := 'SPI memory';
+      end;
+
+      ProtocolSupported := CapsKnown and
+        AsProgrammer.Programmer.SupportsProtocol(Protocol);
+      if ProtocolSupported and RadioSPI.Checked and
+         (not Caps.RawSPICommands) and
+         ((ComboSPICMD.ItemIndex <> SPI_CMD_25) or
+          (not Caps.NativeWholeChipRead)) then
+        ProtocolSupported := False;
+
+      if ProtocolSupported then
+        Lines.Add('[PASS] Backend supports the selected ' + ProtocolText +
+                  ' protocol.')
+      else if CapsKnown then
+        Lines.Add('[FAIL] This programmer backend does not support the ' +
+                  'selected ' + ProtocolText + ' operation.')
+      else
+        Lines.Add('[WARN] The backend did not publish memory capabilities; ' +
+                  'protocol support cannot be trusted.');
+
+      try
+        Opened := AsProgrammer.Programmer.DevOpen;
+      except
+        on E: Exception do
+        begin
+          ErrorText := E.ClassName + ': ' + E.Message;
+          Opened := False;
+        end;
+      end;
+      if Opened then
+        Lines.Add('[PASS] Programmer opened; its driver/transport is available.')
+      else
+      begin
+        if ErrorText = '' then ErrorText := AsProgrammer.Programmer.GetLastError;
+        Lines.Add('[FAIL] Programmer could not be opened: ' + ErrorText);
+        Lines.Add('       ' + DriverGuidance);
+      end;
+    end;
+
+    if CurrentICParam.Name = '' then
+      Lines.Add('[WARN] No chip profile is selected. Pick the exact part first.')
+    else
+      Lines.Add(Format('[INFO] Selected chip: %s (%d bytes, VCC %s)',
+        [CurrentICParam.Name, CurrentICParam.Size,
+         IfThen(Trim(CurrentICParam.Vcc) = '', 'not specified',
+                CurrentICParam.Vcc)]));
+
+    if Trim(CurrentICParam.Vcc) = '' then
+      Lines.Add('[WARN] Chip voltage is unknown. Check the datasheet and ' +
+                'measure VCC before connecting.')
+    else if Pos('1.8', CurrentICParam.Vcc) > 0 then
+      Lines.Add('[WARN] This is a 1.8 V part. Do not connect ordinary ' +
+                '3.3/5 V power or signals; use a verified 1.8 V adapter.')
+    else
+      Lines.Add('[INFO] Profile voltage: ' + CurrentICParam.Vcc +
+                '. Verify the actual rail with a meter; the application ' +
+                'cannot measure it.');
+
+    LiveCheckAllowed := (CurrentICParam.Name <> '') and
+      (CurrentICParam.Size > 0) and (Trim(CurrentICParam.Vcc) <> '') and
+      (Pos('1.8', CurrentICParam.Vcc) = 0);
+    if Opened and ProtocolSupported and (not LiveCheckAllowed) then
+      Lines.Add('[WARN] Live chip probing was skipped because a selected, ' +
+                'sized, non-1.8 V profile is required before the doctor ' +
+                'drives bus pins.');
+
+    if Opened and ProtocolSupported and LiveCheckAllowed then
+      try
+        if RadioSPI.Checked and (not Caps.RawSPICommands) then
+          Lines.Add('[INFO] This backend exposes safe native whole-chip SPI ' +
+                    'operations but not arbitrary raw commands. The doctor ' +
+                    'skipped JEDEC probing; use the backend''s normal Read ID ' +
+                    'workflow for identity.')
+        else if RadioSPI.Checked and (ComboSPICMD.ItemIndex <> SPI_CMD_KB) then
+        begin
+          BusTouched := True;
+          BusInitialized := AsProgrammer.Programmer.SPIInit(SetSPISpeed(0));
+          if not BusInitialized then
+            Lines.Add('[FAIL] Programmer opened but SPI initialization failed: ' +
+                      AsProgrammer.Programmer.GetLastError)
+          else
+          begin
+            FillChar(ID, SizeOf(ID), 0);
+            UsbAsp25_ReadID(ID);
+            if ID.Got9F and (ID.ID9FH[0] <> $00) and
+               (ID.ID9FH[0] <> $FF) then
+            begin
+              LiveID := UpperCase(IntToHex(ID.ID9FH[0], 2) +
+                                  IntToHex(ID.ID9FH[1], 2) +
+                                  IntToHex(ID.ID9FH[2], 2));
+              Lines.Add('[PASS] A chip answered JEDEC 9Fh: ' + LiveID);
+              ExpectedID := UpperCase(Trim(CurrentICParam.ID));
+              if (ExpectedID <> '') and (ExpectedID <> '0') then
+                if ExpectedID = LiveID then
+                  Lines.Add('[PASS] Live identity matches the selected profile.')
+                else
+                  Lines.Add('[FAIL] Selected profile expects ' + ExpectedID +
+                            ', but the live JEDEC identity is ' + LiveID + '.');
+            end
+            else
+              Lines.Add('[FAIL] No valid JEDEC 9Fh identity answered. Check ' +
+                        'orientation, power, CS, CLK, MOSI/MISO, and contact.');
+          end;
+        end
+        else if RadioI2C.Checked then
+        begin
+          BusTouched := True;
+          AsProgrammer.Programmer.I2CInit;
+          BusInitialized := True;
+          if ComboAddrType.ItemIndex < 0 then
+            Lines.Add('[WARN] Select an I2C address type before testing the chip.')
+          else if UsbAspI2C_BUSY(SetI2CDevAddr()) then
+            Lines.Add('[FAIL] No EEPROM acknowledged the selected I2C ' +
+                      'address. Check SDA/SCL, pull-ups and A0/A1/A2.')
+          else
+            Lines.Add('[PASS] An I2C device acknowledged the selected address.');
+        end
+        else if RadioMW.Checked then
+        begin
+          BusTouched := True;
+          BusInitialized := AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+          if BusInitialized then
+            Lines.Add('[PASS] MicroWire bus initialization succeeded. This ' +
+                      'protocol has no standard read-only device identity.')
+          else
+            Lines.Add('[FAIL] MicroWire initialization failed: ' +
+                      AsProgrammer.Programmer.GetLastError);
+        end
+        else
+          Lines.Add('[INFO] Use Read ID for the selected EC protocol; it has ' +
+                    'no JEDEC memory identity.');
+      except
+        on E: Exception do
+          Lines.Add('[FAIL] Read-only bus check raised ' + E.ClassName + ': ' +
+                    E.Message);
+      end;
+
+    AddWiringGuidance;
+    Lines.Add('');
+    Lines.Add('If every electrical check passes, close this window and use ' +
+              'Read ID/Read chip before any write. A successful open alone ' +
+              'does not prove voltage or clip contact.');
+  finally
+    try
+      if BusTouched and (AsProgrammer <> nil) and
+         (AsProgrammer.Programmer <> nil) then
+      begin
+        if RadioI2C.Checked then AsProgrammer.Programmer.I2CDeinit
+        else if RadioMW.Checked then AsProgrammer.Programmer.MWDeinit
+        else AsProgrammer.Programmer.SPIDeinit;
+      end;
+    except
+      on E: Exception do Lines.Add('[WARN] Bus cleanup reported: ' + E.Message);
+    end;
+    try
+      if Opened and (AsProgrammer <> nil) and
+         (AsProgrammer.Programmer <> nil) then
+        AsProgrammer.Programmer.DevClose;
+    except
+      on E: Exception do Lines.Add('[WARN] Device close reported: ' + E.Message);
+    end;
+    Chip25ManufID := SavedManuf;
+  end;
+
+  DoctorForm := TForm.CreateNew(Self);
+  try
+    DoctorForm.Caption := STR_DOCTOR_TITLE;
+    DoctorForm.Position := poScreenCenter;
+    DoctorForm.BorderStyle := bsSizeable;
+    DoctorForm.SetBounds(0, 0, 760, 620);
+
+    Footer := TPanel.Create(DoctorForm);
+    Footer.Parent := DoctorForm;
+    Footer.Align := alBottom;
+    Footer.Height := 52;
+    Footer.BevelOuter := bvNone;
+
+    CloseButton := TButton.Create(DoctorForm);
+    CloseButton.Parent := Footer;
+    CloseButton.Caption := 'Close';
+    CloseButton.ModalResult := mrOK;
+    CloseButton.Default := True;
+    CloseButton.SetBounds(Footer.Width - 110, 10, 96, 32);
+    CloseButton.Anchors := [akTop, akRight];
+
+    Results := TMemo.Create(DoctorForm);
+    Results.Parent := DoctorForm;
+    Results.Align := alClient;
+    Results.ReadOnly := True;
+    Results.ScrollBars := ssAutoBoth;
+    Results.WordWrap := True;
+    Results.Font.Name := 'Consolas';
+    Results.Font.Size := 10;
+    Results.Lines.Assign(Lines);
+    DoctorForm.ActiveControl := CloseButton;
+    DoctorForm.ShowModal;
+  finally
+    DoctorForm.Free;
+    Lines.Free;
+  end;
 end;
 
 procedure TMainForm.MenuCapacityTestClick(Sender: TObject);
@@ -8795,8 +9315,10 @@ try
 
   //SPI scripts can issue destructive commands of their own, so they run only
   //after the same electrical, identity, protection and backup gates as the
-  //built-in writer.  Legacy non-SPI scripts retain their old entry point.
-  if (not RadioSPI.Checked) and
+  //built-in writer.  A legacy non-SPI script keeps its old entry point when
+  //backup is off; when backup is requested it is deferred until the trusted
+  //family-specific snapshot has been published.
+  if (not RadioSPI.Checked) and (not MenuAutoBackup.Checked) and
      RunScriptFromFile(CurrentICParam.Script, 'write') then Exit;
 
   LogPrint(TimeToStr(Time()));
@@ -8977,6 +9499,12 @@ try
       OpFail('the I2C EEPROM did not acknowledge its address');
       exit;
     end;
+    if not AutoBackupChip then
+    begin
+      OpFail('the backup could not be made');
+      Exit;
+    end;
+    if RunScriptFromFile(CurrentICParam.Script, 'write') then Exit;
     TimeCounter := Time();
 
     RomF.Position := 0;
@@ -9020,6 +9548,12 @@ try
       OpFail('the programmer could not initialize the MicroWire bus');
       Exit;
     end;
+    if not AutoBackupChip then
+    begin
+      OpFail('the backup could not be made');
+      Exit;
+    end;
+    if RunScriptFromFile(CurrentICParam.Script, 'write') then Exit;
     TimeCounter := Time();
 
     RomF.Position := 0;
@@ -11467,6 +12001,12 @@ begin
       AutomaticChipDetection := False;
     end;
   end;
+
+  //The first-run doctor is deliberately delayed until the form is visible:
+  //its modal results window and driver guidance must never appear while LCL
+  //is still constructing controls.  It remains available from Options.
+  if (not CLIMode) and (not ConnectionDoctorSeen) then
+    MenuConnectionDoctorClick(nil);
 end;
 
 //ลากไฟล์มาวางบนหน้าต่างแล้วโหลดเข้าเอดิเตอร์ได้เลย
@@ -11836,7 +12376,7 @@ try
   LockControl();
 
   //Destructive SPI scripts are deferred until the built-in preflight below.
-  if (not RadioSPI.Checked) and
+  if (not RadioSPI.Checked) and (not MenuAutoBackup.Checked) and
      RunScriptFromFile(CurrentICParam.Script, 'erase') then Exit;
 
   LogPrint(TimeToStr(Time()));
@@ -11963,6 +12503,12 @@ try
       OpFail('the I2C EEPROM did not acknowledge its address');
       exit;
     end;
+    if not AutoBackupChip then
+    begin
+      OpFail('the backup could not be made');
+      Exit;
+    end;
+    if RunScriptFromFile(CurrentICParam.Script, 'erase') then Exit;
 
     TimeCounter := Time();
 
@@ -11986,6 +12532,12 @@ try
       OpFail('the programmer could not initialize the MicroWire bus');
       Exit;
     end;
+    if not AutoBackupChip then
+    begin
+      OpFail('the backup could not be made');
+      Exit;
+    end;
+    if RunScriptFromFile(CurrentICParam.Script, 'erase') then Exit;
     TimeCounter := Time();
     LogPrint(STR_ERASING_FLASH);
     if UsbAspMW_Ewen(StrToInt(ComboMWBitLen.Text)) <>
@@ -12194,37 +12746,75 @@ begin
              (MainForm.ComboSPICMD.ItemIndex = SPI_CMD_95));
 end;
 
-//สรุปแผน Smart Write ของ EEPROM เป็นภาษาคน สำหรับโหมดดูแผนอย่างเดียว
-procedure LogEEPROMPlanPreview(const Plan: TEEPROMPlan; WriteCycleMs: cardinal);
+procedure AddBackupPreviewLine(Lines: TStrings);
+begin
+  if LastBackupFileName <> '' then
+    Lines.Add('Backup file: ' + LastBackupFileName)
+  else
+    Lines.Add('Backup file: required but not published (execution is blocked)');
+end;
+
+procedure LogPreviewText(const Preview: string);
+var
+  Lines: TStringList;
+  i: integer;
+begin
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Preview;
+    for i := 0 to Lines.Count - 1 do
+      if Lines[i] <> '' then LogPrint(Lines[i]);
+  finally
+    Lines.Free;
+  end;
+end;
+
+//สรุปแผน Smart Write ของ EEPROM เป็นภาษาคน แผนเดียวกันนี้ถูกส่งต่อให้
+//executor จริง ไม่มีตัววางแผนชุดที่สองซ่อนอยู่หลังกล่องข้อความ
+function EEPROMPlanPreviewText(const Plan: TEEPROMPlan;
+  WriteCycleMs: cardinal): string;
 var
   Writes: integer;
   EtaMs: QWord;
+  Lines: TStringList;
 begin
   Writes := EEPROMPlanCountKind(Plan, epsWrite);
-  LogPrint('--- Smart Write plan preview: nothing has been written ---');
-  if Writes = 0 then
-    LogPrint('The chip already matches the image; no page would be written')
-  else
-    LogPrint(Format('  write: %d pages of %d bytes (%d bytes changed)',
-      [Writes, Plan.PageSize, Plan.ChangedBytes]));
-  LogPrint(Format('  verify: %d page reads, %d bytes',
-    [EEPROMPlanCountKind(Plan, epsVerify), Plan.VerifyBytes]));
-  EtaMs := QWord(Writes) * QWord(WriteCycleMs);
-  if EtaMs >= 1000 then
-    LogPrint(Format('  worst-case write-cycle time: about %d s',
-                    [(EtaMs + 999) div 1000]));
-  LogPrint('Run Smart write without --plan-only to execute this plan.');
+  Lines := TStringList.Create;
+  try
+    Lines.Add(STR_SMART_PREVIEW_SAFE);
+    Lines.Add('');
+    Lines.Add(Format('Requested range: 0x%.6x .. 0x%.6x (%d bytes)',
+      [Plan.RequestedAddress,
+       Plan.RequestedAddress + Plan.RequestedLength - 1,
+       Plan.RequestedLength]));
+    if Writes = 0 then
+      Lines.Add('The chip already matches the image; no page will be written')
+    else
+      Lines.Add(Format('Write: %d pages of %d bytes (%d bytes changed)',
+        [Writes, Plan.PageSize, Plan.ChangedBytes]));
+    Lines.Add(Format('Verify: %d page reads covering %d bytes',
+      [EEPROMPlanCountKind(Plan, epsVerify), Plan.VerifyBytes]));
+    EtaMs := QWord(Writes) * QWord(WriteCycleMs);
+    if EtaMs > 0 then
+      Lines.Add(Format('Estimated worst-case write-cycle time: about %d s, ' +
+                       'plus readback', [(EtaMs + 999) div 1000]));
+    AddBackupPreviewLine(Lines);
+    Result := Lines.Text;
+  finally
+    Lines.Free;
+  end;
 end;
 
-//สรุปแผน Smart Write เป็นภาษาคน สำหรับโหมดดูแผนอย่างเดียว
+//สรุปแผน Smart Write เป็นภาษาคน
 //เพดานเวลามาจากตัวเลขที่ชิปประกาศเอง (ทาง SFDP DWORD-10/11 ถ้ามี)
-procedure LogSmartPlanPreview(const Plan: TNORPlan);
+function NORPlanPreviewText(const Plan: TNORPlan): string;
 var
   i: SizeInt;
   Op: integer;
   ByOpcode: array[0..255] of integer;
   ByOpcodeBytes: array[0..255] of QWord;
   WorstMs: QWord;
+  Lines: TStringList;
 begin
   FillChar(ByOpcode, SizeOf(ByOpcode), 0);
   FillChar(ByOpcodeBytes, SizeOf(ByOpcodeBytes), 0);
@@ -12242,30 +12832,77 @@ begin
       npsVerify: ;
     end;
 
-  LogPrint('--- Smart Write plan preview: nothing has been written ---');
-  if Plan.AffectedLength = 0 then
-    LogPrint('The chip already matches the image inside the requested range; ' +
-             'no block would be touched')
-  else
-    LogPrint(Format('Affected range: 0x%.6x .. 0x%.6x (%d bytes)',
-      [Plan.AffectedAddress,
-       Plan.AffectedAddress + Plan.AffectedLength - 1,
-       Plan.AffectedLength]));
-  for Op := 0 to 255 do
-    if ByOpcode[Op] > 0 then
-      LogPrint(Format('  erase %.2xh: %d blocks, %d bytes',
-        [Op, ByOpcode[Op], ByOpcodeBytes[Op]]));
-  LogPrint(Format('  program: %d page commands, %d bytes ' +
-    '(%d preserved neighbour bytes restored)',
-    [NORPlanCountKind(Plan, npsProgram), Plan.ProgramBytes,
-     Plan.PreservedBytesRewritten]));
-  LogPrint(Format('  verify: %d block reads, %d bytes',
-    [NORPlanCountKind(Plan, npsVerify), Plan.VerifyBytes]));
-  if WorstMs > 0 then
-    LogPrint(Format(
-      '  chip-declared worst-case erase+program time: about %d s, ' +
-      'plus verify readback', [(WorstMs + 999) div 1000]));
-  LogPrint('Run Smart write without --plan-only to execute this plan.');
+  Lines := TStringList.Create;
+  try
+    Lines.Add(STR_SMART_PREVIEW_SAFE);
+    Lines.Add('');
+    Lines.Add(Format('Requested range: 0x%.6x .. 0x%.6x (%d bytes)',
+      [Plan.RequestedAddress,
+       Plan.RequestedAddress + Plan.RequestedLength - 1,
+       Plan.RequestedLength]));
+    if Plan.AffectedLength = 0 then
+      Lines.Add('The chip already matches the image inside the requested ' +
+                'range; no block will be touched')
+    else
+      Lines.Add(Format('Affected range: 0x%.6x .. 0x%.6x (%d bytes)',
+        [Plan.AffectedAddress,
+         Plan.AffectedAddress + Plan.AffectedLength - 1,
+         Plan.AffectedLength]));
+    for Op := 0 to 255 do
+      if ByOpcode[Op] > 0 then
+        Lines.Add(Format('Erase %.2xh: %d blocks, %d bytes',
+          [Op, ByOpcode[Op], ByOpcodeBytes[Op]]));
+    Lines.Add(Format('Program: %d page commands, %d bytes',
+      [NORPlanCountKind(Plan, npsProgram), Plan.ProgramBytes]));
+    Lines.Add(Format('Preserved neighbours restored: %d bytes',
+      [Plan.PreservedBytesRewritten]));
+    Lines.Add(Format('Verify: %d block reads covering %d bytes',
+      [NORPlanCountKind(Plan, npsVerify), Plan.VerifyBytes]));
+    if WorstMs > 0 then
+      Lines.Add(Format(
+        'Estimated chip-declared worst case: about %d s, plus readback',
+        [(WorstMs + 999) div 1000]));
+    AddBackupPreviewLine(Lines);
+    Result := Lines.Text;
+  finally
+    Lines.Free;
+  end;
+end;
+
+function ConfirmSmartWritePreview(const Preview: string;
+  HasDestructiveSteps: boolean; AllowPrompt: boolean = True): boolean;
+var
+  Text: string;
+begin
+  Result := True;
+  LogPrint('--- Smart Write plan preview ---');
+  LogPreviewText(Preview);
+  if CLIMode or (not AllowPrompt) then Exit;
+
+  if SmartWritePlanOnly or (not HasDestructiveSteps) then
+  begin
+    MessageDlg(STR_SMART_PREVIEW_TITLE, Preview, mtInformation, [mbOK], 0);
+    Exit;
+  end;
+
+  Text := Preview + LineEnding + STR_SMART_PREVIEW_GO;
+  Result := MessageDlg(STR_SMART_PREVIEW_TITLE, Text, mtWarning,
+                       [mbYes, mbNo], 0) = mrYes;
+  if not Result then LogPrint(STR_SMART_PREVIEW_STOP);
+end;
+
+procedure TMainForm.MenuSmartWritePreviewClick(Sender: TObject);
+var
+  PreviousPlanOnly: boolean;
+begin
+  if OperationRunning then Exit;
+  PreviousPlanOnly := SmartWritePlanOnly;
+  SmartWritePlanOnly := True;
+  try
+    MenuSmartWriteClick(Sender);
+  finally
+    SmartWritePlanOnly := PreviousPlanOnly;
+  end;
 end;
 
 procedure TMainForm.MenuSmartWriteClick(Sender: TObject);
@@ -12294,6 +12931,7 @@ var
   GeometryIndex: SizeInt;
   ExecutorOptions: TNORExecutorOptions;
   ThisTimeout: cardinal;
+  Preview: string;
 
   procedure ReleasePreflightSession;
   begin
@@ -12355,7 +12993,8 @@ var
 
   procedure ExecutePlan;
   begin
-    Outcome := Executor.Execute(Request, Plan, Geometry, Token);
+    Outcome := Executor.ExecuteBound(Request, Plan, Geometry, CurrentBytes,
+      Token);
   end;
 
 begin
@@ -12382,9 +13021,6 @@ begin
   end;
 
   OpBegin(opkWrite);
-  //ชิปกำลังจะถูกเปลี่ยนเนื้อใน ความรู้เดิมว่า "เปล่า" หรือ "มีข้อมูล"
-  //ใช้ต่อไม่ได้อีก ไม่งั้นการเขียนรอบถัดไปจะอ้างสถานะก่อนเขียนรอบนี้
-  ForgetChipContent;
   //FillChar ห้ามใช้กับเรคคอร์ดที่มีสตริง (ดูคำอธิบายที่จุดเดียวกันใน
   //ButtonWriteClick)
   CurrentSerial := Default(TSerialAllocation);
@@ -12472,14 +13108,6 @@ begin
       OpFail('transactional Smart Write supports SPI 25-series NOR only');
       Exit;
     end;
-
-    if (Sender <> ComboItem1) and (not CLIMode) then
-      if MessageDlg('AsProgrammer', STR_COMBO_WARN, mtConfirmation,
-                    [mbYes, mbNo], 0) <> mrYes then
-      begin
-        OpCancel;
-        Exit;
-      end;
 
     if (not TryStrToQWord(Trim(ComboChipSize.Text), Parsed)) or
        (Parsed = 0) or (Parsed > High(cardinal)) then
@@ -12630,7 +13258,7 @@ begin
     end;
 
     Trusted := TMemoryStream.Create;
-    if not AutoBackupChip(Trusted) then
+    if not AutoBackupChip(Trusted, @Speed) then
     begin
       OpFail('a trusted two-pass full-chip snapshot could not be made');
       Exit;
@@ -12639,8 +13267,10 @@ begin
     PatchStream := TMemoryStream.Create;
     MPHexEditorEx.SaveToStream(PatchStream);
     PatchStream.Position := 0;
-    if not ApplySerialToStream(PatchStream) then Exit;
-    if not ReserveCurrentSerial then Exit;
+    //Planning personalizes an immutable copy, but publishing allocation
+    //evidence and consuming the serial are deferred until this exact plan is
+    //accepted.  Preview-only is therefore read-only outside the process too.
+    if not ApplySerialToStream(PatchStream, False) then Exit;
     PatchSize := PatchStream.Size;
     Request.Target.Length := PatchSize;
     Bridge.EvidenceSize := PatchSize;
@@ -12725,12 +13355,25 @@ begin
       [Plan.ChangedBytes, Plan.EraseBytes, Plan.ProgramBytes,
        Plan.VerifyBytes, Plan.PreservedBytesRewritten]));
 
-    //โหมดดูแผนอย่างเดียวจบตรงนี้ ก่อนด่านป้องกันและก่อน UnlockCurrentSPI25
-    //ซึ่งเขียน status register จริง แผนถูกพิมพ์ครบแล้ว และชิปยังไม่ถูกแตะ
-    if SmartWritePlanOnly then
+    Preview := NORPlanPreviewText(Plan);
+    if not ConfirmSmartWritePreview(Preview,
+                                    NORPlanHasDestructiveSteps(Plan),
+                                    Sender <> ComboItem1) then
     begin
-      LogSmartPlanPreview(Plan);
+      OpCancel;
       Exit;
+    end;
+    //โหมดดูแผนอย่างเดียวจบตรงนี้ ก่อนด่านป้องกันและก่อน UnlockCurrentSPI25
+    //ซึ่งเขียน status register จริง แผนถูกแสดงครบแล้ว และชิปยังไม่ถูกแตะ
+    if SmartWritePlanOnly then Exit;
+
+    if NORPlanHasDestructiveSteps(Plan) then
+    begin
+      if not PublishCurrentSerialEvidence then Exit;
+      if not ReserveCurrentSerial then Exit;
+      //Only now is the selected chip scheduled to change.  A cancelled or
+      //preview-only plan keeps the content knowledge gathered by the read.
+      ForgetChipContent;
     end;
 
     //The protection guard covers the planner's complete affected blocks, not
@@ -12829,9 +13472,9 @@ begin
       StrictProductionMode or (ProdSettings.ProdLogFile <> '');
     Request.Policy.PreserveOutsideRange := True;
 
-    //Free full-chip duplicate buffers before execution.  Every byte needed by
-    //the physical transaction is now owned by the immutable plan.
-    CurrentBytes := nil;
+    //The immutable plan owns all bytes it may program, while CurrentBytes is
+    //retained through execution so the reopened session can prove that the
+    //same complete preimage is still connected before any WREN.
     PatchBytes := nil;
     FreeAndNil(Trusted);
     FreeAndNil(PatchStream);
@@ -12942,7 +13585,7 @@ begin
 
     //Failures before the engine's evidence phase are logged here.  A success
     //already committed by the engine must never be appended a second time.
-    if (ProdSettings.ProdLogFile <> '') and
+    if (not SmartWritePlanOnly) and (ProdSettings.ProdLogFile <> '') and
        ((Bridge = nil) or (not Bridge.EvidenceCommitted)) then
       WriteProdLogEntry(MPHexEditorEx.DataSize, LastProgramCRC, LastChipUID);
 
@@ -12980,13 +13623,15 @@ var
   Outcome: TOperationOutcome;
   Plan: TEEPROMPlan;
   PlanBuilt, ControlsLocked, Opened, BusEntered: boolean;
-  Snapshot, PatchStream: TMemoryStream;
+  Snapshot, SnapshotConfirm, PatchStream: TMemoryStream;
   Current, Patch: TBytes;
   ChipSize, PageSize, PatchStart, PatchSize, WriteCycleMs: cardinal;
   DevAddr: byte;
   Parsed: QWord;
   Err: string;
   OldWorker: boolean;
+  SnapshotDiff: int64;
+  Preview: string;
 
   procedure ExecutePlan;
   begin
@@ -12996,9 +13641,6 @@ var
 begin
   if OperationRunning then Exit;
   OpBegin(opkWrite);
-  //ชิปกำลังจะถูกเปลี่ยนเนื้อใน ความรู้เดิมว่า "เปล่า" หรือ "มีข้อมูล"
-  //ใช้ต่อไม่ได้อีก ไม่งั้นการเขียนรอบถัดไปจะอ้างสถานะก่อนเขียนรอบนี้
-  ForgetChipContent;
   CurrentSerial := Default(TSerialAllocation);
   CurrentSerialValid := False;
   CurrentSerialReserved := False;
@@ -13009,6 +13651,7 @@ begin
   Executor := nil;
   Token := nil;
   Snapshot := nil;
+  SnapshotConfirm := nil;
   PatchStream := nil;
   Current := nil;
   Patch := nil;
@@ -13193,6 +13836,7 @@ begin
     end;
 
     //snapshot ที่เชื่อถือได้: อ่านทั้งชิปผ่านทางอ่านของตระกูลนั้นเอง
+    LastBackupFileName := '';
     LogPrint(STR_BACKUP_MAKING);
     Snapshot := TMemoryStream.Create;
     if not ReadCurrentChipEEPROM(Device, Snapshot, ChipSize, PageSize) then
@@ -13201,11 +13845,39 @@ begin
       Exit;
     end;
 
+    //The planner itself requires a trusted snapshot, regardless of whether
+    //the user also asked to publish a recovery file.  A full-size marginal
+    //read is not trustworthy until an independent pass agrees byte-for-byte.
+    LogPrint(Format(STR_READ_PASS, [2, 2]));
+    SnapshotConfirm := TMemoryStream.Create;
+    if not ReadCurrentChipEEPROM(Device, SnapshotConfirm, ChipSize,
+                                 PageSize) then
+    begin
+      OpFail('the EEPROM snapshot confirmation pass could not be read');
+      Exit;
+    end;
+    SnapshotDiff := FirstDifference(PByte(Snapshot.Memory),
+                                    PByte(SnapshotConfirm.Memory),
+                                    Snapshot.Size);
+    if SnapshotDiff >= 0 then
+    begin
+      OpFail('the two EEPROM snapshot reads disagree', SnapshotDiff);
+      LogPrint(STR_BACKUP_FAILED);
+      Exit;
+    end;
+    LogPrint(STR_READ_STABLE);
+    FreeAndNil(SnapshotConfirm);
+
+    if not PersistTrustedBackup(Snapshot, ChipSize) then
+    begin
+      OpFail('the trusted EEPROM backup could not be persisted');
+      Exit;
+    end;
+
     PatchStream := TMemoryStream.Create;
     MPHexEditorEx.SaveToStream(PatchStream);
     PatchStream.Position := 0;
-    if not ApplySerialToStream(PatchStream) then Exit;
-    if not ReserveCurrentSerial then Exit;
+    if not ApplySerialToStream(PatchStream, False) then Exit;
     PatchSize := PatchStream.Size;
     Request.Target.Length := PatchSize;
 
@@ -13228,10 +13900,21 @@ begin
       [Plan.ChangedBytes, EEPROMPlanCountKind(Plan, epsWrite),
        Plan.VerifyBytes]));
 
-    if SmartWritePlanOnly then
+    Preview := EEPROMPlanPreviewText(Plan, WriteCycleMs);
+    if not ConfirmSmartWritePreview(
+      Preview, EEPROMPlanCountKind(Plan, epsWrite) > 0,
+      Sender <> ComboItem1) then
     begin
-      LogEEPROMPlanPreview(Plan, WriteCycleMs);
+      OpCancel;
       Exit;
+    end;
+    if SmartWritePlanOnly then Exit;
+
+    if EEPROMPlanCountKind(Plan, epsWrite) > 0 then
+    begin
+      if not PublishCurrentSerialEvidence then Exit;
+      if not ReserveCurrentSerial then Exit;
+      ForgetChipContent;
     end;
 
     if OperationCancellationRequested then
@@ -13281,6 +13964,7 @@ begin
     Device.Free;
     Token.Free;
     Snapshot.Free;
+    SnapshotConfirm.Free;
     PatchStream.Free;
     Current := nil;
     Patch := nil;
@@ -13288,7 +13972,12 @@ begin
 
     if BusEntered then
       try
-        if RadioSPI.Checked then ExitProgMode25;
+        if RadioI2C.Checked then
+          AsProgrammer.Programmer.I2CDeinit
+        else if RadioMW.Checked then
+          AsProgrammer.Programmer.MWDeinit
+        else
+          ExitProgMode25;
       except
         on E: Exception do
           if not LastOp.Failed then
@@ -13296,7 +13985,8 @@ begin
       end;
     if Opened then AsProgrammer.Programmer.DevClose;
 
-    if (ProdSettings.ProdLogFile <> '') and (MPHexEditorEx.DataSize > 0) then
+    if (not SmartWritePlanOnly) and (ProdSettings.ProdLogFile <> '') and
+       (MPHexEditorEx.DataSize > 0) then
       WriteProdLogEntry(MPHexEditorEx.DataSize, LastProgramCRC, LastChipUID);
 
     SetProgressPos(0);
@@ -13478,9 +14168,11 @@ begin
       TDOMElement(ParentNode).SetAttribute('check_id', '1') else
         TDOMElement(ParentNode).SetAttribute('check_id', '0');
 
-    if MainForm.MenuAutoBackup.Checked then
-      TDOMElement(ParentNode).SetAttribute('auto_backup', '1') else
-        TDOMElement(ParentNode).SetAttribute('auto_backup', '0');
+    //Recovery backups are an admission requirement, not a user preference.
+    TDOMElement(ParentNode).SetAttribute('auto_backup', '1');
+
+    TDOMElement(ParentNode).SetAttribute('connection_doctor_seen',
+      BoolToStr(ConnectionDoctorSeen, '1', '0'));
 
     if MainForm.MenuFastRead.Checked then
       TDOMElement(ParentNode).SetAttribute('fast_read', '1') else
@@ -13661,9 +14353,12 @@ begin
         MainForm.MenuCheckIDBefore.Checked :=
           Node.Attributes.GetNamedItem('check_id').NodeValue = '1';
 
-      if  Node.Attributes.GetNamedItem('auto_backup') <> nil then
-        MainForm.MenuAutoBackup.Checked :=
-          Node.Attributes.GetNamedItem('auto_backup').NodeValue = '1';
+      //Migrate older profiles that allowed this safety gate to be disabled.
+      MainForm.MenuAutoBackup.Checked := True;
+
+      if Node.Attributes.GetNamedItem('connection_doctor_seen') <> nil then
+        ConnectionDoctorSeen :=
+          Node.Attributes.GetNamedItem('connection_doctor_seen').NodeValue = '1';
 
       if  Node.Attributes.GetNamedItem('fast_read') <> nil then
         MainForm.MenuFastRead.Checked :=

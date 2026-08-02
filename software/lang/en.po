@@ -445,3 +445,735 @@ msgstr "Run script"
 #: tmainform.label_startaddress.caption
 msgid "Начальный адрес"
 msgstr "Start address"
+
+#: msgstr.str_sector_spi25_only
+msgid "Sector erase is available only for SPI 25 series chips"
+msgstr "Sector erase is available only for SPI 25 series chips"
+
+#: msgstr.str_erase_range_q
+msgid "Erase the selected address range?"
+msgstr "Erase the selected address range?"
+
+#: msgstr.str_erasing_range
+msgid "Erasing range: "
+msgstr "Erasing range: "
+
+#: msgstr.str_erase_range_empty
+msgid "Nothing to erase: load a file or set a range first"
+msgstr "Nothing to erase: load a file or set a range first"
+
+#: msgstr.str_checksum
+msgid "Checksum: "
+msgstr "Checksum: "
+
+#: msgstr.str_checksum_empty
+msgid "Buffer is empty, nothing to checksum"
+msgstr "Buffer is empty, nothing to checksum"
+
+#: msgstr.str_sfdp_reading
+msgid "Reading SFDP..."
+msgstr "Reading SFDP..."
+
+#: msgstr.str_sfdp_not_found
+msgid "SFDP is not supported by this chip (no valid signature)"
+msgstr "SFDP is not supported by this chip (no valid signature)"
+
+#: msgstr.str_sfdp_found
+msgid "SFDP detected"
+msgstr "SFDP detected"
+
+#: msgstr.str_sfdp_applied
+msgid "Chip settings filled from SFDP"
+msgstr "Chip settings filled from SFDP"
+
+#: msgstr.str_file_loaded
+msgid "File loaded: "
+msgstr "File loaded: "
+
+#: msgstr.str_file_saved
+msgid "File saved: "
+msgstr "File saved: "
+
+#: msgstr.str_fill_buffer
+msgid "Fill buffer"
+msgstr "Fill buffer"
+
+#: msgstr.str_fill_value_hex
+msgid "Fill value (hex byte)"
+msgstr "Fill value (hex byte)"
+
+#: msgstr.str_id_mismatch
+msgid "Chip ID does not match the selected chip: expected "
+msgstr "Chip ID does not match the selected chip: expected "
+
+#: msgstr.str_id_mismatch_q
+msgid "The chip in the socket does not match the selected one.\r\nContinue anyway?"
+msgstr "The chip in the socket does not match the selected one.\r\nContinue anyway?"
+
+#: msgstr.str_id_no_answer
+msgid "No chip answered the id commands. Nothing was read back, so there is no id to compare. This is what a loose clip, an empty socket, a chip fitted the wrong way round or an unpowered chip all look like"
+msgstr "No chip answered the id commands. Nothing was read back, so there is no id to compare. This is what a loose clip, an empty socket, a chip fitted the wrong way round or an unpowered chip all look like"
+
+#: msgstr.str_id_no_answer_q
+msgid "No chip is answering. Nothing was read back from the socket.\r\n\r\nCheck the clip or socket contact, the orientation and the supply, then press Read ID again.\r\n\r\nContinue anyway?"
+msgstr "No chip is answering. Nothing was read back from the socket.\r\n\r\nCheck the clip or socket contact, the orientation and the supply, then press Read ID again.\r\n\r\nContinue anyway?"
+
+#: msgstr.str_id_ok
+msgid "Chip ID matches: "
+msgstr "Chip ID matches: "
+
+#: msgstr.str_backup_making
+msgid "Backing up the chip first..."
+msgstr "Backing up the chip first..."
+
+#: msgstr.str_backup_done
+msgid "Backup saved: "
+msgstr "Backup saved: "
+
+#: msgstr.str_backup_failed
+msgid "Backup failed, operation aborted"
+msgstr "Backup failed, operation aborted"
+
+#: msgstr.str_backup_skipped
+msgid "This chip family has no safe full-chip backup reader; operation aborted"
+msgstr "This chip family has no safe full-chip backup reader; operation aborted"
+
+#: msgstr.str_smart_preview_title
+msgid "Smart Write preview"
+msgstr "Smart Write preview"
+
+#: msgstr.str_smart_preview_safe
+msgid "Nothing has been written. This plan came from the live chip snapshot."
+msgstr "Nothing has been written. This plan came from the live chip snapshot."
+
+#: msgstr.str_smart_preview_go
+msgid "Continue with these exact erase, program and verify steps?"
+msgstr "Continue with these exact erase, program and verify steps?"
+
+#: msgstr.str_smart_preview_stop
+msgid "Smart Write cancelled after preview; the chip was not changed"
+msgstr "Smart Write cancelled after preview; the chip was not changed"
+
+#: msgstr.str_doctor_title
+msgid "Connection Doctor - read-only checks"
+msgstr "Connection Doctor - read-only checks"
+
+#: msgstr.str_compare_reading
+msgid "Reading the chip to compare..."
+msgstr "Reading the chip to compare..."
+
+#: msgstr.str_compare_equal
+msgid "Buffer and chip are identical"
+msgstr "Buffer and chip are identical"
+
+#: msgstr.str_compare_diff
+msgid "Different bytes: "
+msgstr "Different bytes: "
+
+#: msgstr.str_compare_ranges
+msgid "Differing ranges (first 20):"
+msgstr "Differing ranges (first 20):"
+
+#: msgstr.str_swap_done
+msgid "Byte order swapped, 16-bit words: "
+msgstr "Byte order swapped, 16-bit words: "
+
+#: msgstr.str_project_saved
+msgid "Project saved: "
+msgstr "Project saved: "
+
+#: msgstr.str_project_loaded
+msgid "Project loaded: "
+msgstr "Project loaded: "
+
+#: msgstr.str_project_failed
+msgid "Project file error"
+msgstr "Project file error"
+
+#: msgstr.str_prod_saved
+msgid "Serial number and production settings updated"
+msgstr "Serial number and production settings updated"
+
+#: msgstr.str_batch_disabled
+msgid "Enable batch mode first: Options -> Serial number and production"
+msgstr "Enable batch mode first: Options -> Serial number and production"
+
+#: msgstr.str_batch_start
+msgid "Production batch started, chips to program: "
+msgstr "Production batch started, chips to program: "
+
+#: msgstr.str_batch_insert
+msgid "Insert chip %d of %d, then press OK"
+msgstr "Insert chip %d of %d, then press OK"
+
+#: msgstr.str_batch_unit_ok
+msgid "Chip %d: OK"
+msgstr "Chip %d: OK"
+
+#: msgstr.str_batch_unit_fail
+msgid "Chip %d: FAILED"
+msgstr "Chip %d: FAILED"
+
+#: msgstr.str_batch_summary
+msgid "Batch finished. Done %d, passed %d, failed %d"
+msgstr "Batch finished. Done %d, passed %d, failed %d"
+
+#: msgstr.str_serial_written
+msgid "Serial number written: "
+msgstr "Serial number written: "
+
+#: msgstr.str_serial_nofit
+msgid "Serial number does not fit in the buffer, skipped"
+msgstr "Serial number does not fit in the buffer, skipped"
+
+#: msgstr.str_unique_id
+msgid "Unique ID (4Bh): "
+msgstr "Unique ID (4Bh): "
+
+#: msgstr.str_secreg_header
+msgid "Security register %d at 0x%.6x:"
+msgstr "Security register %d at 0x%.6x:"
+
+#: msgstr.str_secreg_blank
+msgid "Security register %d at 0x%.6x: blank (all FF)"
+msgstr "Security register %d at 0x%.6x: blank (all FF)"
+
+#: msgstr.str_erase_too_fast
+msgid "Erase finished suspiciously fast. The chip may still be write protected - check the status register and the WP pin"
+msgstr "Erase finished suspiciously fast. The chip may still be write protected - check the status register and the WP pin"
+
+#: msgstr.str_auth_not_supported
+msgid "Authentication flash (96h): no response, this is not a W74M part"
+msgstr "Authentication flash (96h): no response, this is not a W74M part"
+
+#: msgstr.str_auth_status
+msgid "Authentication flash status (96h): 0x"
+msgstr "Authentication flash status (96h): 0x"
+
+#: msgstr.str_auth_counter
+msgid "Last returned counter data: "
+msgstr "Last returned counter data: "
+
+#: msgstr.str_auth_needs_key
+msgid "Counter and key commands (9Bh) are HMAC-SHA-256 signed and cannot be used without the root key"
+msgstr "Counter and key commands (9Bh) are HMAC-SHA-256 signed and cannot be used without the root key"
+
+#: msgstr.str_no_chip
+msgid "No chip answered. Check the socket, the orientation of pin 1, the cable and the supply voltage"
+msgstr "No chip answered. Check the socket, the orientation of pin 1, the cable and the supply voltage"
+
+#: msgstr.str_detect_one
+msgid "Chip detected and selected: "
+msgstr "Chip detected and selected: "
+
+#: msgstr.str_detect_many
+msgid "This ID matches %d chips, pick the right one from the list"
+msgstr "This ID matches %d chips, pick the right one from the list"
+
+#: msgstr.str_detect_none
+msgid "This ID is not in chiplist.xml and the chip has no SFDP table. Set size and page size by hand, or add the chip to chiplist.xml"
+msgstr "This ID is not in chiplist.xml and the chip has no SFDP table. Set size and page size by hand, or add the chip to chiplist.xml"
+
+#: msgstr.str_detect_sfdp
+msgid "Not in chiplist.xml, falling back to SFDP"
+msgstr "Not in chiplist.xml, falling back to SFDP"
+
+#: msgstr.str_vendor
+msgid "Manufacturer: "
+msgstr "Manufacturer: "
+
+#: msgstr.str_no_chip_selected
+msgid "No chip selected.\r\nPick one from the IC menu, or press Read ID."
+msgstr "No chip selected.\r\nPick one from the IC menu, or press Read ID."
+
+#: msgstr.str_hw_connected
+msgid "Programmer connected: "
+msgstr "Programmer connected: "
+
+#: msgstr.str_hw_disconnected
+msgid "No programmer connected"
+msgstr "No programmer connected"
+
+#: msgstr.str_hw_switched
+msgid "Switched to the programmer that is actually plugged in: "
+msgstr "Switched to the programmer that is actually plugged in: "
+
+#: msgstr.str_led_programmer
+msgid "Programmer"
+msgstr "Programmer"
+
+#: msgstr.str_led_chip
+msgid "Chip"
+msgstr "Chip"
+
+#: msgstr.str_pkg_unknown
+msgid "select a chip"
+msgstr "select a chip"
+
+#: msgstr.str_cmp_pick_first
+msgid "Pick the first file"
+msgstr "Pick the first file"
+
+#: msgstr.str_cmp_pick_second
+msgid "Pick the second file"
+msgstr "Pick the second file"
+
+#: msgstr.str_cmp_files
+msgid "Comparing two files:"
+msgstr "Comparing two files:"
+
+#: msgstr.str_cmp_size_diff
+msgid "Sizes differ, comparing the common part only. Difference: "
+msgstr "Sizes differ, comparing the common part only. Difference: "
+
+#: msgstr.str_cmp_read_first
+msgid "Reading the first chip..."
+msgstr "Reading the first chip..."
+
+#: msgstr.str_cmp_read_second
+msgid "Reading the second chip..."
+msgstr "Reading the second chip..."
+
+#: msgstr.str_cmp_swap
+msgid "Now swap in the second chip, then press OK."
+msgstr "Now swap in the second chip, then press OK."
+
+#: msgstr.str_hint_keys
+msgid "F5 detect   Ctrl+O open   Esc cancel   F1 console"
+msgstr "F5 detect   Ctrl+O open   Esc cancel   F1 console"
+
+#: msgstr.str_workflow_title
+msgid "Safe workflow"
+msgstr "Safe workflow"
+
+#: msgstr.str_workflow_detect
+msgid "1  Detect chip"
+msgstr "1  Detect chip"
+
+#: msgstr.str_workflow_open
+msgid "2  Open image"
+msgstr "2  Open image"
+
+#: msgstr.str_workflow_smart
+msgid "3  Smart write"
+msgstr "3  Smart write"
+
+#: msgstr.str_workflow_read
+msgid "Read chip"
+msgstr "Read chip"
+
+#: msgstr.str_workflow_verify
+msgid "Verify"
+msgstr "Verify"
+
+#: msgstr.str_workflow_connect
+msgid "Next: connect a programmer"
+msgstr "Next: connect a programmer"
+
+#: msgstr.str_workflow_pick_chip
+msgid "Next: detect or select a chip"
+msgstr "Next: detect or select a chip"
+
+#: msgstr.str_workflow_pick_list
+msgid "Next: pick the chip from the list (Read ID is SPI only)"
+msgstr "Next: pick the chip from the list (Read ID is SPI only)"
+
+#: msgstr.str_workflow_load
+msgid "Next: open an image or read the chip"
+msgstr "Next: open an image or read the chip"
+
+#: msgstr.str_workflow_ready
+msgid "Ready for Smart write"
+msgstr "Ready for Smart write"
+
+#: msgstr.str_workflow_legacy
+msgid "Ready - this memory type writes with the Write button"
+msgstr "Ready - this memory type writes with the Write button"
+
+#: msgstr.str_workflow_running
+msgid "Operation in progress - Esc cancels safely"
+msgstr "Operation in progress - Esc cancels safely"
+
+#: msgstr.str_workflow_no_size
+msgid "Next: set the chip size"
+msgstr "Next: set the chip size"
+
+#: msgstr.str_workflow_bad_addr
+msgid "The start address is not a hexadecimal number"
+msgstr "The start address is not a hexadecimal number"
+
+#: msgstr.str_workflow_too_big
+msgid "The image is %d bytes but only %d fit from 0x%s"
+msgstr "The image is %d bytes but only %d fit from 0x%s"
+
+#: msgstr.str_workflow_mw_odd
+msgid "MicroWire Smart write needs an even start address and length"
+msgstr "MicroWire Smart write needs an even start address and length"
+
+#: msgstr.str_workflow_bad_page
+msgid "Next: set a page size between 1 and 2048 bytes"
+msgstr "Next: set a page size between 1 and 2048 bytes"
+
+#: msgstr.str_wf_chip_picked
+msgid "Chip chosen by hand, not identified - press Detect chip to confirm"
+msgstr "Chip chosen by hand, not identified - press Detect chip to confirm"
+
+#: msgstr.str_wf_unread
+msgid "Ready, but the chip has not been read - you do not know what is on it"
+msgstr "Ready, but the chip has not been read - you do not know what is on it"
+
+#: msgstr.str_wf_blank
+msgid "Chip reads blank - nothing to lose, ready to write"
+msgstr "Chip reads blank - nothing to lose, ready to write"
+
+#: msgstr.str_wf_hasdata_backup
+msgid "Chip HAS DATA and it will be backed up first"
+msgstr "Chip HAS DATA and it will be backed up first"
+
+#: msgstr.str_wf_hasdata_nobak
+msgid "Chip HAS DATA and auto-backup is OFF - it will be lost"
+msgstr "Chip HAS DATA and auto-backup is OFF - it will be lost"
+
+#: msgstr.str_wf_hasdata_nobak2
+msgid "Chip HAS DATA and this family cannot be auto-backed up"
+msgstr "Chip HAS DATA and this family cannot be auto-backed up"
+
+#: msgstr.str_wf_same_as_chip
+msgid "Buffer was read from this chip - writing it back changes nothing"
+msgstr "Buffer was read from this chip - writing it back changes nothing"
+
+#: msgstr.str_wf_from_file
+msgid "from %s"
+msgstr "from %s"
+
+#: msgstr.str_wf_edited
+msgid "buffer edited by hand"
+msgstr "buffer edited by hand"
+
+#: msgstr.str_compare_see_log
+msgid "The differing ranges are listed in the log below,\r\nand highlighted in the editor."
+msgstr "The differing ranges are listed in the log below,\r\nand highlighted in the editor."
+
+#: msgstr.str_diff_in_editor
+msgid "The editor shows the second side, with the differing bytes highlighted"
+msgstr "The editor shows the second side, with the differing bytes highlighted"
+
+#: msgstr.str_diff_too_many
+msgid "Too many differences to highlight them all, stopped early"
+msgstr "Too many differences to highlight them all, stopped early"
+
+#: msgstr.str_busy_timeout
+msgid "The chip stayed busy for more than %d seconds. Giving up. Check the wiring, the supply voltage and the write protection"
+msgstr "The chip stayed busy for more than %d seconds. Giving up. Check the wiring, the supply voltage and the write protection"
+
+#: msgstr.str_not_responding
+msgid "No chip is answering. The status register reads back as FF, which is what an empty socket looks like. Check that the chip is seated the right way round, powered, and that CS is wired"
+msgstr "No chip is answering. The status register reads back as FF, which is what an empty socket looks like. Check that the chip is seated the right way round, powered, and that CS is wired"
+
+#: msgstr.str_wps_scanning
+msgid "WPS is set, so the individual block locks decide. Reading them"
+msgstr "WPS is set, so the individual block locks decide. Reading them"
+
+#: msgstr.str_wps_locked
+msgid "Block 0x%.8x is locked by its own lock bit"
+msgstr "Block 0x%.8x is locked by its own lock bit"
+
+#: msgstr.str_wps_unreadable
+msgid "WPS is set but the block lock bits could not be read (3Dh). Whether the target area is protected is unknown"
+msgstr "WPS is set but the block lock bits could not be read (3Dh). Whether the target area is protected is unknown"
+
+#: msgstr.str_wps_clear
+msgid "Block locks checked: no locked block covers the target area"
+msgstr "Block locks checked: no locked block covers the target area"
+
+#: msgstr.str_4b_native
+msgid "Using the chip's own four byte opcodes, no mode switch needed"
+msgstr "Using the chip's own four byte opcodes, no mode switch needed"
+
+#: msgstr.str_erase_map
+msgid "Erase plan from the SFDP sector map: %d commands covering 0x%.8x - 0x%.8x"
+msgstr "Erase plan from the SFDP sector map: %d commands covering 0x%.8x - 0x%.8x"
+
+#: msgstr.str_page_retry
+msgid "Page verify failed, writing it again. Attempt "
+msgstr "Page verify failed, writing it again. Attempt "
+
+#: msgstr.str_volt_warn
+msgid "This chip is a 1.8 V part.\r\n\r\nThe selected programmer does not supply 1.8 V. Powering the chip from 3.3 V or 5 V will destroy it.\r\n\r\nOnly continue if the chip is powered from an external 1.8 V supply with all grounds tied together.\r\n\r\nContinue?"
+msgstr "This chip is a 1.8 V part.\r\n\r\nThe selected programmer does not supply 1.8 V. Powering the chip from 3.3 V or 5 V will destroy it.\r\n\r\nOnly continue if the chip is powered from an external 1.8 V supply with all grounds tied together.\r\n\r\nContinue?"
+
+#: msgstr.str_volt_aborted
+msgid "Aborted because of the supply voltage"
+msgstr "Aborted because of the supply voltage"
+
+#: msgstr.str_not_blank
+msgid "The chip is not blank at 0x"
+msgstr "The chip is not blank at 0x"
+
+#: msgstr.str_not_blank_q
+msgid "The area to be written is not erased.\r\nWriting over data that is not erased usually fails.\r\n\r\nContinue anyway?"
+msgstr "The area to be written is not erased.\r\nWriting over data that is not erased usually fails.\r\n\r\nContinue anyway?"
+
+#: msgstr.str_blank_checking
+msgid "Checking that the target area is erased..."
+msgstr "Checking that the target area is erased..."
+
+#: msgstr.str_prot_header
+msgid "Status register: SR1=0x%.2x  SR2=0x%.2x"
+msgstr "Status register: SR1=0x%.2x  SR2=0x%.2x"
+
+#: msgstr.str_prot_range
+msgid "Protected: 0x%.8x - 0x%.8x  (%d KB)"
+msgstr "Protected: 0x%.8x - 0x%.8x  (%d KB)"
+
+#: msgstr.str_prot_none
+msgid "Nothing is write protected"
+msgstr "Nothing is write protected"
+
+#: msgstr.str_prot_caveat
+msgid "Bit layout read as Winbond W25Q, which most makers follow. Check the datasheet for anything unusual"
+msgstr "Bit layout read as Winbond W25Q, which most makers follow. Check the datasheet for anything unusual"
+
+#: msgstr.str_prot_layout
+msgid "Protection bit layout: %s"
+msgstr "Protection bit layout: %s"
+
+#: msgstr.str_prot_extent_unknown
+msgid "Something is protected on this chip, but the extent cannot be read from the status register alone on this vendor. Treating it as protected"
+msgstr "Something is protected on this chip, but the extent cannot be read from the status register alone on this vendor. Treating it as protected"
+
+#: msgstr.str_wren_refused
+msgid "The chip did not accept write enable: WEL stayed clear. That is what a WP# pin held low, a locked status register or a bad connection looks like. Nothing was written"
+msgstr "The chip did not accept write enable: WEL stayed clear. That is what a WP# pin held low, a locked status register or a bad connection looks like. Nothing was written"
+
+#: msgstr.str_chip_reported_fail
+msgid "The chip reported a failure: %s"
+msgstr "The chip reported a failure: %s"
+
+#: msgstr.str_sr_lock
+msgid "Status register protection: %s"
+msgstr "Status register protection: %s"
+
+#: msgstr.str_fast_read
+msgid "Reading with the fast read opcode 0x%.2x"
+msgstr "Reading with the fast read opcode 0x%.2x"
+
+#: msgstr.str_resetting
+msgid "Resetting the chip before starting"
+msgstr "Resetting the chip before starting"
+
+#: msgstr.str_qpi_recover
+msgid "The id read back as all %.2x. Trying a QPI exit and a reset in case another tool left the chip in a mode it cannot answer in"
+msgstr "The id read back as all %.2x. Trying a QPI exit and a reset in case another tool left the chip in a mode it cannot answer in"
+
+#: msgstr.str_contact_checking
+msgid "Checking the connection is stable..."
+msgstr "Checking the connection is stable..."
+
+#: msgstr.str_contact_unstable
+msgid "The chip id changed between reads (%s then %s). The connection is not reliable: reseat the clip, shorten the cable or lower the clock. Nothing was done"
+msgstr "The chip id changed between reads (%s then %s). The connection is not reliable: reseat the clip, shorten the cable or lower the clock. Nothing was done"
+
+#: msgstr.str_contact_ok
+msgid "Connection stable: the id read back the same %d times"
+msgstr "Connection stable: the id read back the same %d times"
+
+#: msgstr.str_blank_after_erase
+msgid "Checking the erase actually took..."
+msgstr "Checking the erase actually took..."
+
+#: msgstr.str_erase_did_not_take
+msgid "The erase did not take: 0x%.8x still reads 0x%.2x. The chip accepted the command and ignored it, which means it is still protected"
+msgstr "The erase did not take: 0x%.8x still reads 0x%.2x. The chip accepted the command and ignored it, which means it is still protected"
+
+#: msgstr.str_read_pass
+msgid "Read pass %d of %d"
+msgstr "Read pass %d of %d"
+
+#: msgstr.str_read_unstable
+msgid "The two reads of this chip disagree in %d bytes, first at 0x%.8x. One of them is wrong and there is no way to tell which. Reseat the clip and lower the clock"
+msgstr "The two reads of this chip disagree in %d bytes, first at 0x%.8x. One of them is wrong and there is no way to tell which. Reseat the clip and lower the clock"
+
+#: msgstr.str_read_stable
+msgid "Both reads agree, so the dump can be trusted"
+msgstr "Both reads agree, so the dump can be trusted"
+
+#: msgstr.str_read_retry_slower
+msgid "Dropping the SPI clock to %s and reading again before giving up"
+msgstr "Dropping the SPI clock to %s and reading again before giving up"
+
+#: msgstr.str_erase_wear_warning
+msgid "Wear warning: %d blocks erased more than five times slower than the rest (worst %d ms at 0x%.8x, median %d ms). Flash slows down before it fails; consider retiring this chip"
+msgstr "Wear warning: %d blocks erased more than five times slower than the rest (worst %d ms at 0x%.8x, median %d ms). Flash slows down before it fails; consider retiring this chip"
+
+#: msgstr.str_read_stable_slower
+msgid "The dump only became stable at %s, below the selected clock. Reseat the clip, or keep the clock at this speed"
+msgstr "The dump only became stable at %s, below the selected clock. Reseat the clip, or keep the clock at this speed"
+
+#: msgstr.str_img_stats
+msgid "Dump: %s"
+msgstr "Dump: %s"
+
+#: msgstr.str_ifd_regions
+msgid "Intel flash descriptor regions (use --region NAME on the command line to work on one):"
+msgstr "Intel flash descriptor regions (use --region NAME on the command line to work on one):"
+
+#: msgstr.str_img_kind
+msgid "The dump looks like a %s"
+msgstr "The dump looks like a %s"
+
+#: msgstr.str_img_suspect
+msgid "Suspicious dump: %s"
+msgstr "Suspicious dump: %s"
+
+#: msgstr.str_timeout_from_chip
+msgid "Busy ceilings taken from the chip: page %d ms, erase %d ms, chip erase %d ms"
+msgstr "Busy ceilings taken from the chip: page %d ms, erase %d ms, chip erase %d ms"
+
+#: msgstr.str_global_unlock
+msgid "WPS is set, so the block protect bits decide nothing. Releasing the individual block locks as well (98h)"
+msgstr "WPS is set, so the block protect bits decide nothing. Releasing the individual block locks as well (98h)"
+
+#: msgstr.str_unlock_failed
+msgid "The chip accepted the unlock and stayed protected. Check the WP# pin, and whether this part needs its configuration register changed too"
+msgstr "The chip accepted the unlock and stayed protected. Check the WP# pin, and whether this part needs its configuration register changed too"
+
+#: msgstr.str_unlock_ok
+msgid "Unlocked: nothing on this chip is write protected now"
+msgstr "Unlocked: nothing on this chip is write protected now"
+
+#: msgstr.str_qe_kept
+msgid "Quad enable was left set, as it was before"
+msgstr "Quad enable was left set, as it was before"
+
+#: msgstr.str_otp_title
+msgid "Security register"
+msgstr "Security register"
+
+#: msgstr.str_otp_which
+msgid "Which register, 1 to 3?"
+msgstr "Which register, 1 to 3?"
+
+#: msgstr.str_otp_erase_q
+msgid "Erase it instead of writing to it?"
+msgstr "Erase it instead of writing to it?"
+
+#: msgstr.str_otp_need_256
+msgid "The editor needs at least 256 bytes: its first 256 bytes are written"
+msgstr "The editor needs at least 256 bytes: its first 256 bytes are written"
+
+#: msgstr.str_otp_confirm
+msgid "Security register %d can be locked permanently, and once locked nothing can change it again.\r\n\r\nContinue?"
+msgstr "Security register %d can be locked permanently, and once locked nothing can change it again.\r\n\r\nContinue?"
+
+#: msgstr.str_otp_writing
+msgid "Writing security register %d..."
+msgstr "Writing security register %d..."
+
+#: msgstr.str_otp_erasing
+msgid "Erasing security register %d..."
+msgstr "Erasing security register %d..."
+
+#: msgstr.str_driver_hint
+msgid "If the programmer is plugged in, its driver is probably missing. Install it from "
+msgstr "If the programmer is plugged in, its driver is probably missing. Install it from "
+
+#: msgstr.str_driver_hint_com
+msgid "Check the COM port setting and that no other program is holding the port open"
+msgstr "Check the COM port setting and that no other program is holding the port open"
+
+#: msgstr.str_guard_blocked
+msgid "The area to be changed is write protected: 0x%.8x - 0x%.8x"
+msgstr "The area to be changed is write protected: 0x%.8x - 0x%.8x"
+
+#: msgstr.str_guard_q
+msgid "Part of the area you are about to change is write protected by the status register.\r\n\r\nThe chip will silently ignore the erase or the write, and the result will look like a verify failure.\r\n\r\nPress \"Unprotect\" first. Continue anyway?"
+msgstr "Part of the area you are about to change is write protected by the status register.\r\n\r\nThe chip will silently ignore the erase or the write, and the result will look like a verify failure.\r\n\r\nPress \"Unprotect\" first. Continue anyway?"
+
+#: msgstr.str_guard_refused
+msgid "Refusing to continue while the target area is write protected. Press \"Unprotect\" first, or pass --force"
+msgstr "Refusing to continue while the target area is write protected. Press \"Unprotect\" first, or pass --force"
+
+#: msgstr.str_guard_srp1
+msgid "SRP1 is set: the status register is locked by hardware and software cannot unprotect this chip"
+msgstr "SRP1 is set: the status register is locked by hardware and software cannot unprotect this chip"
+
+#: msgstr.str_guard_ok
+msgid "Write protection checked: the target area is writable"
+msgstr "Write protection checked: the target area is writable"
+
+#: msgstr.str_op_result
+msgid "Result: "
+msgstr "Result: "
+
+#: msgstr.str_sfdp_4b_entry
+msgid "  4 byte address mode: "
+msgstr "  4 byte address mode: "
+
+#: msgstr.str_sfdp_4b_opcodes
+msgid "  4 byte opcodes: read 0x%.2x, page program 0x%.2x"
+msgstr "  4 byte opcodes: read 0x%.2x, page program 0x%.2x"
+
+#: msgstr.str_sfdp_sr_wren
+msgid "  Status register write enable: 0x%.2x"
+msgstr "  Status register write enable: 0x%.2x"
+
+#: msgstr.str_sfdp_reset
+msgid "  Soft reset: "
+msgstr "  Soft reset: "
+
+#: msgstr.str_sfdp_map_header
+msgid "  Sector map: %d regions, %s"
+msgstr "  Sector map: %d regions, %s"
+
+#: msgstr.str_sfdp_map_uniform
+msgid "uniform"
+msgstr "uniform"
+
+#: msgstr.str_sfdp_map_mixed
+msgid "NOT uniform - this chip has boot blocks of a different size"
+msgstr "NOT uniform - this chip has boot blocks of a different size"
+
+#: msgstr.str_sfdp_map_region
+msgid "    region %d: %d bytes, erase %d bytes with 0x%.2x"
+msgstr "    region %d: %d bytes, erase %d bytes with 0x%.2x"
+
+#: msgstr.str_chipsave_q
+msgid "Save this chip into %s so it is picked up next time?"
+msgstr "Save this chip into %s so it is picked up next time?"
+
+#: msgstr.str_chipsave_ok
+msgid "Chip saved into "
+msgstr "Chip saved into "
+
+#: msgstr.str_chipsave_fail
+msgid "Could not save the chip: "
+msgstr "Could not save the chip: "
+
+#: msgstr.str_chipsave_noname
+msgid "Name for the new chip entry"
+msgstr "Name for the new chip entry"
+
+#: msgstr.str_prod_uid_seen
+msgid "This chip has already been programmed and logged as passed. Unique ID: "
+msgstr "This chip has already been programmed and logged as passed. Unique ID: "
+
+#: msgstr.str_prod_logged
+msgid "Production log updated: "
+msgstr "Production log updated: "
+
+#: msgstr.str_prod_log_fail
+msgid "Could not write the production log: "
+msgstr "Could not write the production log: "
+
+#: msgstr.str_job_loaded
+msgid "Job file loaded: "
+msgstr "Job file loaded: "
+
+#: msgstr.str_job_failed
+msgid "Job file rejected the buffer: "
+msgstr "Job file rejected the buffer: "
+
+#: msgstr.str_job_ok
+msgid "Job file check passed"
+msgstr "Job file check passed"

@@ -31,7 +31,7 @@ unit spi25nandadapter;
 interface
 
 uses
-  SysUtils, BaseHW, nandmodel, nandengine;
+  SysUtils, BaseHW, nandmodel, nandengine, nandcatalog;
 
 const
   NAND_FEAT_PROTECTION = $A0;
@@ -57,6 +57,7 @@ type
     ProgramTimeoutMs: cardinal;  //hundreds of microseconds typically
     EraseTimeoutMs: cardinal;    //up to ~10 ms per block
     ResetTimeoutMs: cardinal;
+    DrainTimeoutMs: cardinal;    //post-error proof that OIP really cleared
     PollDelayMs: cardinal;       //0 = spin as fast as the bus allows
   end;
 
@@ -85,6 +86,11 @@ type
     function Reset: TNANDIOResult;
     //Raw bytes clocked out after 9Fh, for nandcatalog.NANDIdentify.
     function ReadRawID(out Raw: TBytes): TNANDIOResult;
+    //Read consecutive 256-byte ONFI parameter-page copies from the checked
+    //vendor mode in nandcatalog, restoring B0h exactly on every exit path.
+    function ReadONFIParameterPages(
+      const Access: TSPINANDParameterPageAccess;
+      out Raw: TBytes): TNANDIOResult;
 
     function ReadPage(Block, Page, Offset, Len: cardinal; out Data: TBytes;
       out ECC: TNANDECCStatus): TNANDIOResult; override;
@@ -94,6 +100,12 @@ type
       TNANDIOResult; override;
     function SetECC(Enabled: boolean): TNANDIOResult; override;
     function GetECC(out Enabled: boolean): TNANDIOResult; override;
+    function GetProtection(out Value: byte): TNANDIOResult; override;
+    function SetProtection(Value: byte): TNANDIOResult; override;
+    function GetConfiguration(out Value: byte): TNANDIOResult; override;
+    function SetConfiguration(Value: byte): TNANDIOResult; override;
+    function EnsureIdle: TNANDIOResult; override;
+    function WriteDisable: TNANDIOResult; override;
     function UnlockAll: TNANDIOResult; override;
   end;
 
@@ -109,6 +121,7 @@ begin
   Result.ProgramTimeoutMs := 200;
   Result.EraseTimeoutMs := 1000;
   Result.ResetTimeoutMs := 500;
+  Result.DrainTimeoutMs := 2000;
   Result.PollDelayMs := 0;
 end;
 
@@ -251,6 +264,9 @@ begin
   //ชิปที่ WP# ค้างต่ำรับ 06h แล้วเมินเฉย อ่าน WEL กลับมาดูก่อนจะเชื่อ
   Result := GetFeature(NAND_FEAT_STATUS, Status);
   if not Result.Success then Exit;
+  if Status = $FF then
+    Exit(NANDIOFailure(nnioTransport,
+      'write enable: the status bus reads FF; no chip is answering'));
   if (Status and NAND_STATUS_WEL) = 0 then
     Exit(NANDIOFailure(nnioRejected,
       'the chip did not accept write enable (WP# held low, or protected)'));
@@ -293,6 +309,81 @@ begin
   Header[0] := $9F;
   //สี่ไบต์พอสำหรับทั้งทรง [dummy][mfr][dev][dev] และ [mfr][dev][dev]
   Result := Exchange(Header, 4, Raw, 'read id');
+end;
+
+function TSPINANDDevice.ReadONFIParameterPages(
+  const Access: TSPINANDParameterPageAccess;
+  out Raw: TBytes): TNANDIOResult;
+var
+  Before, Wanted, AfterRestore, Active: byte;
+  Block, Page: cardinal;
+  ReadLength: QWord;
+  ECC: TNANDECCStatus;
+  RestoreIO: TNANDIOResult;
+  PrimaryError: string;
+begin
+  Raw := nil;
+  if not Access.Supported then
+    Exit(NANDIOFailure(nnioRejected,
+      'this catalog entry has no verified ONFI parameter-page access mode'));
+  if Access.CopyCount = 0 then
+    Exit(NANDIOFailure(nnioRejected,
+      'the ONFI parameter-page copy count is zero'));
+  if FGeometry.PagesPerBlock = 0 then
+    Exit(NANDIOFailure(nnioRejected, 'the NAND geometry has no pages'));
+
+  Block := Access.RowAddress div FGeometry.PagesPerBlock;
+  Page := Access.RowAddress mod FGeometry.PagesPerBlock;
+  ReadLength := QWord(Access.CopyCount) * 256;
+  if (Block >= FGeometry.BlockCount) or
+     (ReadLength > QWord(FGeometry.PageSize) + QWord(FGeometry.SpareSize)) or
+     (ReadLength > High(cardinal)) then
+    Exit(NANDIOFailure(nnioRejected,
+      'the ONFI parameter-page cache range is outside this NAND geometry'));
+
+  Result := GetFeature(NAND_FEAT_CONFIG, Before);
+  if not Result.Success then Exit;
+  Wanted := (Before or Access.ConfigSetMask) and
+            (not Access.ConfigClearMask);
+
+  //Set-feature changes persistent device state until explicitly restored.
+  //Once the original byte is known, every path below must attempt cleanup.
+  try
+    Result := SetFeature(NAND_FEAT_CONFIG, Wanted);
+    if not Result.Success then Exit;
+    Result := GetFeature(NAND_FEAT_CONFIG, Active);
+    if not Result.Success then Exit;
+    if ((Active and Access.ConfigSetMask) <> Access.ConfigSetMask) or
+       ((Active and Access.ConfigClearMask) <> 0) then
+    begin
+      Result := NANDIOFailure(nnioRejected, Format(
+        'the ONFI parameter-page mode did not stick (B0h reads %.2x)',
+        [Active]));
+      Exit;
+    end;
+
+    Result := ReadPage(Block, Page, 0, cardinal(ReadLength), Raw, ECC);
+  finally
+    PrimaryError := Result.ErrorText;
+    RestoreIO := SetFeature(NAND_FEAT_CONFIG, Before);
+    if RestoreIO.Success then
+    begin
+      RestoreIO := GetFeature(NAND_FEAT_CONFIG, AfterRestore);
+      if RestoreIO.Success and (AfterRestore <> Before) then
+        RestoreIO := NANDIOFailure(nnioRejected, Format(
+          'configuration restore did not stick (wanted %.2x, read %.2x)',
+          [Before, AfterRestore]));
+    end;
+    if not RestoreIO.Success then
+    begin
+      Raw := nil;
+      if PrimaryError <> '' then
+        PrimaryError := PrimaryError + '; ';
+      Result := NANDIOFailure(RestoreIO.Error,
+        PrimaryError + 'restoring B0h after ONFI read failed: ' +
+        RestoreIO.ErrorText);
+    end;
+  end;
 end;
 
 function TSPINANDDevice.ReadPage(Block, Page, Offset, Len: cardinal;
@@ -367,11 +458,20 @@ begin
   Command[2] := byte(Row shr 8);
   Command[3] := byte(Row);
   Result := WriteExact(1, Command, 'program execute');
-  if not Result.Success then Exit;
+  if not Result.Success then
+  begin
+    Result.MutationState := nimsPossiblyIssued;
+    Exit;
+  end;
 
   Result := WaitReady(FConfig.ProgramTimeoutMs, 'program', Status);
-  if not Result.Success then Exit;
+  if not Result.Success then
+  begin
+    Result.MutationState := nimsPossiblyIssued;
+    Exit;
+  end;
   ProgramFailed := (Status and NAND_STATUS_P_FAIL) <> 0;
+  Result.MutationState := nimsCompletedIdle;
 end;
 
 function TSPINANDDevice.EraseBlock(Block: cardinal;
@@ -395,11 +495,20 @@ begin
   Command[2] := byte(Row shr 8);
   Command[3] := byte(Row);
   Result := WriteExact(1, Command, 'block erase');
-  if not Result.Success then Exit;
+  if not Result.Success then
+  begin
+    Result.MutationState := nimsPossiblyIssued;
+    Exit;
+  end;
 
   Result := WaitReady(FConfig.EraseTimeoutMs, 'erase', Status);
-  if not Result.Success then Exit;
+  if not Result.Success then
+  begin
+    Result.MutationState := nimsPossiblyIssued;
+    Exit;
+  end;
   EraseFailed := (Status and NAND_STATUS_E_FAIL) <> 0;
+  Result.MutationState := nimsCompletedIdle;
 end;
 
 function TSPINANDDevice.SetECC(Enabled: boolean): TNANDIOResult;
@@ -427,6 +536,78 @@ var
 begin
   Result := GetFeature(NAND_FEAT_CONFIG, Value);
   Enabled := Result.Success and ((Value and NAND_CONFIG_ECC_E) <> 0);
+end;
+
+function TSPINANDDevice.GetProtection(out Value: byte): TNANDIOResult;
+begin
+  Result := GetFeature(NAND_FEAT_PROTECTION, Value);
+end;
+
+function TSPINANDDevice.SetProtection(Value: byte): TNANDIOResult;
+begin
+  Result := SetFeature(NAND_FEAT_PROTECTION, Value);
+end;
+
+function TSPINANDDevice.GetConfiguration(out Value: byte): TNANDIOResult;
+begin
+  Result := GetFeature(NAND_FEAT_CONFIG, Value);
+end;
+
+function TSPINANDDevice.SetConfiguration(Value: byte): TNANDIOResult;
+begin
+  Result := SetFeature(NAND_FEAT_CONFIG, Value);
+end;
+
+function TSPINANDDevice.EnsureIdle: TNANDIOResult;
+var
+  Deadline: QWord;
+  Status: byte;
+  LastError: string;
+begin
+  //Unlike the normal operation poll, cleanup must tolerate a transient
+  //transport failure: keep trying inside one strict deadline. Success still
+  //requires an actual non-FF status sample with OIP observed clear.
+  Deadline := GetTickCount64 + QWord(FConfig.DrainTimeoutMs);
+  LastError := '';
+  repeat
+    Result := GetFeature(NAND_FEAT_STATUS, Status);
+    if Result.Success then
+    begin
+      if Status = $FF then
+        LastError := 'the status bus reads FF; no chip is answering'
+      else if (Status and NAND_STATUS_OIP) = 0 then
+        Exit(NANDIOSuccess)
+      else
+        LastError := 'OIP remains set';
+    end
+    else
+      LastError := Result.ErrorText;
+
+    if GetTickCount64 >= Deadline then
+      Exit(NANDIOFailure(nnioTimeout, Format(
+        'mutation drain could not prove idle after %d ms: %s',
+        [FConfig.DrainTimeoutMs, LastError])));
+    if FConfig.PollDelayMs > 0 then Sleep(FConfig.PollDelayMs);
+  until False;
+end;
+
+function TSPINANDDevice.WriteDisable: TNANDIOResult;
+var
+  Command: TBytes;
+  Status: byte;
+begin
+  SetLength(Command, 1);
+  Command[0] := $04;
+  Result := WriteExact(1, Command, 'write disable');
+  if not Result.Success then Exit;
+  Result := GetFeature(NAND_FEAT_STATUS, Status);
+  if not Result.Success then Exit;
+  if Status = $FF then
+    Exit(NANDIOFailure(nnioTransport,
+      'write disable: the status bus reads FF; no chip is answering'));
+  if (Status and NAND_STATUS_WEL) <> 0 then
+    Exit(NANDIOFailure(nnioRejected,
+      'write disable did not clear WEL in the status register'));
 end;
 
 function TSPINANDDevice.UnlockAll: TNANDIOResult;

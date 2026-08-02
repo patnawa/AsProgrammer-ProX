@@ -71,12 +71,22 @@ type
     FEvidenceCommit: TOperationEvidenceProc;
     FExecuting: LongInt;
     FOptions: TNORExecutorOptions;
+    function ExecuteInternal(const Request: TOperationRequest;
+      const Plan: TNORPlan; const Geometry: TNORGeometry;
+      const ExpectedPreimage: TBytes; BindPreimage: boolean;
+      Token: TCancellationToken): TOperationOutcome;
   public
     constructor Create(Device: TNORDevice;
       OnEvent: TOperationEventProc = nil; Clock: TOperationClockProc = nil;
       EvidenceCommit: TOperationEvidenceProc = nil);
     function Execute(const Request: TOperationRequest; const Plan: TNORPlan;
       const Geometry: TNORGeometry; Token: TCancellationToken): TOperationOutcome;
+    // Re-open, initialize, and prove that the complete chip still equals the
+    // trusted planning snapshot in the same uninterrupted session as any
+    // mutation.  No WREN is issued when this admission check fails.
+    function ExecuteBound(const Request: TOperationRequest; const Plan: TNORPlan;
+      const Geometry: TNORGeometry; const ExpectedPreimage: TBytes;
+      Token: TCancellationToken): TOperationOutcome;
     property Options: TNORExecutorOptions read FOptions write FOptions;
   end;
 
@@ -176,6 +186,23 @@ end;
 function TNORPlanExecutor.Execute(const Request: TOperationRequest;
   const Plan: TNORPlan; const Geometry: TNORGeometry;
   Token: TCancellationToken): TOperationOutcome;
+begin
+  Result := ExecuteInternal(Request, Plan, Geometry, nil, False, Token);
+end;
+
+function TNORPlanExecutor.ExecuteBound(const Request: TOperationRequest;
+  const Plan: TNORPlan; const Geometry: TNORGeometry;
+  const ExpectedPreimage: TBytes;
+  Token: TCancellationToken): TOperationOutcome;
+begin
+  Result := ExecuteInternal(Request, Plan, Geometry, ExpectedPreimage, True,
+    Token);
+end;
+
+function TNORPlanExecutor.ExecuteInternal(const Request: TOperationRequest;
+  const Plan: TNORPlan; const Geometry: TNORGeometry;
+  const ExpectedPreimage: TBytes; BindPreimage: boolean;
+  Token: TCancellationToken): TOperationOutcome;
 var
   State: TOperationStateMachine;
   LocalToken: TCancellationToken;
@@ -187,7 +214,7 @@ var
   StepIndex, ByteIndex: SizeInt;
   Polls, CommandTimeoutMs: cardinal;
   DoneBytes, TotalBytes: QWord;
-  ReadBack: TBytes;
+  ReadBack, SessionPreimage: TBytes;
   Err, EvidenceError: string;
 
   procedure FailFromIO(const Context: string; const IO: TNORIOResult;
@@ -351,6 +378,13 @@ begin
               (Request.Chip.Capacity <> Geometry.ChipSize) then
         SetPending(Pending, oeInvalidRequest,
           'request chip capacity does not match plan geometry', ddNotOpened)
+      else if BindPreimage and
+              (QWord(Length(ExpectedPreimage)) <> Geometry.ChipSize) then
+        SetPending(Pending, oeInvalidRequest,
+          'bound preimage length does not match plan geometry', ddNotOpened)
+      else if BindPreimage and (Geometry.ChipSize > High(cardinal)) then
+        SetPending(Pending, oeInvalidRequest,
+          'bound preimage is too large for one exact device read', ddNotOpened)
       else if Request.Policy.RequireFullVerify and
               (not NORPlanVerifyCoversRequestedRange(Plan)) then
         SetPending(Pending, oeInvalidPlan,
@@ -393,9 +427,36 @@ begin
 
       if Pending.Code = oeNone then
       begin
-        // Identification/contact/backup/protection are intentionally separate
-        // future adapters.  This executor consumes a plan only after those
-        // gates have produced a trusted snapshot and immutable plan.
+        if BindPreimage then
+        begin
+          State.AdvanceTo(opCheckingContact);
+          SessionPreimage := nil;
+          R := FDevice.Read(0, cardinal(Geometry.ChipSize), SessionPreimage);
+          if not R.Success then
+            FailFromIO('bound preimage read', R, oeTransport, 0, True, False)
+          else if (R.Transferred <> Geometry.ChipSize) or
+                  (QWord(Length(SessionPreimage)) <> Geometry.ChipSize) then
+            SetPending(Pending, oeShortTransfer,
+              Format('bound preimage read returned %d of %d bytes',
+                [R.Transferred, Geometry.ChipSize]), ddKnownSafe, 0, True)
+          else
+            for ByteIndex := 0 to High(SessionPreimage) do
+              if SessionPreimage[ByteIndex] <> ExpectedPreimage[ByteIndex] then
+              begin
+                SetPending(Pending, oeContactUnstable,
+                  'chip content changed since the trusted planning snapshot',
+                  ddKnownSafe, QWord(ByteIndex), True);
+                Break;
+              end;
+          SessionPreimage := nil;
+        end;
+      end;
+
+      if Pending.Code = oeNone then
+      begin
+        // Identity, backup, and protection are separate admission adapters.
+        // Bound callers additionally prove the trusted snapshot above without
+        // releasing this physical session before mutation.
         State.AdvanceTo(opPlanning);
         State.AdvanceTo(opExecuting);
         // Progress is byte-denominated: consumers publish these values as
@@ -579,9 +640,19 @@ begin
           else
           begin
             EvidenceError := '';
-            if not FEvidenceCommit(Request, EvidenceError) then
-              SetPending(Pending, oeEvidenceCommitFailed,
-                'evidence commit failed: ' + EvidenceError, ddKnownSafe);
+            try
+              if not FEvidenceCommit(Request, EvidenceError) then
+                SetPending(Pending, oeEvidenceCommitFailed,
+                  'evidence commit failed: ' + EvidenceError, ddKnownSafe);
+            except
+              on E: Exception do
+                // Physical verification and bus cleanup have already
+                // completed.  A storage callback exception is therefore an
+                // evidence failure, not a transport ambiguity.
+                SetPending(Pending, oeEvidenceCommitFailed,
+                  'evidence commit raised ' + E.ClassName + ': ' + E.Message,
+                  ddKnownSafe);
+            end;
           end;
         end;
 

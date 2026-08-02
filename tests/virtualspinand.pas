@@ -26,10 +26,17 @@ type
     FErased: array of boolean; //per page: erased since last program?
     FECCOn: boolean;
     FLocked: boolean;
+    FProtection: byte;
+    FConfiguration: byte;
+    FBusy: boolean;
+    FWriteEnabled: boolean;
     FCallCount: integer;
 
     function PageIndex(Block, Page: cardinal): SizeInt;
     function CallGate(out IO: TNANDIOResult): boolean;
+    procedure SetLocked(Value: boolean);
+    procedure SetProtectionValue(Value: byte);
+    procedure SetConfigurationValue(Value: byte);
   public
     //Inject a failure into the Nth device call (1-based); 0 = never.
     FailAtCall: integer;
@@ -39,17 +46,30 @@ type
     //Completion-flag injection.
     FailProgramBlock, FailProgramPage: integer;  //-1 = never
     FailEraseBlock: integer;                     //-1 = never
+    FailProgramAfterWREN, FailEraseAfterWREN: boolean;
+    FailProgramAfterIssue, FailEraseAfterIssue: boolean;
+    FailEnsureIdle, RemainBusy: boolean;
+    FailWriteDisable: boolean;
+    FailConfigurationRestore, FailProtectionRestore: boolean;
     //Counters the tests assert on.
-    EraseCalls, ProgramCalls, ReadCalls: integer;
+    EraseCalls, ProgramCalls, ReadCalls, EnsureIdleCalls,
+      WriteDisableCalls: integer;
+    ReadBytes: QWord;
     ECCOffDuringScan: boolean; //latched whenever a spare read sees ECC off
 
     constructor Create(const Geometry: TNANDGeometry);
     procedure MarkFactoryBad(Block: cardinal);
+    procedure MarkFactoryBadOnSecondPage(Block: cardinal);
+    procedure SeedMain(Block, Page, Offset: cardinal; Value: byte);
     procedure InjectCorrected(Block, Page: cardinal);
     procedure InjectUncorrectable(Block, Page: cardinal);
     function MainByte(Block, Page, Offset: cardinal): byte;
-    property Locked: boolean read FLocked write FLocked;
+    property Locked: boolean read FLocked write SetLocked;
     property ECCOn: boolean read FECCOn write FECCOn;
+    property ProtectionValue: byte read FProtection write SetProtectionValue;
+    property ConfigurationValue: byte read FConfiguration
+      write SetConfigurationValue;
+    property WriteEnabled: boolean read FWriteEnabled;
     //Every device call ever made, feature calls included; the fault matrix
     //aims FailAtCall relative to this.
     property CallCount: integer read FCallCount;
@@ -62,6 +82,12 @@ type
       TNANDIOResult; override;
     function SetECC(Enabled: boolean): TNANDIOResult; override;
     function GetECC(out Enabled: boolean): TNANDIOResult; override;
+    function GetProtection(out Value: byte): TNANDIOResult; override;
+    function SetProtection(Value: byte): TNANDIOResult; override;
+    function GetConfiguration(out Value: byte): TNANDIOResult; override;
+    function SetConfiguration(Value: byte): TNANDIOResult; override;
+    function EnsureIdle: TNANDIOResult; override;
+    function WriteDisable: TNANDIOResult; override;
     function UnlockAll: TNANDIOResult; override;
   end;
 
@@ -88,10 +114,41 @@ begin
   end;
   FECCOn := True;      //on-die ECC ships enabled on real parts
   FLocked := True;     //and so does block protection
+  FProtection := $78;
+  FConfiguration := $10;
+  FBusy := False;
+  FWriteEnabled := False;
   FailAtCall := 0;
   FailProgramBlock := -1;
   FailProgramPage := -1;
   FailEraseBlock := -1;
+  FailProgramAfterWREN := False;
+  FailEraseAfterWREN := False;
+  FailProgramAfterIssue := False;
+  FailEraseAfterIssue := False;
+  FailEnsureIdle := False;
+  RemainBusy := False;
+  FailWriteDisable := False;
+  FailConfigurationRestore := False;
+  FailProtectionRestore := False;
+end;
+
+procedure TVirtualSPINAND.SetLocked(Value: boolean);
+begin
+  FLocked := Value;
+  if Value then FProtection := $78 else FProtection := $00;
+end;
+
+procedure TVirtualSPINAND.SetProtectionValue(Value: byte);
+begin
+  FProtection := Value;
+  FLocked := (Value and $78) <> 0;
+end;
+
+procedure TVirtualSPINAND.SetConfigurationValue(Value: byte);
+begin
+  FConfiguration := Value;
+  FECCOn := (Value and $10) <> 0;
 end;
 
 function TVirtualSPINAND.PageIndex(Block, Page: cardinal): SizeInt;
@@ -114,6 +171,16 @@ end;
 procedure TVirtualSPINAND.MarkFactoryBad(Block: cardinal);
 begin
   FSpare[PageIndex(Block, 0)][0] := $00;
+end;
+
+procedure TVirtualSPINAND.MarkFactoryBadOnSecondPage(Block: cardinal);
+begin
+  FSpare[PageIndex(Block, 1)][0] := $00;
+end;
+
+procedure TVirtualSPINAND.SeedMain(Block, Page, Offset: cardinal; Value: byte);
+begin
+  FMain[PageIndex(Block, Page)][Offset] := Value;
 end;
 
 procedure TVirtualSPINAND.InjectCorrected(Block, Page: cardinal);
@@ -149,6 +216,8 @@ begin
      (Page >= FGeometry.PagesPerBlock) or
      (Offset + Len > FGeometry.PageSize + FGeometry.SpareSize) then
     Exit(NANDIOFailure(nnioRejected, 'address outside the chip'));
+
+  Inc(ReadBytes, Len);
 
   Idx := PageIndex(Block, Page);
 
@@ -205,11 +274,31 @@ begin
   //พฤติกรรมจริงที่ทำให้ engine ต้องปลดล็อกและอ่านทะเบียนกลับก่อนเสมอ
   if FLocked then Exit(NANDIOSuccess);
 
+  //Model the internal WREN performed by the real adapter. A failure after
+  //this point but before program execute leaves no OIP to drain, yet WEL can
+  //remain set until an explicit 04h.
+  FWriteEnabled := True;
+  if FailProgramAfterWREN then
+    Exit(NANDIOFailure(nnioTransport,
+      'injected transport failure after WREN/program load'));
+
+  if FailProgramAfterIssue then
+  begin
+    FBusy := True;
+    Result := NANDIOFailure(nnioTransport,
+      'injected transport failure after program execute');
+    Result.MutationState := nimsPossiblyIssued;
+    Exit;
+  end;
+
   if (FailProgramBlock >= 0) and (cardinal(FailProgramBlock) = Block) and
      (cardinal(FailProgramPage) = Page) then
   begin
     ProgramFailed := True;
-    Exit(NANDIOSuccess);
+    FWriteEnabled := False;
+    Result := NANDIOSuccess;
+    Result.MutationState := nimsCompletedIdle;
+    Exit;
   end;
 
   Idx := PageIndex(Block, Page);
@@ -225,7 +314,9 @@ begin
           FSpare[Idx][Offset + i - FGeometry.PageSize] and Data[i];
     end;
   FErased[Idx] := False;
+  FWriteEnabled := False;
   Result := NANDIOSuccess;
+  Result.MutationState := nimsCompletedIdle;
 end;
 
 function TVirtualSPINAND.EraseBlock(Block: cardinal;
@@ -243,10 +334,27 @@ begin
 
   if FLocked then Exit(NANDIOSuccess);  //เมินเงียบ ๆ เหมือนชิปจริง
 
+  FWriteEnabled := True;
+  if FailEraseAfterWREN then
+    Exit(NANDIOFailure(nnioTransport,
+      'injected transport failure after erase WREN'));
+
+  if FailEraseAfterIssue then
+  begin
+    FBusy := True;
+    Result := NANDIOFailure(nnioTransport,
+      'injected transport failure after block erase');
+    Result.MutationState := nimsPossiblyIssued;
+    Exit;
+  end;
+
   if (FailEraseBlock >= 0) and (cardinal(FailEraseBlock) = Block) then
   begin
     EraseFailed := True;
-    Exit(NANDIOSuccess);
+    FWriteEnabled := False;
+    Result := NANDIOSuccess;
+    Result.MutationState := nimsCompletedIdle;
+    Exit;
   end;
 
   for Page := 0 to FGeometry.PagesPerBlock - 1 do
@@ -256,13 +364,17 @@ begin
     FillByte(FSpare[Idx][0], FGeometry.SpareSize, $FF);
     FErased[Idx] := True;
   end;
+  FWriteEnabled := False;
   Result := NANDIOSuccess;
+  Result.MutationState := nimsCompletedIdle;
 end;
 
 function TVirtualSPINAND.SetECC(Enabled: boolean): TNANDIOResult;
 begin
   if CallGate(Result) then Exit;
   FECCOn := Enabled;
+  if Enabled then FConfiguration := FConfiguration or $10
+  else FConfiguration := FConfiguration and (not $10);
 end;
 
 function TVirtualSPINAND.GetECC(out Enabled: boolean): TNANDIOResult;
@@ -271,10 +383,62 @@ begin
   if CallGate(Result) then Exit;
 end;
 
+function TVirtualSPINAND.GetProtection(out Value: byte): TNANDIOResult;
+begin
+  Value := FProtection;
+  if CallGate(Result) then Exit;
+end;
+
+function TVirtualSPINAND.SetProtection(Value: byte): TNANDIOResult;
+begin
+  if CallGate(Result) then Exit;
+  if FailProtectionRestore then
+    Exit(NANDIOFailure(nnioTransport,
+      'injected protection-register restore failure'));
+  SetProtectionValue(Value);
+end;
+
+function TVirtualSPINAND.GetConfiguration(out Value: byte): TNANDIOResult;
+begin
+  Value := FConfiguration;
+  if CallGate(Result) then Exit;
+end;
+
+function TVirtualSPINAND.SetConfiguration(Value: byte): TNANDIOResult;
+begin
+  if CallGate(Result) then Exit;
+  if FailConfigurationRestore then
+    Exit(NANDIOFailure(nnioTransport,
+      'injected configuration-register restore failure'));
+  SetConfigurationValue(Value);
+end;
+
+function TVirtualSPINAND.EnsureIdle: TNANDIOResult;
+begin
+  Inc(EnsureIdleCalls);
+  if CallGate(Result) then Exit;
+  if FailEnsureIdle or (FBusy and RemainBusy) then
+    Exit(NANDIOFailure(nnioTimeout,
+      'injected busy state could not be drained'));
+  FBusy := False;
+  Result := NANDIOSuccess;
+end;
+
+function TVirtualSPINAND.WriteDisable: TNANDIOResult;
+begin
+  Inc(WriteDisableCalls);
+  if CallGate(Result) then Exit;
+  if FailWriteDisable then
+    Exit(NANDIOFailure(nnioTransport,
+      'injected write-disable/status verification failure'));
+  FWriteEnabled := False;
+  Result := NANDIOSuccess;
+end;
+
 function TVirtualSPINAND.UnlockAll: TNANDIOResult;
 begin
   if CallGate(Result) then Exit;
-  FLocked := False;
+  SetProtectionValue($00);
 end;
 
 end.

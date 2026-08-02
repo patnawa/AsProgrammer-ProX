@@ -3,90 +3,139 @@ name: build
 on:
   push:
     branches: [main]
-    # A tag like v4.9.0.0 publishes a GitHub release with the zip attached,
-    # so the published zip is always the one built and tested from that tag.
     tags: ['v*']
   pull_request:
   workflow_dispatch:
 
+# Build and test jobs never need a repository write token. Only the isolated,
+# tag-only publish job below can create a release.
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 45
     permissions:
-      contents: write   # creating the release on tag pushes
+      contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the exact revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
-      # Catch a tag that points at the wrong commit before spending twenty
-      # minutes building it. The tag must be exactly v<PROX_VERSION>.
       - name: The tag must match PROX_VERSION
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           $src = Get-Content software\appver.pas -Raw
-          if ($src -notmatch "PROX_VERSION\s*=\s*'([0-9.]+)'") { throw "no PROX_VERSION in software\appver.pas" }
-          $v = $Matches[1]
-          $tag = "${{ github.ref_name }}"
-          if ($tag -ne "v$v") { throw "tag $tag does not match PROX_VERSION $v; retag the release commit" }
+          if ($src -notmatch "PROX_VERSION\s*=\s*'([0-9.]+)'") {
+            throw "no PROX_VERSION in software\appver.pas"
+          }
+          $version = $Matches[1]
+          if ($env:RELEASE_TAG -ne "v$version") {
+            throw "tag $env:RELEASE_TAG does not match PROX_VERSION $version"
+          }
 
-      # The project targets win32, so the 64-bit Lazarus cannot build it
-      # without an i386 cross compiler. Install the 32-bit one.
-      - name: Cache Lazarus
-        id: cache-lazarus
-        uses: actions/cache@v4
-        with:
-          path: C:\lazarus32
-          key: lazarus-4.8-fpc-3.2.2-win32
-
-      - name: Install Lazarus 32 bit
-        if: steps.cache-lazarus.outputs.cache-hit != 'true'
+      # This is the 32-bit compiler the project targets. The installer is
+      # downloaded for every clean runner and admitted only by exact SHA-256;
+      # no mutable tool cache is trusted by the release build.
+      - name: Install hash-pinned Lazarus 4.8 (32 bit)
         shell: pwsh
+        env:
+          LAZARUS_URL: https://downloads.sourceforge.net/project/lazarus/Lazarus%20Windows%2032%20bits/Lazarus%204.8/lazarus-4.8-fpc-3.2.2-win32.exe
+          LAZARUS_SHA256: 81DA36A9AEAFEE55EAE29AAA636CCDB009F2BCEEE3215A87EC99F6F3F81B709E
         run: |
-          $url = "https://downloads.sourceforge.net/project/lazarus/Lazarus%20Windows%2032%20bits/Lazarus%204.8/lazarus-4.8-fpc-3.2.2-win32.exe"
-          curl.exe -L --fail --retry 3 -o lazarus.exe $url
-          Start-Process -FilePath .\lazarus.exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/NOCANCEL","/DIR=C:\lazarus32","/TASKS=" -Wait
-          if (-not (Test-Path C:\lazarus32\lazbuild.exe)) { throw "Lazarus did not install" }
+          curl.exe -L --fail --retry 3 --proto '=https' --tlsv1.2 `
+            -o lazarus-installer.exe $env:LAZARUS_URL
+          if ($LASTEXITCODE -ne 0) { throw "Lazarus download failed" }
+          $actual = (Get-FileHash .\lazarus-installer.exe -Algorithm SHA256).Hash
+          if ($actual -ne $env:LAZARUS_SHA256) {
+            throw "Lazarus SHA-256 mismatch: expected $env:LAZARUS_SHA256, got $actual"
+          }
+          $installerArgs = @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL",
+            "/DIR=C:\lazarus32", "/TASKS="
+          )
+          Start-Process -FilePath .\lazarus-installer.exe -WindowStyle Hidden `
+            -ArgumentList $installerArgs -Wait
+          if (-not (Test-Path C:\lazarus32\lazbuild.exe)) {
+            throw "Lazarus did not install"
+          }
+          Remove-Item -LiteralPath .\lazarus-installer.exe -Force
 
-      - name: Build and test
-        shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File tools\build.ps1
-
-      - name: Assemble the release folder
+      # -Release already validates, tests, builds and packages. Calling the
+      # script once avoids compiling and running every suite twice.
+      - name: Validate, test, build, and package
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Release
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload tested release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: AsProgrammer-ProX
+          name: AsProgrammer-ProX-${{ github.sha }}
           path: release/*.zip
           if-no-files-found: error
+          retention-days: 14
 
-      # Only a tag publishes. The zip is the same one the tests above just
-      # ran against; nothing is rebuilt or repackaged by hand.
-      - name: Publish the GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*.zip
-          fail_on_unmatched_files: true
-          generate_release_notes: true
-
-  # The GUI is Windows only, but nothing that decides whether a chip survives
-  # lives in the GUI. The parser, the erase planner, the protection decoder and
-  # the protocol layers are all LCL free, so they get a second compiler and a
-  # second target here. A pointer bug that i386 tolerates and x86-64 does not
-  # is exactly the kind of thing this catches for free.
   linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the exact revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Install Free Pascal
         run: sudo apt-get update && sudo apt-get install -y fp-compiler
 
       - name: Run the hardware-free suites
-        run: |
-          chmod +x tools/build.sh
-          ./tools/build.sh
+        run: ./tools/build.sh
+
+  publish:
+    name: Publish tag release
+    needs: [windows, linux]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: github-release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download the tested candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: AsProgrammer-ProX-${{ github.sha }}
+          path: release-dist
+
+      - name: Write release checksums
+        working-directory: release-dist
+        run: sha256sum *.zip > SHA256SUMS.txt
+
+      - name: Attest release provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: release-dist/*.zip
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2.3.3
+        with:
+          files: |
+            release-dist/*.zip
+            release-dist/SHA256SUMS.txt
+          fail_on_unmatched_files: true
+          generate_release_notes: true

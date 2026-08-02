@@ -24,11 +24,17 @@ type
     FSent: array of byte;
     FReply: array of byte;
     FReplyPos: integer;
+    FReadCalls: integer;
   public
     //จำลองชิปที่ไม่ตอบ ซ็อกเก็ตว่าง คลิปหนีบไม่ติด หรือชิปไม่ได้รับไฟ
     //การอ่านจะคืน 0 และไม่แตะบัฟเฟอร์เลย ซึ่งเป็นพฤติกรรมจริงของสายที่เงียบ
     //และเป็นเงื่อนไขที่ทำให้ค่าที่ค้างอยู่ในบัฟเฟอร์ถูกรายงานผิดเป็นคำตอบ
     FailReads: boolean;
+    //One-shot transport faults used by adapter tests. -1/0 disables them.
+    //A short write still records every supplied byte because the dangerous
+    //case is precisely that the backend cannot tell how much reached silicon.
+    ShortWriteOpcode: integer;
+    ShortReadAtCall: integer;
 
     constructor Create;
 
@@ -96,6 +102,9 @@ begin
   SetLength(FReply, 0);
   FReplyPos := 0;
   FailReads := False;
+  ShortWriteOpcode := -1;
+  ShortReadAtCall := 0;
+  FReadCalls := 0;
 end;
 
 function TMockHardware.Transcript: string;
@@ -169,8 +178,10 @@ function TMockHardware.SPIRead(CS: byte; BufferLen: integer;
 var
   i: integer;
 begin
+  Inc(FReadCalls);
   //สายเงียบ ไม่มีอะไรถูกเขียนลงบัฟเฟอร์ และคืนศูนย์ไบต์
-  if FailReads then Exit(0);
+  if FailReads or ((ShortReadAtCall > 0) and
+     (FReadCalls = ShortReadAtCall)) then Exit(0);
 
   for i := 0 to BufferLen - 1 do
   begin
@@ -194,6 +205,12 @@ begin
   SetLength(FSent, Base + BufferLen);
   for i := 0 to BufferLen - 1 do
     FSent[Base + i] := buffer[i];
+  if (BufferLen > 0) and (ShortWriteOpcode >= 0) and
+     (buffer[0] = byte(ShortWriteOpcode)) then
+  begin
+    ShortWriteOpcode := -1;
+    Exit(BufferLen - 1);
+  end;
   Result := BufferLen;
 end;
 

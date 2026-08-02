@@ -114,6 +114,12 @@ begin
 
   G := Geo(nilRaw);
   Map := AllGood(G);
+  Check(not PlanNANDProgram(G, Map, 0, G.PageSize, nbpRefuse,
+                            Plan, Err),
+        'program planning refuses raw images that could overwrite spare data');
+
+  G := Geo(nilMainOnly);
+  Map := AllGood(G);
 
   //Exactly two blocks worth of image
   Bytes := NANDImageBlockStride(G) * 2;
@@ -155,7 +161,7 @@ var
 begin
   WriteLn('Planning: bad blocks are never touched');
 
-  G := Geo(nilRaw);
+  G := Geo(nilMainOnly);
   Map := AllGood(G);
   Map[1] := nbsFactoryBad;
 
@@ -209,6 +215,46 @@ begin
   Check(not PlanNANDProgram(G, Map, 0, NANDImageSize(G) + 1, nbpSkip,
                             Plan, Err),
         'an image larger than the chip is refused');
+end;
+
+procedure TestErasePlanning;
+var
+  G: TNANDGeometry;
+  Map: TNANDBlockMap;
+  Plan: TNANDPlan;
+  Err: string;
+begin
+  WriteLn('Planning: erase-only ranges obey the bad-block policy');
+
+  G := Geo(nilMainOnly);
+  Map := AllGood(G);
+
+  Check(PlanNANDErase(G, Map, 2, 3, nbpRefuse, Plan, Err),
+        'three known-good blocks can be erased exactly', Err);
+  Check((Length(Plan.Steps) = 3) and
+        (NANDPlanCountKind(Plan, nskErase) = 3),
+        'an erase-only plan contains one erase step per block');
+  Check((Plan.Steps[0].Block = 2) and (Plan.Steps[2].Block = 4),
+        'the exact erase range keeps its physical block addresses');
+  Check((Plan.ProgramBytes = 0) and (Plan.ReadBytes = 0),
+        'erase-only planning never claims image bytes');
+
+  Map[3] := nbsFactoryBad;
+  Check(not PlanNANDErase(G, Map, 2, 3, nbpRefuse, Plan, Err),
+        'exact erase refuses a bad block in the requested range');
+  Check(Length(Plan.Steps) = 0,
+        'a refused exact erase leaves no executable steps');
+
+  Check(PlanNANDErase(G, Map, 2, 3, nbpSkip, Plan, Err),
+        'skip erase moves around a known bad block', Err);
+  Check((Plan.BlocksUsed = 3) and (Plan.BlocksSkipped = 1) and
+        (Plan.Steps[0].Block = 2) and (Plan.Steps[1].Block = 4) and
+        (Plan.Steps[2].Block = 5),
+        'skip erase consumes three good blocks and never the bad one');
+
+  Check(PlanNANDErase(G, Map, 0, 0, nbpRefuse, Plan, Err) and
+        (Length(Plan.Steps) = 0),
+        'an empty erase request is a valid no-op', Err);
 end;
 
 procedure TestValidatorCatchesBadPlans;
@@ -299,8 +345,7 @@ begin
   for Round := 1 to ROUNDS do
   begin
     Blocks := 4 + cardinal(Random(28));
-    if Random(2) = 0 then G := Geo(nilRaw, Blocks)
-    else G := Geo(nilMainOnly, Blocks);
+    G := Geo(nilMainOnly, Blocks);
 
     Map := NewNANDBlockMap(G);
     for i := 0 to High(Map) do
@@ -358,6 +403,7 @@ begin
   TestBlockMap;
   TestPlanHappyPath;
   TestBadBlocks;
+  TestErasePlanning;
   TestValidatorCatchesBadPlans;
   TestRandomised;
 
