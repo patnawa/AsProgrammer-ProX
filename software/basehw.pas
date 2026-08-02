@@ -12,6 +12,24 @@ type
 //รายชื่ออุปกรณ์ที่รองรับ
 THardwareList = (CHW_NONE, CHW_CH341, CHW_CH347, CHW_AVRISP, CHW_USBASP, CHW_ARDUINO, CHW_FT232H, CHW_BUZZPIRAT, CHW_SERPROG, CHW_EZP);
 
+// Capability-oriented seam used by admission, setup, and headless callers.
+// A caller asks only whether the selected programmer can serve its protocol;
+// it no longer has to probe an unrelated abstract method and interpret a
+// backend-specific "not implemented" string.
+TMemoryProtocol = (mpSPI, mpI2C, mpMicroWire);
+TMemoryProtocols = set of TMemoryProtocol;
+
+TProgrammerMemoryCapabilities = record
+  Known: boolean;
+  Protocols: TMemoryProtocols;
+  // EZP is the important distinction: it can read/write/erase complete SPI
+  // memories but cannot carry arbitrary opcodes such as SFDP or block locks.
+  RawSPICommands: boolean;
+  NativeWholeChipRead: boolean;
+  NativeWholeChipWrite: boolean;
+  NativeWholeChipErase: boolean;
+end;
+
 //คลาสฐานของฮาร์ดแวร์
 TBaseHardware = class
 protected
@@ -50,6 +68,9 @@ public
     out Capabilities: TProgrammerElectricalCapabilities): boolean; virtual;
   function GetElectricalObservation(
     out Observation: TElectricalObservation): boolean; virtual;
+  function GetMemoryCapabilities(
+    out Capabilities: TProgrammerMemoryCapabilities): boolean; virtual;
+  function SupportsProtocol(Protocol: TMemoryProtocol): boolean;
 
   //I2C
   procedure I2CInit; virtual; abstract;
@@ -164,6 +185,47 @@ begin
   Result := False;
 end;
 
+function TBaseHardware.GetMemoryCapabilities(
+  out Capabilities: TProgrammerMemoryCapabilities): boolean;
+begin
+  FillChar(Capabilities, SizeOf(Capabilities), 0);
+  Capabilities.Known := FHardwareID <> CHW_NONE;
+  case FHardwareID of
+    CHW_CH347, CHW_BUZZPIRAT:
+      begin
+        Capabilities.Protocols := [mpSPI, mpI2C];
+        Capabilities.RawSPICommands := True;
+      end;
+    CHW_CH341, CHW_AVRISP, CHW_USBASP, CHW_ARDUINO, CHW_FT232H:
+      begin
+        Capabilities.Protocols := [mpSPI, mpI2C, mpMicroWire];
+        Capabilities.RawSPICommands := True;
+      end;
+    CHW_SERPROG:
+      begin
+        Capabilities.Protocols := [mpSPI];
+        Capabilities.RawSPICommands := True;
+      end;
+    CHW_EZP:
+      begin
+        Capabilities.Protocols := [mpSPI];
+        Capabilities.RawSPICommands := False;
+        Capabilities.NativeWholeChipRead := True;
+        Capabilities.NativeWholeChipWrite := True;
+        Capabilities.NativeWholeChipErase := True;
+      end;
+  end;
+  Result := Capabilities.Known;
+end;
+
+function TBaseHardware.SupportsProtocol(Protocol: TMemoryProtocol): boolean;
+var
+  Capabilities: TProgrammerMemoryCapabilities;
+begin
+  Result := GetMemoryCapabilities(Capabilities) and
+            (Protocol in Capabilities.Protocols);
+end;
+
 constructor TAsProgrammer.Create;
 begin
   FCurrent_HW := CHW_NONE;
@@ -202,4 +264,3 @@ begin
 end;
 
 end.
-

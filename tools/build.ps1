@@ -22,6 +22,23 @@ $lazbuild = Join-Path $Lazarus "lazbuild.exe"
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Die($msg) { Write-Host "FAILED: $msg" -ForegroundColor Red; exit 1 }
 
+function Assert-Sha256($Path, $Expected, $Label) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    Die "$Label is missing: $Path"
+  }
+  $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+  if ($actual -ne $Expected.ToUpperInvariant()) {
+    Die "$Label SHA-256 mismatch: expected $Expected, got $actual"
+  }
+}
+
+function Download-PinnedFile($Url, $Destination, $Sha256, $Label) {
+  & curl.exe -L --fail --retry 3 --proto '=https' --tlsv1.2 `
+    -o $Destination $Url
+  if ($LASTEXITCODE -ne 0) { Die "could not download $Label" }
+  Assert-Sha256 $Destination $Sha256 $Label
+}
+
 if (-not (Test-Path $lazbuild)) { Die "lazbuild not found at $lazbuild (32-bit Lazarus is required, the project targets win32)" }
 
 # --- the version lives in software\appver.pas; everything else must agree ---
@@ -33,10 +50,29 @@ $proxVersion = $Matches[1]
 
 $lpiSrc = Get-Content "$root\software\AsProgrammer.lpi" -Raw
 if ($lpiSrc -notmatch 'ProductVersion="([0-9.]+)"') { Die "no ProductVersion in AsProgrammer.lpi" }
-if ($Matches[1] -ne $proxVersion) {
-  Die "version mismatch: appver.pas says $proxVersion, AsProgrammer.lpi says $($Matches[1]). Bump both."
+$lpiProductVersion = $Matches[1]
+$lpiParts = @(
+  @('MajorVersionNr', '<MajorVersionNr Value="([0-9]+)"'),
+  @('MinorVersionNr', '<MinorVersionNr Value="([0-9]+)"'),
+  @('RevisionNr', '<RevisionNr Value="([0-9]+)"'),
+  @('BuildNr', '<BuildNr Value="([0-9]+)"')
+)
+$lpiFileVersionParts = foreach ($part in $lpiParts) {
+  if ($lpiSrc -notmatch $part[1]) { Die "no $($part[0]) in AsProgrammer.lpi" }
+  $Matches[1]
+}
+$lpiFileVersion = $lpiFileVersionParts -join '.'
+if (($lpiProductVersion -ne $proxVersion) -or ($lpiFileVersion -ne $proxVersion)) {
+  Die "version mismatch: appver.pas says $proxVersion, AsProgrammer.lpi ProductVersion says $lpiProductVersion and FileVersion says $lpiFileVersion. Bump all fields."
 }
 Step "version $proxVersion"
+
+$python = (Get-Command python -ErrorAction SilentlyContinue)
+if ($python) {
+  Step "checking release, suite and localization metadata"
+  & $python.Source "$root\tools\check_project_metadata.py"
+  if ($LASTEXITCODE -ne 0) { Die "project metadata has drifted" }
+}
 
 # The zip name follows the same number unless the caller overrides it.
 if ($Version -eq "") { $Version = $proxVersion }
@@ -54,7 +90,6 @@ Step "registering $((Split-Path -Leaf $lpk))"
 # A typo here breaks one chip and nothing else, which means it is only found
 # when somebody puts that exact part in the socket. Catch it now instead.
 Step "checking the chip tables"
-$python = (Get-Command python -ErrorAction SilentlyContinue)
 if ($python) {
   & $python.Source "$root\tools\validate_chiplist.py" "$root\chiplist.xml" `
     $(if (Test-Path "$root\chiplist-flashrom.xml") { "$root\chiplist-flashrom.xml" }) `
@@ -124,6 +159,13 @@ Run-Suite "hwtests" $hwDir @(
   "$root\software\utilfunc.pas", "$root\software\i2c.pas",
   "$root\software\electricalpreflight.pas")
 
+# Every backend advertises typed voltage, protocol and clock capabilities;
+# unknown facts must remain unknown rather than becoming permissive defaults.
+$capabilityDir = Join-Path $env:TEMP "aspx-tests-hardware-capability"
+Run-Suite "hardwarecapability_tests" $capabilityDir @(
+  "$root\tests\hardwarecapability_tests.lpr",
+  "$root\software\basehw.pas", "$root\software\electricalpreflight.pas")
+
 # preservation-aware whole-operation service, including deterministic
 # fail-at-every-call and randomized invariant checks
 $norDir = Join-Path $env:TEMP "aspx-tests-nor"
@@ -139,6 +181,15 @@ Run-Suite "eepromengine_tests" $eepromDir @(
   "$root\tests\eepromengine_tests.lpr", "$root\tests\virtualeeprom.pas",
   "$root\software\operationmodel.pas", "$root\software\eepromengine.pas")
 
+# The presentation-neutral operation facade: stable read, preview and write
+# requests with one typed result/event contract for the headless CLI and tests.
+# The GUI consumes the same planners and engines through its mature LCL bridge.
+$runnerDir = Join-Path $env:TEMP "aspx-tests-operation-runner"
+Run-Suite "operationrunner_tests" $runnerDir @(
+  "$root\tests\operationrunner_tests.lpr", "$root\tests\virtualspi25.pas",
+  "$root\software\operationmodel.pas", "$root\software\norplanner.pas",
+  "$root\software\norengine.pas", "$root\software\operationrunner.pas")
+
 # SPI NAND geometry and bad-block-aware planning: the arithmetic that decides
 # whether a bad block is ever touched.
 $nandDir = Join-Path $env:TEMP "aspx-tests-nand"
@@ -153,6 +204,16 @@ Run-Suite "nandengine_tests" $nandEngineDir @(
   "$root\tests\nandengine_tests.lpr", "$root\tests\virtualspinand.pas",
   "$root\software\nandmodel.pas", "$root\software\nandplanner.pas",
   "$root\software\nandengine.pas", "$root\software\nandcatalog.pas")
+
+# Real TBaseHardware-to-NAND-device framing, including ambiguous command
+# issuance, bounded status draining, and checked write-disable cleanup.
+$nandAdapterDir = Join-Path $env:TEMP "aspx-tests-nand-adapter"
+Run-Suite "nandadapter_tests" $nandAdapterDir @(
+  "$root\tests\nandadapter_tests.lpr", "$root\tests\mockhw.pas",
+  "$root\software\spi25nandadapter.pas", "$root\software\nandmodel.pas",
+  "$root\software\nandengine.pas", "$root\software\nandplanner.pas",
+  "$root\software\nandcatalog.pas", "$root\software\basehw.pas",
+  "$root\software\electricalpreflight.pas")
 
 # The capacity/counterfeit test engine against fake chips of every stripe;
 # the invariant is that original content is always restored and verified.
@@ -220,6 +281,42 @@ foreach ($tool in "ezpsmoke", "ezpwrite", "ezppowercheck") {
   Write-Host "    $tool.exe"
 }
 
+# Build the LCL-free CLI with the same 32-bit compiler as the GUI. Unit and
+# executable output stay in a private directory so source folders remain clean.
+Step "building the headless CLI"
+$headlessDir = Join-Path $env:TEMP "aspx-headless-cli-win32"
+Remove-Item -LiteralPath $headlessDir -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path (Join-Path $headlessDir "units") -Force | Out-Null
+& "$fpcBin\fpc.exe" -Twin32 -Pi386 -Mobjfpc -Sh `
+  "-Fu$root\software" "-FU$headlessDir\units" "-FE$headlessDir" `
+  "$root\software\AsProgrammerCLI.lpr" | Out-Null
+$headlessExe = Join-Path $headlessDir "AsProgrammerCLI.exe"
+if (($LASTEXITCODE -ne 0) -or -not (Test-Path -LiteralPath $headlessExe)) {
+  Die "the headless Windows CLI did not compile"
+}
+Write-Host "    AsProgrammerCLI.exe"
+
+# Parser boundary checks run without opening USB. These values wrap to 256
+# and 4096 if a QWord is truncated before the geometry builder sees it.
+foreach ($badGeometry in @(
+  @{ Page = '4294967552'; Erase = '4096' },
+  @{ Page = '256'; Erase = '4294971392' }
+)) {
+  $cliArgs = @('--smart-preview', 'unused.bin', '--size', '8388608',
+    '--address', '0', '--page-size', $badGeometry.Page,
+    '--erase-size', $badGeometry.Erase, '--erase-opcode', '20')
+  & $headlessExe @cliArgs 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 2) {
+    Die "headless CLI admitted or mishandled overflowing geometry"
+  }
+}
+Write-Host "    overflowing geometry refused before USB open"
+& $headlessExe --detect --speeed 1 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 2) { Die "headless CLI ignored an unknown option" }
+& $headlessExe --detect --detect 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 2) { Die "headless CLI accepted a duplicate option" }
+Write-Host "    unknown and duplicate options refused before USB open"
+
 # --- the program ---
 Step "building AsProgrammer.exe"
 & $lazbuild --build-mode=Release "$root\software\AsProgrammer.lpi" | Out-Null
@@ -228,7 +325,11 @@ $exe = "$root\software\AsProgrammer.exe"
 if (-not (Test-Path $exe)) { Die "no executable was produced" }
 Write-Host ("    {0:N0} bytes" -f (Get-Item $exe).Length)
 
-if (-not $Release) { Step "done"; exit 0 }
+if (-not $Release) {
+  Remove-Item -LiteralPath $headlessDir -Recurse -Force
+  Step "done"
+  exit 0
+}
 
 # --- release folder ---
 $out = Join-Path $root "release\AsProgrammer-ProX-$Version"
@@ -237,11 +338,16 @@ Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $out | Out-Null
 
 Copy-Item $exe $out
+Copy-Item $headlessExe $out
+Remove-Item -LiteralPath $headlessDir -Recurse -Force
 Copy-Item "$root\chiplist.xml","$root\settings.xml" $out
 if (Test-Path "$root\chiplist-flashrom.xml") { Copy-Item "$root\chiplist-flashrom.xml" $out }
 if (Test-Path "$root\chiplist-ezp.xml") { Copy-Item "$root\chiplist-ezp.xml" $out }
 if (Test-Path "$root\chiplist-imsprog.xml") { Copy-Item "$root\chiplist-imsprog.xml" $out }
-Copy-Item "$root\LICENSE","$root\README.md" $out
+Copy-Item "$root\LICENSE","$root\README.md","$root\CHANGELOG.md",`
+  "$root\CONTRIBUTING.md","$root\SECURITY.md",`
+  "$root\THIRD_PARTY_NOTICES.md" $out
+Copy-Item "$root\docs" $out -Recurse
 Copy-Item "$root\scripts" $out -Recurse
 Copy-Item "$root\software\lang" $out -Recurse
 New-Item -ItemType Directory -Force "$out\icons" | Out-Null
@@ -286,34 +392,70 @@ $libusbVersion = (Get-Item $libusbDll).VersionInfo.FileVersion
 if ($libusbVersion -ne "1.4.0.2") {
   Die "software\libusb0.dll is $libusbVersion, expected signed release 1.4.0.2"
 }
+Assert-Sha256 $libusbDll `
+  "F56C6F28BFB864761CEBC05494B56AF8BED97493F3B6E7B19AFCB8F1ABCD2CBE" `
+  "repository libusb-win32 1.4.0.2 runtime"
 Copy-Item $libusbDll $out
 
-# The remaining DLLs are not in the repository, so take them from the upstream
-# release, which is where they have always been published.
-$dlls = "CH341DLL.DLL","CH347DLL.DLL","ftd2xx.dll",
-        "buzzpirathlp.dll","libiconv2.dll","libintl3.dll"
-$cache = Join-Path $env:TEMP "aspx-dlls"
-$missing = $dlls | Where-Object { -not (Test-Path (Join-Path $cache $_)) }
-
-if ($missing) {
-  Step "fetching the runtime DLLs from the upstream release"
-  New-Item -ItemType Directory -Force $cache | Out-Null
-  $zip = Join-Path $env:TEMP "upstream.zip"
-  $url = "https://github.com/therealdreg/asprogrammer-dregmod/releases/download/v3.17/asprogrammer-dregmod-v3.17.zip"
-  curl.exe -sL --fail -o $zip $url
-  if (-not (Test-Path $zip)) { Die "could not download the upstream release for the DLLs" }
-  $tmp = Join-Path $env:TEMP "upstream-extract"
-  Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
-  Expand-Archive -Path $zip -DestinationPath $tmp -Force
-  foreach ($d in $dlls) {
-    $found = Get-ChildItem -Recurse -Filter $d $tmp | Select-Object -First 1
-    if ($found) { Copy-Item $found.FullName $cache -Force }
-  }
+# The remaining DLLs come from one immutable upstream release archive. Both
+# the archive and each exact entry are pinned. A fresh private directory is
+# used for every package, so an old file in %TEMP% can never enter a release.
+$runtimeArchiveUrl = "https://github.com/therealdreg/asprogrammer-dregmod/releases/download/v3.17/asprogrammer-dregmod-v3.17.zip"
+$runtimeArchiveSha256 = "23BF51CDE094FCFDE873DEE0EFBA4492F3E0B93CE382575D6126D21F6F7EBB59"
+$runtimeArchiveRoot = "asprogrammer-dregmod-v3.17"
+$runtimeDlls = [ordered]@{
+  "CH341DLL.DLL" = "935F5D2EA6A40D47FCBB4892127670E09633374CA524B8739615B30A02C4D178"
+  "CH347DLL.DLL" = "6B63BBDFCD36BF4945A4F7DA49F11AF36DC1AB0A77DD65D6A2E88443D5C8E14A"
+  "ftd2xx.dll" = "60BB0D6348B1EB0127401AA902F34C963D9196D2778C66F4008A6CF0C6F098A5"
+  "buzzpirathlp.dll" = "5026074608F9BC859725252B5D1E3CFAD97B68FCE22A0A47A2479E4DB14C28DD"
+  "libiconv2.dll" = "6DEEDAD652BFAB7B09EBD0E06045810390B6AC6CB5AA9EF41C9DAA5616181F22"
+  "libintl3.dll" = "F48CE1866602B114E653C876334B771107559ACF1C685373D2305034613958F0"
 }
 
-foreach ($d in $dlls) {
-  $p = Join-Path $cache $d
-  if (Test-Path $p) { Copy-Item $p $out } else { Write-Host "    missing $d" -ForegroundColor Yellow }
+Step "fetching and verifying pinned runtime DLLs"
+$runtimeTemp = Join-Path ([IO.Path]::GetTempPath()) `
+  ("aspx-runtime-" + [Guid]::NewGuid().ToString("N"))
+try {
+  New-Item -ItemType Directory -Path $runtimeTemp | Out-Null
+  $runtimeArchive = Join-Path $runtimeTemp "runtime.zip"
+  Download-PinnedFile $runtimeArchiveUrl $runtimeArchive `
+    $runtimeArchiveSha256 "upstream runtime archive v3.17"
+  $runtimeExtract = Join-Path $runtimeTemp "extract"
+  Expand-Archive -LiteralPath $runtimeArchive -DestinationPath $runtimeExtract
+
+  foreach ($entry in $runtimeDlls.GetEnumerator()) {
+    $source = Join-Path (Join-Path $runtimeExtract $runtimeArchiveRoot) $entry.Key
+    Assert-Sha256 $source $entry.Value ("runtime DLL " + $entry.Key)
+    Copy-Item -LiteralPath $source -Destination $out
+    Assert-Sha256 (Join-Path $out $entry.Key) $entry.Value `
+      ("packaged runtime DLL " + $entry.Key)
+    Write-Host "    $($entry.Key) verified"
+  }
+
+  # The headless x86 Windows CLI uses official libusb-1.0.29. The upstream
+  # binary release is a 7z archive; Windows' built-in bsdtar extracts it.
+  $libusb1Url = "https://github.com/libusb/libusb/releases/download/v1.0.29/libusb-1.0.29.7z"
+  $libusb1ArchiveHash = "964A38152CA9A104CD00EC8D2F0617B89CD814F9B635E29763C68563D951521D"
+  $libusb1DllHash = "E868ED4705CCC82506EE66A22D981ABC90DEBD300C0F38B5D17873CEB0C0A43A"
+  $libusb1Archive = Join-Path $runtimeTemp "libusb-1.0.29.7z"
+  Download-PinnedFile $libusb1Url $libusb1Archive $libusb1ArchiveHash `
+    "official libusb 1.0.29 Windows archive"
+  $libusb1Extract = Join-Path $runtimeTemp "libusb1"
+  New-Item -ItemType Directory -Path $libusb1Extract | Out-Null
+  & tar.exe -xf $libusb1Archive -C $libusb1Extract
+  if ($LASTEXITCODE -ne 0) { Die "could not extract official libusb 1.0.29 archive" }
+  $libusb1Source = Join-Path $libusb1Extract "VS2022\MS32\dll\libusb-1.0.dll"
+  Assert-Sha256 $libusb1Source $libusb1DllHash "x86 libusb-1.0.29 runtime"
+  Copy-Item -LiteralPath $libusb1Source -Destination $out
+  Assert-Sha256 (Join-Path $out "libusb-1.0.dll") $libusb1DllHash `
+    "packaged x86 libusb-1.0.29 runtime"
+  Copy-Item -LiteralPath (Join-Path $libusb1Extract "README.txt") `
+    -Destination (Join-Path $out "libusb-1.0-README.txt")
+  Write-Host "    libusb-1.0.dll verified"
+} finally {
+  if (Test-Path -LiteralPath $runtimeTemp) {
+    Remove-Item -LiteralPath $runtimeTemp -Recurse -Force
+  }
 }
 
 $zipOut = "$root\release\AsProgrammer-ProX-$Version.zip"

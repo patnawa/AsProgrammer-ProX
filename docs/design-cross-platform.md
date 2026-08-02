@@ -1,89 +1,82 @@
-# Design: cross-platform hardware backends
+# Cross-platform hardware and headless CLI
 
-Status: in progress (task 11). Steps 1 and 2 are complete. Step 1: all four
-vendor bindings (`ch347dll.pas`, `ch341dll.pas`, `D2XXUnit.pas`,
-`LibUSB.pas`) are dynamic — the exe starts with no hardware DLLs present,
-and a missing DLL reads as "that programmer is absent", per-DLL and even
-per-export. Step 2: `prodcrypto` binds OpenSSL's libcrypto at run time and
-`prodevidence`/`prodstate` have native POSIX durable writes, so the complete
-stage-9 production suite runs live on Linux (`tools/build.sh`).
+Status: headless CH347 path implemented and compile-checked on Windows/Linux;
+live Linux validation remains required before its destructive gate can be
+removed. The Windows GUI remains the primary interactive application.
 
-Step 3 is **built, pending live validation** (4.12.0.0). The split:
+## Delivered seams
 
-- `ch347proto.pas` — the CH347 bulk packet layout (config/CS/out/in and
-  reply headers), pure and byte-exact-tested on both toolchains
-  (`tests/ch347proto_tests.lpr`). The layout follows flashrom's
-  `ch347_spi` and the kernel's `spi-ch347`, mystery bytes included.
-- `ch347usb.pas` — libusb-1.0 transport implementing the `TBaseHardware`
-  SPI contract (dynamic binding via `dynlibs`; missing libusb reads as
-  "absent programmer"). I2C/MicroWire honestly report unsupported.
-- `tools/ch347smoke.lpr` — the validation harness: JEDEC ID + status
-  register, nothing destructive. `tools/build.sh` compile-checks the
-  backend and harness on every Linux run.
+- All Windows hardware libraries (`CH341DLL.DLL`, `CH347DLL.DLL`, D2XX,
+  libusb0, and Buzzpirat helpers) bind dynamically. A missing library disables
+  one backend instead of preventing process startup.
+- `ch347proto.pas` owns the pure, byte-exact CH347 bulk packet layout. It is
+  tested on both toolchains.
+- `ch347usb.pas` implements `TBaseHardware` through dynamically loaded
+  libusb 1.0. Missing libusb or hardware returns a typed absence/error.
+- `operationrunner.pas` is the presentation-neutral interface used by the
+  LCL-free CLI and runner tests for trusted reads, Smart Write preview, and
+  Smart Write execution. It owns stable snapshots, planning, events,
+  cancellation, and typed outcomes. The GUI uses the same lower-level
+  planners and engines directly; it does not route through this runner.
+- `AsProgrammerCLI.lpr` plus `headlesscli.pas` provides a real LCL-free entry
+  point. It no longer imports `Forms` or delegates to GUI event handlers.
+- `prodcrypto.pas` uses Windows CNG or the system OpenSSL `libcrypto`;
+  `prodevidence.pas` and `prodstate.pas` have durable native Windows/POSIX
+  implementations. The production suites run on both platforms.
 
-To validate on this machine: `usbipd list; usbipd bind --busid <id>;
-usbipd attach --wsl --busid <id>` on Windows, then build and run the
-smoke tool inside WSL (root or a udev rule for 1a86:55db/55de). Until
-that passes on real silicon, the backend must not be offered in any UI.
+## Current headless surface
 
-Remaining: wire the validated backend into a CLI-only Linux build (the
-CLI currently pulls in `main.pas` and thus the LCL — the actual porting
-work of step 3's second half), then step 4 (UsbAsp/AVRISP via libusb,
-GUI last).
+The CLI supports CH347/libusb stable detection and reads, offline image scan,
+offline SFDP decode, Smart Write preview, and Smart Write execution. Execution
+is deliberately gated while live validation is pending: it requires `--yes`,
+an atomic backup destination, and the exact sacrificial-chip environment token
+printed by `--help`.
 
-## Where the Windows coupling actually lives
+Linux needs FPC to build and the system libusb 1.0 runtime to run. Windows
+release ZIPs contain `AsProgrammerCLI.exe` and an exact hash-verified official
+x86 `libusb-1.0.dll`.
 
-The protocol layers (`spi25`, `i2c`, `microwire`, `spi45`, `spi95`), the
-NOR engine stack, and every test suite already build and run on Linux —
-CI proves it on every push. What does not:
+```bash
+fpc -Mobjfpc -Sh -Fusoftware software/AsProgrammerCLI.lpr
+./software/AsProgrammerCLI --detect
+./software/AsProgrammerCLI --read dump.bin --size 8388608 --passes 2
+```
 
-1. **Hardware backends.** `ch341hw`/`ch347hw` statically import vendor
-   DLLs; `ft232hhw` imports `ftd2xx.dll`; `usbasphw`/`avrisphw` use
-   libusb0 (which has a Linux twin); `buzzpirathw` goes through a helper
-   DLL.
-2. **Crypto.** `prodcrypto` is CNG-only; non-Windows deliberately returns
-   "unsupported".
-3. **Durable writes.** `prodevidence.AtomicWriteDurable` uses Win32
-   handles, `MoveFileExW`, and `FlushFileBuffers`.
-4. **The GUI.** Lazarus LCL builds on GTK/Qt mostly for free once the
-   backends do; the CLI matters more for production boxes anyway.
+`tools/build.sh` compiles the actual entrypoint and dependency graph on every
+ordinary CI run but does not open hardware. `tools/hil.sh` separately compiles
+and runs both the non-mutating `ch347smoke` program and headless CLI detect on a
+labeled physical Linux runner.
 
-## Approach, in order of value per risk
+## Live validation gate
 
-1. **Dynamic binding seam.** Replace static `external 'CH347DLL.DLL'`
-   imports with a small loader record resolved at runtime (`LoadLibrary`/
-   `dlopen`). Windows behavior is unchanged (same DLLs); the seam is what
-   makes a Linux implementation possible at all, and it also fixes the
-   "exe will not start because a DLL for hardware you never touch is
-   missing" caveat in the README.
-2. **CH347 libusb backend.** The CH347 exposes its SPI/I2C protocol over
-   plain bulk endpoints; wch ships a Linux `libch347` and the protocol is
-   documented by several open implementations. One backend unit
-   implementing the existing `TBaseHardware` contract against libusb-1.0,
-   selected by the same seam. UsbAsp/AVRISP follow almost free via
-   libusb.
-3. **Crypto backend.** Keep the "no handwritten crypto" rule: on Linux,
-   bind OpenSSL's `libcrypto` (EVP SHA-256 / HMAC) behind the existing
-   `prodcrypto` interface. The API surface used is four functions; the
-   backend choice is compile-time per platform.
-4. **Durable writes.** POSIX implementation of `AtomicWriteDurable`:
-   `O_TMPFILE`/temp sibling + `fsync` + `rename` + directory `fsync` —
-   the same guarantees the Windows path requests.
-5. **GUI last.** Only after a CLI-only Linux release has soaked.
+The minimum evidence for graduating CH347/libusb destructive support is:
 
-## Testing
+1. repeated stable JEDEC ID and status reads across process reopen;
+2. two matching complete reads at conservative and faster clocks;
+3. Smart Write preview with no mutating opcode in a USB trace;
+4. a full destructive cycle on a socketed sacrificial chip, including trusted
+   backup, required erase and no-erase plans, shuffled full verification,
+   process restart, restore, and restore verification;
+5. cancellation/fault injection at open, init, read, erase, program, verify,
+   mode cleanup, close, backup commit, and evidence commit boundaries; and
+6. recorded programmer revision, firmware, USB driver/library version, chip
+   lot, adapter, and measured rail voltage.
 
-The seam gets a fake-loader test (missing library → typed error, not a
-process-start failure). The libusb backend validates against hwtests'
-transcript discipline with a capture replay; live validation needs the
-user's CH347 on a Linux box. Crypto backend must pass the exact HMAC
-test vectors already in stage9tests.
+Until that record exists, compile success must be described as compile
+coverage—not silicon validation—and the destructive environment gate stays.
+See [hardware-in-loop.md](hardware-in-loop.md).
 
-## Order of work
+## Next backends
 
-1. Loader seam for CH341/CH347/FT232H (Windows-only release, no behavior
-   change, kills the missing-DLL startup failure)
-2. prodcrypto OpenSSL backend + prodevidence POSIX path (stage9 suite
-   then runs on Linux CI too)
-3. CH347 libusb backend, CLI-only Linux build
-4. UsbAsp/AVRISP via libusb; GUI port last
+The next cross-platform work should reuse the same `TBaseHardware` capability
+contract and `operationrunner` boundary:
+
+1. validate and graduate CH347/libusb;
+2. implement UsbAsp/AVRISP through libusb 1.0 with typed capability records;
+3. add Linux production packaging only after runtime/udev/install behavior is
+   documented and tested; and
+4. consider a GTK/Qt GUI last, without coupling operation policy back into LCL.
+
+No backend is allowed to claim a voltage, open-drain capability, protocol, or
+clock it cannot establish. Unknown remains an admission failure for
+destructive production work.

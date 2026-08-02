@@ -1,0 +1,6 @@
+self-hosted-runner:
+  labels:
+    - aspx-hil-ch341
+    - aspx-hil-ch347
+    - aspx-hil-ezp
+    - aspx-hil-ch347-libusb

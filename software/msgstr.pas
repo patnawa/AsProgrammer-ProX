@@ -79,7 +79,12 @@ resourcestring
   STR_BACKUP_MAKING      = 'Backing up the chip first...';
   STR_BACKUP_DONE        = 'Backup saved: ';
   STR_BACKUP_FAILED      = 'Backup failed, operation aborted';
-  STR_BACKUP_SKIPPED     = 'Auto-backup covers SPI 25-series chips only; skipping the backup for this chip';
+  STR_BACKUP_SKIPPED     = 'This chip family has no safe full-chip backup reader; operation aborted';
+  STR_SMART_PREVIEW_TITLE= 'Smart Write preview';
+  STR_SMART_PREVIEW_SAFE = 'Nothing has been written. This plan came from the live chip snapshot.';
+  STR_SMART_PREVIEW_GO   = 'Continue with these exact erase, program and verify steps?';
+  STR_SMART_PREVIEW_STOP = 'Smart Write cancelled after preview; the chip was not changed';
+  STR_DOCTOR_TITLE       = 'Connection Doctor - read-only checks';
   STR_COMPARE_READING    = 'Reading the chip to compare...';
   STR_COMPARE_EQUAL      = 'Buffer and chip are identical';
   STR_COMPARE_DIFF       = 'Different bytes: ';

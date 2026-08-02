@@ -844,8 +844,13 @@ object MainForm: TMainForm
         Checked = True
       end
       object MenuAutoBackup: TMenuItem
-        AutoCheck = True
-        Caption = 'Back up the chip before write / erase (slow)'
+        Caption = 'Trusted backup before write / erase (required)'
+        Checked = True
+        Enabled = False
+      end
+      object MenuConnectionDoctor: TMenuItem
+        Caption = 'Connection Doctor (read-only)...'
+        OnClick = MenuConnectionDoctorClick
       end
       object MenuProdConfig: TMenuItem
         Caption = 'Serial number and production...'
@@ -1545,6 +1550,10 @@ object MainForm: TMainForm
     object MenuSmartWrite: TMenuItem
       Caption = 'Unlock -> erase only needed sectors -> write -> verify'
       OnClick = MenuSmartWriteClick
+    end
+    object MenuSmartWritePreview: TMenuItem
+      Caption = 'Preview Smart Write (read-only)...'
+      OnClick = MenuSmartWritePreviewClick
     end
   end
   object HwTimer: TTimer

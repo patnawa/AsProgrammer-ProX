@@ -7,6 +7,8 @@ software/backup/
 *.ppu
 *.o
 *.a
+__pycache__/
+*.pyc
 
 # Extracted from mphexeditor.zip during setup, not source
 mphexeditor/
@@ -27,6 +29,12 @@ serials.log
 
 # Release output
 release/
+hil-results/
+
+# Local focused-test output (keep unrelated tmp/ material visible)
+tmp/capabilities-*/
+tmp/headless-*/
+tmp/operationrunner-*/
 
 # Third party binary kept locally for reference, deliberately not distributed.
 # A Linux ELF with no source and no clear licence has no place in an MIT repo,

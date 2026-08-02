@@ -41,18 +41,19 @@ const
   EXIT_USAGE = 2;
 
   //สวิตช์ที่ตามด้วยค่า
-  ValueSwitches: array[0..21] of string = (
+  ValueSwitches: array[0..24] of string = (
     'chip', 'hw', 'read', 'write', 'verify', 'job', 'operator', 'log', 'save-chip',
     'read-passes', 'sfdp-dump', 'sfdp-decode', 'compare', 'scan',
     'prod-job', 'prod-auth', 'prod-key-id', 'prod-key-env', 'evidence-dir',
-    'export-chip', 'region', 'nand-read'
+    'export-chip', 'region', 'nand-read', 'nand-write', 'nand-bad-policy',
+    'nand-backup'
   );
 
   //สวิตช์ที่เป็นธงเปล่า ๆ
-  FlagSwitches: array[0..14] of string = (
+  FlagSwitches: array[0..15] of string = (
     'erase', 'detect', 'sfdp', 'help', 'force', 'json', 'verify',
     'no-fast-read', 'smart', 'plan-only', 'nand-info', 'nand-raw',
-    'chip-test', 'capacity-test', 'surface-scan'
+    'chip-test', 'capacity-test', 'surface-scan', 'nand-erase'
   );
 
   //The secret source is station policy, not an arbitrary caller-selected
@@ -60,6 +61,12 @@ const
   //uses this fixed name; it cannot redirect trust to an attacker-owned key.
   STATION_KEY_ID_ENV = 'ASPROGRAMMER_PROD_KEY_ID';
   STATION_HMAC_KEY_ENV = 'ASPROGRAMMER_PROD_HMAC_KEY';
+
+  //Phase 3 intentionally ships fail-closed until the mutation path has been
+  //validated on each programmer/part combination. Read/info need no gate.
+  NAND_LIVE_GATE_ENV = 'ASPROGRAMMER_NAND_LIVE_VALIDATED';
+  NAND_LIVE_GATE_VALUE = '1';
+  MOVEFILE_WRITE_THROUGH_FLAG = $00000008;
 
 var
   ConsoleReady: boolean = False;
@@ -107,6 +114,12 @@ begin
   Result := False;
   for i := 1 to ParamCount do
     if SameText(ParamStr(i), '--' + Name) then Exit(True);
+end;
+
+function NANDMutationGateEnabled: boolean;
+begin
+  Result := SysUtils.GetEnvironmentVariable(NAND_LIVE_GATE_ENV) =
+            NAND_LIVE_GATE_VALUE;
 end;
 
 //ค่าที่ตามหลังสวิตช์ คืนสตริงว่างถ้าไม่มี
@@ -239,6 +252,20 @@ begin
   Say('                  every page. An uncorrectable page fails the dump');
   Say('  --nand-raw      with --nand-read: include the spare areas (ECC off,');
   Say('                  bytes exactly as stored)');
+  Say('  --nand-write F  erase and write a main-area binary image from block 0;');
+  Say('                  every programmed physical page is read back in full');
+  Say('  --nand-erase    erase every selected good block and read every page');
+  Say('                  back blank before reporting success');
+  Say('  --nand-bad-policy refuse|skip');
+  Say('                  mutation default is refuse; skip explicitly walks');
+  Say('                  around known factory-bad blocks');
+  Say('  --nand-backup F required for mutation: two matching ECC-checked');
+  Say('                  main-area reads of every good block are atomically');
+  Say('                  published to a new recovery file before mutation');
+  Say('                  NAND mutation is disabled by default pending live');
+  Say('                  validation. A validated station must set');
+  Say('                  ' + NAND_LIVE_GATE_ENV + '=1, and every destructive');
+  Say('                  invocation must also include --force');
   Say('');
   Say('  Production:');
   Say('  --job FILE      refuse to write unless the buffer matches the job file');
@@ -549,7 +576,9 @@ begin
      (SwitchValue('save-chip') <> '') or
      (SwitchValue('export-chip') <> '') or
      (SwitchValue('read-passes') <> '') or
-     HasSwitch('nand-info') or (SwitchValue('nand-read') <> '') or
+     HasSwitch('nand-info') or HasSwitch('nand-read') or
+     HasSwitch('nand-write') or HasSwitch('nand-erase') or
+     HasSwitch('nand-bad-policy') or HasSwitch('nand-backup') or
      HasSwitch('chip-test') or HasSwitch('capacity-test') or
      HasSwitch('surface-scan') then
     Exit(Reject('authenticated production cannot be combined with read, ' +
@@ -776,35 +805,214 @@ function RunNANDCLI(Json: boolean): integer;
 var
   Config: TSPINANDConfig;
   Dev: TSPINANDDevice;
-  Raw: TBytes;
+  Raw, ONFIRaw: TBytes;
   Entry: TNANDCatalogEntry;
-  Geo: TNANDGeometry;
+  Geo, ONFIGeo: TNANDGeometry;
+  ONFIParams: TONFIParameterPage;
+  ParameterAccess: TSPINANDParameterPageAccess;
   Layout: TNANDImageLayout;
+  Policy: TNANDBadBlockPolicy;
   Map: TNANDBlockMap;
-  Plan: TNANDPlan;
-  Image: TBytes;
-  Err, FileName, IDText, BadText, Action: string;
+  Plan, BackupPlan: TNANDPlan;
+  Image, BackupFirst, BackupSecond: TBytes;
+  Err, FileName, IDText, BadText, Action, PolicyText, BackupFile: string;
   IO: TNANDIOResult;
   Rep: TNANDRunReport;
   i: SizeInt;
-  BadCount: cardinal;
+  BadCount, BlocksToErase: cardinal;
+  ActionCount: integer;
+  Mutation: boolean;
   F: TFileStream;
   UsableBytes: QWord;
 
-  function Fail(const Msg: string): integer;
+  function PublishBackupAtomic(const Destination: string;
+    const Data: TBytes; out ErrorText: string): boolean;
+  var
+    AbsoluteDestination, DirectoryName, TempName: string;
+    OutFile: TFileStream;
+    SavedError: DWORD;
+  begin
+    Result := False;
+    ErrorText := '';
+    AbsoluteDestination := ExpandFileName(Destination);
+    DirectoryName := ExtractFileDir(AbsoluteDestination);
+    if not DirectoryExists(DirectoryName) then
+    begin
+      ErrorText := 'backup directory does not exist: ' + DirectoryName;
+      Exit;
+    end;
+    if FileExists(AbsoluteDestination) then
+    begin
+      ErrorText := 'refusing to overwrite existing recovery backup: ' +
+                   AbsoluteDestination;
+      Exit;
+    end;
+    TempName := AbsoluteDestination + '.tmp-' +
+      IntToHex(GetCurrentProcessId, 8) + '-' + IntToHex(GetTickCount64, 16);
+    if FileExists(TempName) then
+    begin
+      ErrorText := 'the recovery backup temporary path already exists';
+      Exit;
+    end;
+
+    try
+      try
+        OutFile := TFileStream.Create(TempName, fmCreate or fmShareExclusive);
+        try
+          if Length(Data) > 0 then OutFile.WriteBuffer(Data[0], Length(Data));
+          if not FlushFileBuffers(THandle(OutFile.Handle)) then
+          begin
+            SavedError := GetLastError;
+            ErrorText := 'flushing the recovery backup failed: ' +
+                         SysErrorMessage(SavedError);
+            Exit;
+          end;
+        finally
+          OutFile.Free;
+        end;
+        //The temporary file is in the destination directory, so this is one
+        //same-volume atomic publication. No replace flag means a racing
+        //target creation fails rather than destroying an existing backup.
+        if not MoveFileEx(PChar(TempName), PChar(AbsoluteDestination),
+                          MOVEFILE_WRITE_THROUGH_FLAG) then
+        begin
+          SavedError := GetLastError;
+          ErrorText := 'publishing the recovery backup failed: ' +
+                       SysErrorMessage(SavedError);
+          Exit;
+        end;
+        Result := True;
+      except
+        on E: Exception do
+          ErrorText := 'writing the recovery backup failed: ' + E.Message;
+      end;
+    finally
+      if (not Result) and FileExists(TempName) then
+        SysUtils.DeleteFile(TempName);
+    end;
+  end;
+
+  function Fail(const Msg: string; Code: integer = EXIT_FAIL): integer;
   begin
     Say(Msg);
     OpFail(Msg);
     if Json then SayJson(Action);
-    Result := EXIT_FAIL;
+    Result := Code;
   end;
 
 begin
-  FileName := SwitchValue('nand-read');
-  if FileName <> '' then Action := 'nand-read' else Action := 'nand-info';
-  OpBegin(opkDetect);
+  Action := 'nand';
+  FileName := '';
+  BackupFile := SwitchValue('nand-backup');
+  Image := nil;
+  BackupFirst := nil;
+  BackupSecond := nil;
+  ActionCount := 0;
+  if HasSwitch('nand-info') then
+  begin
+    Action := 'nand-info';
+    Inc(ActionCount);
+  end;
+  if HasSwitch('nand-read') then
+  begin
+    Action := 'nand-read';
+    FileName := SwitchValue('nand-read');
+    Inc(ActionCount);
+  end;
+  if HasSwitch('nand-write') then
+  begin
+    Action := 'nand-write';
+    FileName := SwitchValue('nand-write');
+    Inc(ActionCount);
+  end;
+  if HasSwitch('nand-erase') then
+  begin
+    Action := 'nand-erase';
+    Inc(ActionCount);
+  end;
+
+  if Action = 'nand-read' then OpBegin(opkRead)
+  else if Action = 'nand-write' then OpBegin(opkWrite)
+  else if Action = 'nand-erase' then OpBegin(opkErase)
+  else OpBegin(opkDetect);
+
+  if ActionCount <> 1 then
+    Exit(Fail('choose exactly one of --nand-info, --nand-read, ' +
+      '--nand-write, or --nand-erase', EXIT_USAGE));
+  if ((Action = 'nand-read') or (Action = 'nand-write')) and
+     (FileName = '') then
+    Exit(Fail('--' + Action + ' needs a file name', EXIT_USAGE));
+
+  Mutation := (Action = 'nand-write') or (Action = 'nand-erase');
+  if Mutation and (not NANDMutationGateEnabled) then
+    Exit(Fail('SPI NAND mutation is disabled pending live validation. ' +
+      'A validated station must set ' + NAND_LIVE_GATE_ENV + '=1'));
+  if Mutation and (not HasSwitch('force')) then
+    Exit(Fail('--nand-write and --nand-erase are destructive; add --force ' +
+      'to acknowledge this invocation', EXIT_USAGE));
+  if Mutation and (BackupFile = '') then
+    Exit(Fail('--nand-write and --nand-erase require --nand-backup FILE ' +
+      'for pre-mutation recovery', EXIT_USAGE));
+  if (not Mutation) and HasSwitch('nand-backup') then
+    Exit(Fail('--nand-backup is only used by --nand-write and --nand-erase',
+      EXIT_USAGE));
+  if Mutation then
+  begin
+    BackupFile := ExpandFileName(BackupFile);
+    if FileExists(BackupFile) then
+      Exit(Fail('refusing to overwrite existing recovery backup: ' +
+                BackupFile, EXIT_USAGE));
+    if not DirectoryExists(ExtractFileDir(BackupFile)) then
+      Exit(Fail('backup directory does not exist: ' +
+                ExtractFileDir(BackupFile), EXIT_USAGE));
+    if (Action = 'nand-write') and
+       SameFileName(ExpandFileName(FileName), BackupFile) then
+      Exit(Fail('--nand-write input and --nand-backup output must be ' +
+                'different files', EXIT_USAGE));
+  end;
+  if Mutation and HasSwitch('nand-raw') then
+    Exit(Fail('--nand-write and --nand-erase accept main-area layout only; ' +
+      'raw mutation could overwrite bad-block markers and ECC bytes',
+      EXIT_USAGE));
+
+  PolicyText := LowerCase(Trim(SwitchValue('nand-bad-policy')));
+  if HasSwitch('nand-bad-policy') and (PolicyText = '') then
+    Exit(Fail('--nand-bad-policy needs refuse or skip', EXIT_USAGE));
+  if PolicyText = '' then Policy := nbpRefuse
+  else if PolicyText = 'refuse' then Policy := nbpRefuse
+  else if PolicyText = 'skip' then Policy := nbpSkip
+  else
+    Exit(Fail('--nand-bad-policy must be refuse or skip', EXIT_USAGE));
+  if (not Mutation) and HasSwitch('nand-bad-policy') then
+    Exit(Fail('--nand-bad-policy is only used by --nand-write and ' +
+      '--nand-erase', EXIT_USAGE));
 
   if HasSwitch('nand-raw') then Layout := nilRaw else Layout := nilMainOnly;
+
+  //Read the exact main-area binary before opening a programmer. Bad paths,
+  //empty files, and process-size overflows therefore cannot reach the chip.
+  if Action = 'nand-write' then
+  begin
+    if not FileExists(FileName) then
+      Exit(Fail('no such file: ' + FileName, EXIT_USAGE));
+    try
+      F := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
+      try
+        if F.Size = 0 then
+          Exit(Fail(FileName + ' is empty', EXIT_USAGE));
+        if QWord(F.Size) > QWord(High(SizeInt)) then
+          Exit(Fail(FileName + ' is too large for this build', EXIT_USAGE));
+        SetLength(Image, SizeInt(F.Size));
+        F.ReadBuffer(Image[0], Length(Image));
+      finally
+        F.Free;
+      end;
+    except
+      on E: Exception do
+        Exit(Fail('could not read ' + FileName + ': ' + E.Message,
+                  EXIT_USAGE));
+    end;
+  end;
 
   if not OpenDevice() then
     Exit(Fail('the programmer could not be opened'));
@@ -853,6 +1061,50 @@ begin
 
     Dev := TSPINANDDevice.Create(AsProgrammer.Programmer, Geo, Config);
     try
+      //Known vendors expose three redundant ONFI copies through a checked
+      //configuration-register mode. A geometry contradiction always stops;
+      //a mutation also requires the supported ONFI read itself to succeed.
+      if NANDParameterPageAccess(Entry, ParameterAccess) then
+      begin
+        IO := Dev.ReadONFIParameterPages(ParameterAccess, ONFIRaw);
+        if not IO.Success then
+        begin
+          if Mutation then
+            Exit(Fail('ONFI live validation failed before mutation: ' +
+                      IO.ErrorText));
+          Say('ONFI parameter page unavailable; using catalog geometry: ' +
+              IO.ErrorText);
+        end
+        else if not ParseONFIParameterPages(ONFIRaw, ONFIParams, Err) then
+        begin
+          if Mutation then
+            Exit(Fail('ONFI live validation failed before mutation: ' + Err));
+          Say('ONFI parameter page was not CRC-valid; using catalog geometry: ' +
+              Err);
+        end
+        else if not NANDCatalogONFIGeometry(Entry, ONFIParams, Layout,
+                                             ONFIGeo, Err) then
+          Exit(Fail('the ONFI device shape is unsupported: ' + Err))
+        else if (ONFIGeo.PageSize <> Geo.PageSize) or
+                (ONFIGeo.SpareSize <> Geo.SpareSize) or
+                (ONFIGeo.PagesPerBlock <> Geo.PagesPerBlock) or
+                (ONFIGeo.BlockCount <> Geo.BlockCount) then
+          Exit(Fail(Format(
+            'ONFI geometry contradicts the catalog for %s: ' +
+            'ONFI says %d x %d x (%d+%d), catalog says %d x %d x (%d+%d)',
+            [string(Entry.Name), ONFIGeo.BlockCount,
+             ONFIGeo.PagesPerBlock, ONFIGeo.PageSize, ONFIGeo.SpareSize,
+             Geo.BlockCount, Geo.PagesPerBlock, Geo.PageSize,
+             Geo.SpareSize])))
+        else
+          Say(Format('ONFI copy %d: %s %s, geometry confirmed',
+            [ONFIParams.SelectedCopy + 1, ONFIParams.Manufacturer,
+             ONFIParams.Model]));
+      end
+      else if Mutation then
+        Exit(Fail('this NAND family has no primary-source-verified ONFI ' +
+          'parameter-page access sequence; mutation is disabled'));
+
       Say('scanning the factory bad-block markers...');
       if not ScanNANDBadBlocks(Dev, Geo, Map, Err) then
         Exit(Fail('the bad-block scan failed: ' + Err));
@@ -875,8 +1127,102 @@ begin
       else
         Say(Format('%d bad blocks: %s', [BadCount, BadText]));
 
+      if Mutation then
+      begin
+        //Validate the destructive plan before spending time or publishing a
+        //backup. The executor receives this exact, already checked plan after
+        //the stable recovery image is durable.
+        if Action = 'nand-erase' then
+        begin
+          if Policy = nbpSkip then
+            BlocksToErase := NANDCountUsable(Map)
+          else
+            BlocksToErase := Geo.BlockCount;
+          if BlocksToErase = 0 then
+            Exit(Fail('every block is bad; there is nothing safe to erase'));
+          if not PlanNANDErase(Geo, Map, 0, BlocksToErase, Policy,
+                               Plan, Err) then
+            Exit(Fail('planning the erase failed before mutation: ' + Err));
+        end
+        else if not PlanNANDProgram(Geo, Map, 0, Length(Image), Policy,
+                                    Plan, Err) then
+          Exit(Fail('planning the write failed before mutation: ' + Err));
+
+        UsableBytes := QWord(NANDCountUsable(Map)) *
+                       NANDImageBlockStride(Geo);
+        if UsableBytes = 0 then
+          Exit(Fail('every block is bad; no recovery backup can be made'));
+        if UsableBytes > QWord(High(SizeInt)) then
+          Exit(Fail('the recovery image is too large for this build'));
+        if not PlanNANDRead(Geo, Map, 0, UsableBytes, nbpSkip,
+                            BackupPlan, Err) then
+          Exit(Fail('planning the recovery backup failed before mutation: ' +
+                    Err));
+
+        SetLength(BackupFirst, SizeInt(UsableBytes));
+        SetLength(BackupSecond, SizeInt(UsableBytes));
+        Say(Format('recovery backup pass 1/2: reading %d main-area bytes...',
+                   [UsableBytes]));
+        Rep := ExecuteNANDRead(Dev, Geo, Map, BackupPlan, BackupFirst,
+                               nil, nil);
+        if not Rep.Success then
+          Exit(Fail('recovery backup pass 1 failed before mutation: ' +
+                    Rep.ErrorText));
+        Say('recovery backup pass 2/2: confirming a stable read...');
+        Rep := ExecuteNANDRead(Dev, Geo, Map, BackupPlan, BackupSecond,
+                               nil, nil);
+        if not Rep.Success then
+          Exit(Fail('recovery backup pass 2 failed before mutation: ' +
+                    Rep.ErrorText));
+        if not SameBytes(BackupFirst, BackupSecond) then
+          Exit(Fail('the two recovery reads differ; refusing mutation'));
+        if not PublishBackupAtomic(BackupFile, BackupFirst, Err) then
+          Exit(Fail('recovery backup was not published; refusing mutation: ' +
+                    Err));
+        Say('stable recovery backup published atomically to ' + BackupFile);
+        BackupFirst := nil;
+        BackupSecond := nil;
+      end;
+
       if Action = 'nand-info' then
       begin
+        if Json then SayJson(Action);
+        Exit(EXIT_OK);
+      end;
+
+      if Action = 'nand-erase' then
+      begin
+        Say(Format('erasing and fully blank-checking %d good blocks...',
+                   [Plan.BlocksUsed]));
+        Rep := ExecuteNANDErase(Dev, Geo, Map, Plan, nil, nil);
+        if not Rep.Success then
+          Exit(Fail(Format('the erase failed (outcome %d): %s',
+            [Ord(Rep.ErrorCode), Rep.ErrorText])));
+        UsableBytes := QWord(Plan.BlocksUsed) *
+                       QWord(Geo.PagesPerBlock) * QWord(Geo.PageSize);
+        if UsableBytes <= High(cardinal) then
+          OpProgress(cardinal(UsableBytes), cardinal(UsableBytes));
+        Say(Format('erase verified: %d blocks are blank',
+                   [Plan.BlocksUsed]));
+        if Json then SayJson(Action);
+        Exit(EXIT_OK);
+      end;
+
+      if Action = 'nand-write' then
+      begin
+        Say(Format('writing %d main-area bytes across %d good blocks; ' +
+                   'full physical-page verification is mandatory...',
+                   [Length(Image), Plan.BlocksUsed]));
+        Rep := ExecuteNANDWrite(Dev, Geo, Map, Plan, Image, nil, nil);
+        if not Rep.Success then
+          Exit(Fail(Format('the write failed (outcome %d): %s',
+            [Ord(Rep.ErrorCode), Rep.ErrorText])));
+        if QWord(Length(Image)) <= High(cardinal) then
+          OpProgress(cardinal(Length(Image)), cardinal(Length(Image)));
+        if Plan.BlocksSkipped > 0 then
+          Say(Format('%d bad blocks were skipped by explicit policy',
+                     [Plan.BlocksSkipped]));
+        Say('write and full read-back verification passed');
         if Json then SayJson(Action);
         Exit(EXIT_OK);
       end;
@@ -1005,6 +1351,30 @@ begin
     Exit(EXIT_USAGE);
   end;
 
+  //Defense at the outermost boundary: a disabled NAND mutation request is
+  //rejected before PollProgrammer or OpenDevice can acquire hardware.
+  if (HasSwitch('nand-write') or HasSwitch('nand-erase')) and
+     (not NANDMutationGateEnabled) then
+  begin
+    Say('SPI NAND mutation is disabled pending live validation. A validated ' +
+        'station must set ' + NAND_LIVE_GATE_ENV + '=1');
+    Exit(EXIT_FAIL);
+  end;
+  if (HasSwitch('nand-write') or HasSwitch('nand-erase')) and
+     (not HasSwitch('force')) then
+  begin
+    Say('--nand-write and --nand-erase are destructive; add --force to ' +
+        'acknowledge this invocation');
+    Exit(EXIT_USAGE);
+  end;
+  if (HasSwitch('nand-write') or HasSwitch('nand-erase')) and
+     (SwitchValue('nand-backup') = '') then
+  begin
+    Say('--nand-write and --nand-erase require --nand-backup FILE for ' +
+        'pre-mutation recovery');
+    Exit(EXIT_USAGE);
+  end;
+
   Json := HasSwitch('json');
   CLIForce := HasSwitch('force');
 
@@ -1049,7 +1419,10 @@ begin
        (SwitchValue('save-chip') <> '') or
        (SwitchValue('export-chip') <> '') or
        HasSwitch('plan-only') or
-       (SwitchValue('read-passes') <> '') then
+       (SwitchValue('read-passes') <> '') or
+       HasSwitch('nand-info') or HasSwitch('nand-read') or
+       HasSwitch('nand-write') or HasSwitch('nand-erase') or
+       HasSwitch('nand-bad-policy') or HasSwitch('nand-backup') then
     begin
       Say('authenticated production cannot be combined with other operation switches');
       Exit(EXIT_USAGE);
@@ -1303,7 +1676,8 @@ begin
   end;
 
   //SPI NAND เดินคนละเส้นทั้งสาย: ไม่ใช้ตารางชิป ไม่ใช้ปุ่มของหน้าต่างหลัก
-  if HasSwitch('nand-info') or (SwitchValue('nand-read') <> '') then
+  if HasSwitch('nand-info') or HasSwitch('nand-read') or
+     HasSwitch('nand-write') or HasSwitch('nand-erase') then
     Exit(RunNANDCLI(Json));
 
   if HasSwitch('chip-test') then

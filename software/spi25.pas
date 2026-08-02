@@ -117,6 +117,10 @@ function UsbAsp25_Write(Opcode: byte; Addr: longword; buffer: array of byte; buf
 function UsbAsp25_Write32bitAddr(Opcode: byte; Addr: longword; buffer: array of byte; bufflen: integer): integer;
 
 function UsbAsp25_ReadID(var ID: MEMORY_ID): integer;
+// Connection Doctor probe: one JEDEC command, one exact three-byte reply.
+// It deliberately does not fall back to vendor-specific 90h/ABh/15h probes
+// and does not mutate the process-wide manufacturer hint.
+function UsbAsp25_ReadJEDEC9FExact(var ID: array of byte): boolean;
 function UsbAsp25_ReadSFDP(Addr: longword; var buffer: array of byte; bufflen: integer): integer;
 function UsbAsp25_ReadUniqueID(var buffer: array of byte): integer;
 function UsbAsp25_ReadAuthStatus(var buffer: array of byte; bufflen: integer): integer;
@@ -423,6 +427,19 @@ begin
   //Public compatibility: this function has always counted successful ID
   //commands rather than bytes.
   Result := 4;
+end;
+
+function UsbAsp25_ReadJEDEC9FExact(var ID: array of byte): boolean;
+var
+  Command: byte;
+begin
+  Result := False;
+  if Length(ID) < 3 then Exit;
+
+  FillByte(ID[0], 3, $FF);
+  Command := $9F;
+  Result := SPI25CommandReadExact(1, 0, Command, 1, ID, 3) = 3;
+  if not Result then FillByte(ID[0], 3, $FF);
 end;
 
 //อ่านตาราง SFDP (JESD216) opcode 5Ah: แอดเดรส 3 ไบต์ + ไบต์หลอก 1 ไบต์

@@ -1,97 +1,132 @@
 # Design: SPI NAND support with bad blocks and ECC
 
-Status: **phase 2 built** (4.11.0.0). On top of phase 1's `nandmodel.pas` /
-`nandplanner.pas` (49 checks, 500 randomised layouts):
+Status: **Phase 3 is implemented but mutation is gated pending live
+validation** (4.24.0.0). Identification, factory-bad-block scanning, and
+ECC-checked reads are available from the Windows command line. Erase/write
+code exists only in that command-line path, is disabled by default, and has
+not graduated to the GUI.
 
-- `nandengine.pas` — the executor. Scans factory markers with ECC off
-  (an erased page has no codeword; GD5F flags that as an ECC failure) and
-  restores the previous ECC state; checks the ECC verdict after every page
-  of a main-only read and fails an uncorrectable page naming block and
-  page; counts corrected pages; unlocks before programming and believes
-  only the read-back of the protection register; checks E_FAIL/P_FAIL
-  after every erase/program; reads every programmed page back.
-- `tests/virtualspinand.pas` + `tests/nandengine_tests.lpr` — the virtual
-  chip models AND-programming, factory markers, injectable corrected /
-  uncorrectable pages, P_FAIL/E_FAIL, silent protection (a locked chip
-  ignores program/erase without raising anything — only read-back
-  catches a chip that lies about unlocking), and a fail-the-Nth-call
-  fault matrix. 300 randomised layouts round-trip. Both toolchains.
-- `spi25nandadapter.pas` — wire framing over `TBaseHardware` (13h/03h/
-  02h/10h/D8h/0Fh/1Fh/FFh/9Fh), exact-transfer discipline, all-FF status
-  treated as a silent bus, WEL confirmed after WREN, feature-register
-  writes read back.
-- `nandcatalog.pas` — the JEDEC-ID catalog (W25N512GV/01GV/02KV,
-  GD5F1GQ4UA/UB, MX35LF1GE4AB, TC58CVG0S3), matching both the with-dummy
-  and no-dummy 9Fh reply shapes. Only single-plane parts whose command
-  set matches the adapter's assumptions are admitted.
-- CLI: `--nand-info` (identify + bad-block scan, read-only) and
-  `--nand-read FILE` (dump every good block in order, skip policy, ECC
-  verdict per page; `--nand-raw` for main+spare with ECC off).
+## Delivered architecture
 
-Still to build (phase 3): erase/write from the CLI, GUI integration, ONFI
-parameter-page detection for parts not in the catalog (needs ECC-off page
-reads at address 01h), and the chiplist `spicmd="NAND"` family once the
-GUI knows what to do with it. Live validation on CH347 hardware with a
-W25N01GV is the gate before erase/write ships.
+The implementation is LCL-free below the command-line adapter:
 
-## What makes NAND different (and why the current code must not touch it)
+- `nandmodel.pas` defines geometry, main-only versus raw image layouts,
+  bad-block states, and typed results.
+- `nandplanner.pas` creates read, erase, and program plans. The default
+  mutation policy refuses a range containing a factory-bad block;
+  `--nand-bad-policy skip` is an explicit request to walk around known bad
+  blocks. There is no hidden remapping table.
+- `nandengine.pas` scans byte 0 of the spare area on the first **two** pages of
+  every block with ECC disabled, then restores the previous ECC state. Reads
+  check the on-die ECC verdict on every main-area page and stop on an
+  uncorrectable result.
+- `spi25nandadapter.pas` owns the exact 9Fh, 13h, 03h, 02h, 10h, D8h, 0Fh,
+  1Fh, FFh, and parameter-page wire framing over `TBaseHardware`. Transfers,
+  WEL, feature-register writes, BUSY, P_FAIL, E_FAIL, and all-FF silent-bus
+  responses are checked rather than inferred.
+- `nandcatalog.pas` admits only the catalogued single-plane parts whose
+  command shape matches the adapter: W25N512GV/01GV/02KV, GD5F1GQ4UA/UB,
+  MX35LF1GE4AB, and TC58CVG0S3.
+- `virtualspinand.pas`, `nandplanner_tests.lpr`, and
+  `nandengine_tests.lpr` cover layout arithmetic, random bad-block maps,
+  corrected/uncorrectable ECC, silent protection, P_FAIL/E_FAIL, cancellation,
+  verification failures, redundant ONFI copies, and injected transport
+  faults without requiring hardware.
 
-- **Bad blocks are normal.** Factory-marked bad blocks (non-FF byte 0 of
-  the spare area of a block's first page, vendor-dependent) must be
-  scanned before anything else and never written or erased. A dump or
-  write that ignores them corrupts data silently.
-- **Spare areas.** Each page (typically 2048 B) carries a spare region
-  (typically 64/128 B) holding bad-block marks and ECC. The user must
-  choose raw (page+spare) or main-only images; both are legitimate.
-- **On-die ECC.** Most SPI NAND (Winbond W25N, GD5F, MX35, Toshiba/Kioxia)
-  has internal ECC enabled by default; the status register reports
-  corrected / uncorrectable after every page read. An uncorrectable read
-  must fail the dump, not return garbage bytes that look plausible.
-- **Different command model.** Page-to-cache (13h) + read-from-cache
-  (03h/0Bh with column address), program-load (02h/84h) + program-execute
-  (10h), block erase (D8h with row address), feature registers via 0Fh/1Fh.
+## Phase 3 mutation boundary
 
-## Shape
+`--nand-write FILE` and `--nand-erase` deliberately fail before hardware is
+opened unless all of these conditions hold:
 
-Follows the proven NOR split, all LCL-free:
+1. A bench that has completed the live-validation checklist sets
+   `ASPROGRAMMER_NAND_LIVE_VALIDATED=1`.
+2. The invocation includes `--force`.
+3. `--nand-backup FILE` names a new file in an existing directory. Existing
+   files are never overwritten.
+4. JEDEC ID matches a supported catalog entry. An ONFI parameter page does
+   not make an otherwise unknown part writable.
+5. The part has a primary-source-checked parameter-page access sequence. The
+   current allowlist is W25N01GV and MX35LF1GE4AB; similar vendor IDs are not
+   guessed.
+6. One of three redundant 256-byte ONFI copies has the required signature and
+   CRC16, describes the supported single-LUN SLC shape, and exactly agrees
+   with the catalog page, spare, pages-per-block, and block counts.
+7. The factory marker scan succeeds. The default bad-block policy is
+   `refuse`; skipping requires `--nand-bad-policy skip`.
 
-- `nandmodel.pas` — geometry (page, spare, pages/block, blocks), image
-  layout (raw vs main-only), bad-block map type, typed outcomes reusing
-  `operationmodel`.
-- `nandplanner.pas` — plans reads/writes/erases over *good* blocks only;
-  fails closed if the requested range cannot be satisfied without a
-  skip-bad-block policy the user has not chosen (plain skip vs strict
-  refuse; no remapping table in v1).
-- `nandengine.pas` — executor: feature-register gate (ECC on/off as the
-  job demands, block-protection bits cleared and read back), bad-block
-  scan, then per-page operations with ECC status checked after every read
-  and program-execute status (P_FAIL/E_FAIL) after every program/erase.
-- `spi25nandadapter.pas` — exact wire framing over `TBaseHardware`, with
-  the same exact-transfer discipline as the NOR adapter.
-- Detection: JEDEC 9Fh (with the dummy-byte variant NAND vendors use) plus
-  the ONFI-style parameter page (ECh) where present; chips land in
-  `chiplist.xml` with a new `spicmd="NAND"` family carrying page/spare/
-  block geometry explicitly.
+Before either mutation, the CLI reads the main area of every good block twice
+with ECC checking enabled. The byte-identical result must be atomically
+published as the new recovery file before an erase or program command is
+sent. That file is recovery evidence, not an automatic rollback: restoring it
+after a failure remains an explicit operator action.
 
-## Testing
+Raw mutation is always rejected because it could overwrite factory markers
+or chip-managed ECC bytes. Main-only writes erase each selected good block,
+check E_FAIL/P_FAIL, and read back every complete physical main-area page;
+even the unwritten tail of a partial page must remain FFh. Erase reads every
+byte of every page in each selected block with ECC disabled and reports
+success only when the full main area is blank.
 
-`virtualspinand.pas`: models cache, program-execute, factory bad-block
-marks, injectable bit errors (corrected and uncorrectable), and P_FAIL.
-Property tests: a dump over a chip with random bad blocks never reads a
-bad block in skip mode and always refuses in strict mode; uncorrectable
-ECC always fails the operation with the failing page address; a write plan
-never touches a factory-bad block.
+The read-only surface remains usable without the station gate:
 
-## Explicit v1 non-goals
+```powershell
+AsProgrammer.exe --nand-info --hw ch347
+AsProgrammer.exe --nand-read recovery.bin --hw ch347
+AsProgrammer.exe --nand-read raw.bin --nand-raw --hw ch347
+```
 
-Wear-leveling, logical remapping, JFFS2/UBI awareness, and writing the
-spare area from user images (main-only writes compute/leave ECC to the
-chip). These belong to filesystem tools, not a programmer.
+After a station has independently satisfied the validation checklist, a
+mutation invocation has this shape (do not set the environment gate merely to
+bypass the refusal):
 
-## Order of work
+```powershell
+$env:ASPROGRAMMER_NAND_LIVE_VALIDATED = '1'
+AsProgrammer.exe --nand-write image.bin --nand-backup recovery.bin `
+  --nand-bad-policy refuse --force --hw ch347
+```
 
-1. `nandmodel` + `virtualspinand` + planner + suite (Linux-testable)
-2. Adapter + engine, CLI `--nand-info` (scan + bad-block report, read-only)
-3. Read/dump path (safest first), then erase/write
-4. Chip entries for W25N01GV and GD5F1GQ4 as the first two validated parts
-   (user has CH347 hardware for live validation)
+## Why NAND needs a separate path
+
+- **Bad blocks are normal.** Factory markers must be discovered before a plan
+  is built and must never be erased or programmed.
+- **Spare areas carry metadata.** A typical 2 KiB page has an additional
+  64/128-byte spare area containing bad-block marks and ECC state.
+- **On-die ECC is stateful.** Main-area reads require a verdict after every
+  page, while raw reads and blank pages require carefully scoped ECC-off
+  access followed by state restoration.
+- **The command model is not NOR.** NAND stages a physical page through a
+  cache, then separately executes program or erase against row addresses.
+
+## Current limits
+
+- No GUI NAND workflow and no `chiplist.xml` `spicmd="NAND"` integration.
+- No ONFI-only discovery of unknown parts. JEDEC catalog identity remains the
+  first admission gate.
+- Mutation is eligible only for the two catalog parts with checked ONFI access
+  sequences, and it remains disabled by default until live evidence exists.
+- Writes accept main-area images only; user-supplied spare/ECC data is not
+  programmed.
+- No wear-leveling, logical remapping, filesystem awareness, JFFS2/UBI policy,
+  or automatic recovery after an interrupted job.
+
+## Live-validation checklist
+
+Graduating a part requires retained evidence from a socketed sacrificial chip:
+
+1. Record programmer revision and firmware, chip marking/lot, adapter,
+   software commit, USB library/driver, clock, and measured rail voltage.
+2. Repeat identification and ONFI reads across disconnect/reopen cycles and
+   retain the decoded geometry plus raw parameter copies.
+3. Read the complete device twice, prove the dumps identical, and confirm the
+   recovery file is committed before the first mutating opcode.
+4. Exercise both `refuse` and `skip` policies against known marker layouts;
+   confirm neither erase nor program touches a factory-bad block.
+5. Erase, full blank-check, write address-sensitive and 00/55/AA patterns,
+   fully verify, restart the process, and verify again.
+6. Inject cancellation and transport faults at identify, ONFI, marker scan,
+   backup, erase, program, verify, ECC restore, and close boundaries.
+7. Restore the original recovery image and retain a final full verification.
+
+Until that record exists, tests and successful compilation are evidence of
+software behavior only—not proof that destructive commands are safe on
+silicon.

@@ -69,6 +69,14 @@ function PlanNANDRead(const Geometry: TNANDGeometry;
   Policy: TNANDBadBlockPolicy; out Plan: TNANDPlan;
   out ErrorText: string): boolean;
 
+//Plans erasure of BlocksToErase usable blocks beginning at StartBlock.
+//nbpRefuse means those exact physical blocks must all be good; nbpSkip walks
+//past known bad blocks without counting them toward BlocksToErase.
+function PlanNANDErase(const Geometry: TNANDGeometry;
+  const Map: TNANDBlockMap; StartBlock, BlocksToErase: cardinal;
+  Policy: TNANDBadBlockPolicy; out Plan: TNANDPlan;
+  out ErrorText: string): boolean;
+
 // Every invariant the plan must satisfy, checked independently of how it was
 // built, so the tests can assert on the plan rather than on the builder.
 function ValidateNANDPlan(const Plan: TNANDPlan;
@@ -219,6 +227,13 @@ function PlanNANDProgram(const Geometry: TNANDGeometry;
   Policy: TNANDBadBlockPolicy; out Plan: TNANDPlan;
   out ErrorText: string): boolean;
 begin
+  if Geometry.Layout <> nilMainOnly then
+  begin
+    ClearNANDPlan(Plan);
+    ErrorText := 'SPI NAND programming accepts main-area images only; ' +
+      'raw images would overwrite bad-block markers and ECC bytes';
+    Exit(False);
+  end;
   Result := PlanWalk(Geometry, Map, StartBlock, ImageBytes, Policy, True,
                      Plan, ErrorText);
 end;
@@ -230,6 +245,76 @@ function PlanNANDRead(const Geometry: TNANDGeometry;
 begin
   Result := PlanWalk(Geometry, Map, StartBlock, ImageBytes, Policy, False,
                      Plan, ErrorText);
+end;
+
+function PlanNANDErase(const Geometry: TNANDGeometry;
+  const Map: TNANDBlockMap; StartBlock, BlocksToErase: cardinal;
+  Policy: TNANDBadBlockPolicy; out Plan: TNANDPlan;
+  out ErrorText: string): boolean;
+var
+  Count: SizeInt;
+  Block: cardinal;
+  FirstSet: boolean;
+begin
+  ClearNANDPlan(Plan);
+  ErrorText := '';
+  Result := False;
+
+  if not ValidateNANDGeometry(Geometry, ErrorText) then Exit;
+  if cardinal(Length(Map)) <> Geometry.BlockCount then
+  begin
+    ErrorText := Format('block map has %d entries, geometry declares %d',
+                        [Length(Map), Geometry.BlockCount]);
+    Exit;
+  end;
+  if StartBlock >= Geometry.BlockCount then
+  begin
+    ErrorText := 'the start block is past the end of the chip';
+    Exit;
+  end;
+  if BlocksToErase = 0 then Exit(True);
+
+  Count := 0;
+  Block := StartBlock;
+  FirstSet := False;
+  while Plan.BlocksUsed < BlocksToErase do
+  begin
+    if Block >= Geometry.BlockCount then
+    begin
+      ErrorText := Format(
+        'the erase needs more good blocks than remain from block %d',
+        [StartBlock]);
+      ClearNANDPlan(Plan);
+      Exit;
+    end;
+
+    if not NANDBlockIsUsable(Map, Block) then
+    begin
+      if Policy = nbpRefuse then
+      begin
+        ErrorText := Format('block %d is %s and the erase range is exact',
+          [Block, NANDBlockStateName(Map[Block])]);
+        ClearNANDPlan(Plan);
+        Exit;
+      end;
+      Inc(Plan.BlocksSkipped);
+      Inc(Block);
+      Continue;
+    end;
+
+    if not FirstSet then
+    begin
+      Plan.FirstBlock := Block;
+      FirstSet := True;
+    end;
+    AppendStep(Plan, Count, nskErase, Block, 0, 0, 0);
+    Inc(Plan.BlocksUsed);
+    Inc(Block);
+  end;
+
+  SetLength(Plan.Steps, Count);
+  Result := ValidateNANDPlan(Plan, Geometry, Map, ErrorText);
+  if not Result then ClearNANDPlan(Plan);
 end;
 
 function ValidateNANDPlan(const Plan: TNANDPlan;

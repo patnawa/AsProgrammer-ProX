@@ -228,6 +228,30 @@ begin
   Check('nothing was remembered', Chip25ManufID = 0);
 end;
 
+procedure TestExactJEDECProbeSendsOnly9F;
+var
+  ID: array[0..2] of byte;
+begin
+  WriteLn('Connection probe: exact JEDEC identity sends only 9Fh');
+  Fresh;
+  Mock.SetReply([$EF, $40, $17]);
+
+  Check('exact 9F probe succeeds', UsbAsp25_ReadJEDEC9FExact(ID));
+  Check('exact 9F probe returns all three bytes',
+        (ID[0] = $EF) and (ID[1] = $40) and (ID[2] = $17));
+  Check('the complete probe transcript is exactly 9F',
+        Mock.Transcript = '9F');
+
+  Fresh;
+  Mock.FailReads := True;
+  Check('short or failed transfer is rejected',
+        not UsbAsp25_ReadJEDEC9FExact(ID));
+  Check('failed transfer leaves a deterministic all-ones result',
+        (ID[0] = $FF) and (ID[1] = $FF) and (ID[2] = $FF));
+  Check('failed probe still sent no fallback opcodes',
+        Mock.Transcript = '9F');
+end;
+
 // ------------------------------------------------------------------ I2C
 //
 // การแตกแอดเดรสของ I2C เคยถูกคัดลอกไว้สองที่ ก้อนละเจ็ดสาขา ตอนนี้เหลือก้อนเดียว
@@ -496,6 +520,7 @@ begin
   TestWriteSR2Byte;
   TestReadIDRemembersVendor;
   TestReadIDIgnoresDeadChip;
+  TestExactJEDECProbeSendsOnly9F;
 
   TestPlainReadHasNoDummy;
   TestFastReadSendsDummy;

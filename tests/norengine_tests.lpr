@@ -31,6 +31,12 @@ type
       Opcode: byte): TNORIOResult; override;
   end;
 
+  TThrowingEvidenceSink = class
+  public
+    function Commit(const Request: TOperationRequest;
+      out ErrorText: string): boolean;
+  end;
+
 var
   Failures: integer = 0;
   Assertions: integer = 0;
@@ -84,6 +90,12 @@ begin
   Result := inherited Erase(Address, Len, Opcode);
   if Result.Success then
     raise Exception.Create('injected exception after erase delivery');
+end;
+
+function TThrowingEvidenceSink.Commit(const Request: TOperationRequest;
+  out ErrorText: string): boolean;
+begin
+  raise Exception.Create('injected evidence-store exception');
 end;
 
 procedure CopyArray(const Source: array of byte; out Dest: TBytes);
@@ -560,6 +572,56 @@ begin
   end;
 end;
 
+procedure TestEvidenceExceptionIsTyped;
+const
+  CHIP = 128;
+var
+  Geometry: TNORGeometry;
+  Initial, Patch, Expected: TBytes;
+  Plan: TNORPlan;
+  Request: TOperationRequest;
+  Device: TVirtualSPI25;
+  Executor: TNORPlanExecutor;
+  Token: TCancellationToken;
+  Outcome: TOperationOutcome;
+  Sink: TThrowingEvidenceSink;
+  Err: string;
+begin
+  WriteLn('Evidence: a throwing sink remains a typed, known-safe failure');
+  Check('uniform geometry created', MakeGeometry(CHIP, 16, 64, Geometry));
+  SetLength(Initial, CHIP);
+  FillByte(Initial[0], Length(Initial), $FF);
+  SetLength(Patch, 1);
+  Patch[0] := $5A;
+  CopyArray(Initial, Expected);
+  Overlay(Expected, 7, Patch);
+  Check('plan builds',
+    BuildNORDifferentialPlan(Initial, Patch, 7, Geometry, Plan, Err));
+
+  Request := MakeRequest(7, Length(Patch), CHIP);
+  Request.Policy.RequireEvidenceCommit := True;
+  Token := TCancellationToken.Create;
+  Sink := TThrowingEvidenceSink.Create;
+  Device := TVirtualSPI25.Create(Geometry, Initial);
+  Executor := TNORPlanExecutor.Create(Device, nil, nil, @Sink.Commit);
+  try
+    Outcome := Executor.Execute(Request, Plan, Geometry, Token);
+    Check('physical image was programmed before evidence commit',
+          Device.MemoryEquals(Expected));
+    Check('throwing evidence sink prevents success',
+          Outcome.Status = osFailed);
+    Check('throwing sink is typed as evidence commit failure',
+          Outcome.ErrorCode = oeEvidenceCommitFailed);
+    Check('evidence exception leaves disposition known safe',
+          Outcome.DeviceDisposition = ddKnownSafe);
+  finally
+    Executor.Free;
+    Device.Free;
+    Sink.Free;
+    Token.Free;
+  end;
+end;
+
 procedure TestExhaustiveFailAtN;
 const
   CHIP = 256;
@@ -769,6 +831,7 @@ begin
   TestStuckBusyIsHonest;
   TestPostDeliveryExceptionDrainsCommand;
   TestEvidenceIsPartOfSuccess;
+  TestEvidenceExceptionIsTyped;
   TestExhaustiveFailAtN;
   TestRandomPreservationProperties;
 

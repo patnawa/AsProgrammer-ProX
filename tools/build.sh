@@ -30,12 +30,21 @@ prox_version="$(sed -n "s/.*PROX_VERSION *= *'\([0-9.]*\)'.*/\1/p" software/appv
 [ -n "$prox_version" ] || die "no PROX_VERSION in software/appver.pas"
 lpi_version="$(sed -n 's/.*ProductVersion="\([0-9.]*\)".*/\1/p' software/AsProgrammer.lpi | head -1)"
 [ -n "$lpi_version" ] || die "no ProductVersion in AsProgrammer.lpi"
-[ "$prox_version" = "$lpi_version" ] || \
-  die "version mismatch: appver.pas says $prox_version, AsProgrammer.lpi says $lpi_version"
+lpi_file_version="$(sed -n \
+  -e 's/.*<MajorVersionNr Value="\([0-9]*\)".*/\1/p' \
+  -e 's/.*<MinorVersionNr Value="\([0-9]*\)".*/.\1/p' \
+  -e 's/.*<RevisionNr Value="\([0-9]*\)".*/.\1/p' \
+  -e 's/.*<BuildNr Value="\([0-9]*\)".*/.\1/p' \
+  software/AsProgrammer.lpi | tr -d '\n')"
+[ "$prox_version" = "$lpi_version" ] && [ "$prox_version" = "$lpi_file_version" ] || \
+  die "version mismatch: appver.pas says $prox_version, AsProgrammer.lpi ProductVersion says $lpi_version and FileVersion says $lpi_file_version"
 step "version $prox_version"
 
 # --- chip tables ---
 if command -v python3 >/dev/null 2>&1; then
+  step "checking release, suite and localization metadata"
+  python3 tools/check_project_metadata.py \
+    || die "project metadata has drifted"
   step "checking the chip tables"
   extra=()
   [ -f chiplist-flashrom.xml ] && extra+=(chiplist-flashrom.xml)
@@ -96,6 +105,11 @@ run_suite hwtests "$hw" \
   software/spi25.pas software/basehw.pas software/utilfunc.pas \
   software/i2c.pas software/electricalpreflight.pas
 
+capability="$tmp/hardware-capability"
+run_suite hardwarecapability_tests "$capability" \
+  tests/hardwarecapability_tests.lpr \
+  software/basehw.pas software/electricalpreflight.pas
+
 nor="$tmp/nor"
 run_suite norengine_tests "$nor" \
   tests/norengine_tests.lpr tests/virtualspi25.pas \
@@ -105,6 +119,12 @@ eeprom="$tmp/eeprom"
 run_suite eepromengine_tests "$eeprom" \
   tests/eepromengine_tests.lpr tests/virtualeeprom.pas \
   software/operationmodel.pas software/eepromengine.pas
+
+runner="$tmp/operation-runner"
+run_suite operationrunner_tests "$runner" \
+  tests/operationrunner_tests.lpr tests/virtualspi25.pas \
+  software/operationmodel.pas software/norplanner.pas \
+  software/norengine.pas software/operationrunner.pas
 
 # SPI NAND geometry and bad-block-aware planning: the arithmetic that decides
 # whether a bad block is ever touched.
@@ -119,6 +139,16 @@ run_suite nandengine_tests "$nand_engine" \
   tests/nandengine_tests.lpr tests/virtualspinand.pas \
   software/nandmodel.pas software/nandplanner.pas \
   software/nandengine.pas software/nandcatalog.pas
+
+# Real TBaseHardware-to-NAND-device framing, including ambiguous command
+# issuance, bounded status draining, and checked write-disable cleanup.
+nand_adapter="$tmp/nand-adapter"
+run_suite nandadapter_tests "$nand_adapter" \
+  tests/nandadapter_tests.lpr tests/mockhw.pas \
+  software/spi25nandadapter.pas software/nandmodel.pas \
+  software/nandengine.pas software/nandplanner.pas \
+  software/nandcatalog.pas software/basehw.pas \
+  software/electricalpreflight.pas
 
 # The capacity/counterfeit test engine against fake chips of every stripe.
 chip_test="$tmp/chiptest"
@@ -140,6 +170,48 @@ cp tools/ch347smoke.lpr software/ch347proto.pas software/ch347usb.pas \
    software/basehw.pas software/electricalpreflight.pas "$smoke/"
 (cd "$smoke" && fpc -Mobjfpc -Sh ch347smoke.lpr >/dev/null) \
   || die "the CH347 smoke tool did not compile"
+
+# The production CLI is intentionally LCL-free. Compile the real entrypoint
+# and its complete dependency graph, but do not touch hardware in ordinary CI.
+step "compiling the headless Linux CLI"
+headless="$tmp/headless-cli"
+mkdir -p "$headless/units"
+fpc -Mobjfpc -Sh -Fusoftware -FU"$headless/units" -FE"$headless" \
+  software/AsProgrammerCLI.lpr >/dev/null \
+  || die "the headless Linux CLI did not compile"
+[ -x "$headless/AsProgrammerCLI" ] \
+  || die "the headless Linux CLI executable was not produced"
+
+# These QWord values would wrap to plausible 32-bit geometry without an
+# explicit bound check. Both invocations must fail as usage before USB opens.
+if "$headless/AsProgrammerCLI" --smart-preview unused.bin --size 8388608 \
+    --address 0 --page-size 4294967552 --erase-size 4096 \
+    --erase-opcode 20 >/dev/null 2>&1; then
+  die "headless CLI admitted overflowing page geometry"
+else
+  code=$?
+  [ "$code" -eq 2 ] || die "headless CLI returned $code for overflowing page geometry"
+fi
+if "$headless/AsProgrammerCLI" --smart-preview unused.bin --size 8388608 \
+    --address 0 --page-size 256 --erase-size 4294971392 \
+    --erase-opcode 20 >/dev/null 2>&1; then
+  die "headless CLI admitted overflowing erase geometry"
+else
+  code=$?
+  [ "$code" -eq 2 ] || die "headless CLI returned $code for overflowing erase geometry"
+fi
+if "$headless/AsProgrammerCLI" --detect --speeed 1 >/dev/null 2>&1; then
+  die "headless CLI ignored an unknown option"
+else
+  code=$?
+  [ "$code" -eq 2 ] || die "headless CLI returned $code for an unknown option"
+fi
+if "$headless/AsProgrammerCLI" --detect --detect >/dev/null 2>&1; then
+  die "headless CLI accepted a duplicate option"
+else
+  code=$?
+  [ "$code" -eq 2 ] || die "headless CLI returned $code for a duplicate option"
+fi
 
 adapter="$tmp/spi25-adapter"
 run_suite spi25noradapter_tests "$adapter" \
