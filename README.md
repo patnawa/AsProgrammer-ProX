@@ -53,8 +53,8 @@ checksummed and carries GitHub build-provenance attestation.
 
 ## Why this fork
 
-The code treats every operation that can destroy unique firmware as a
-fail-closed transaction rather than a sequence of unrelated buttons.
+Smart Write and production programming treat mutation as a guarded
+transaction rather than a sequence of unrelated buttons.
 
 | Capability | Safety property |
 |---|---|
@@ -62,7 +62,7 @@ fail-closed transaction rather than a sequence of unrelated buttons.
 | **Preservation-aware SPI NOR updates** | A `0→1` change erases only its containing block and restores untouched neighbours from the trusted snapshot. Pure `1→0` changes skip erase. |
 | **Differential EEPROM updates** | 24Cxx, 93xx, and 95xx write only differing pages, then verify every touched page. |
 | **Trusted snapshots and backups** | Two full reads must match before existing content is trusted. Smart Write and gated NAND mutation require durable backups; explicitly destructive diagnostics such as Surface scan remain opt-in and are not recoverable. |
-| **Identity and electrical gates** | Repeated JEDEC identity, typed programmer capabilities, voltage policy, WEL/BUSY checks, protection decoding, exact transfer counts, and cleanup all fail closed. |
+| **Identity and electrical gates** | Repeated JEDEC identity, typed programmer capabilities, voltage policy, WEL/BUSY checks, protection decoding, exact transfer counts, and cleanup are enforced. Unattended and strict-production paths fail closed; interactive overrides are explicit. |
 | **SFDP and four-byte support** | Uses JESD216 geometry, timings, erase maps, and address strategies instead of guessing from capacity. |
 | **Dump and chip diagnostics** | Detects blank/silent buses, repeating wrapped dumps, unstable contacts, remarked capacity, slow-wearing blocks, and uncorrectable NAND ECC. |
 | **Production evidence** | Supports HMAC-authenticated jobs, retained image handles, full verification, signed durable evidence, and local anti-replay state. |
