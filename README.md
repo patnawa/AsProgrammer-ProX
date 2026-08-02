@@ -104,8 +104,8 @@ is no GUI NAND workflow yet. See
 3. Confirm the chip voltage and pin 1. Connect the chip with target power off.
 4. Press **Read ID** (`F5`). For an unlisted SPI NOR, use
    **Chip → Detect chip via SFDP**.
-5. Press **Read** (`Ctrl+R`) with two read passes. Save the dump somewhere
-   separate before attempting any change.
+5. Enable **Options → Read twice and compare**, then press **Read** (`Ctrl+R`).
+   Save the dump somewhere separate before attempting any change.
 6. Run the offline dump scan or compare its hash with a known-good reference.
 
 ### SPI NOR wiring
@@ -187,6 +187,15 @@ entrypoint from source. It supports stable read-only detection/read, offline
 scan/SFDP decoding, Smart Write preview, and a separately gated
 sacrificial-chip write path while live validation is still being completed.
 
+From the extracted Windows release:
+
+```powershell
+.\AsProgrammerCLI.exe --help
+.\AsProgrammerCLI.exe --detect
+```
+
+Build and run the same entrypoint on Linux:
+
 ```bash
 fpc -Mobjfpc -Sh -Fusoftware software/AsProgrammerCLI.lpr
 ./software/AsProgrammerCLI --detect
@@ -234,7 +243,7 @@ run time by separately licensed/imported lists and the update-safe local
 that pass the structural validator.
 
 ```xml
-<W25Q64BV id="EF4017" page="256" size="8388608" sector="4096" sectorcmd="20"/>
+<W25Q64BV id="EF4017" page="256" size="8388608" vcc="3.3"/>
 ```
 
 Never infer voltage, address width, page size, or erase geometry when a
