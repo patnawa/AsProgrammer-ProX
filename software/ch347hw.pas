@@ -19,8 +19,10 @@ private
   FDevSPIConfig: _SPI_CONFIG;
   FTargetVoltageMv: cardinal;
   FVoltageSupported: boolean;
-  //ตั้งเฉพาะขาแรงดัน ห้ามแตะขาไฟแสดงการทำงาน (ดูหมายเหตุที่ตัวฟังก์ชัน)
+  FLedOn: boolean;
+  //สองขานี้เขียนแยกกันคนละ mask จะได้ไม่กวนกันเอง
   function ApplyVccGPIO(VccBits: byte): boolean;
+  function ApplyLedGPIO(On: boolean): boolean;
 public
   constructor Create;
   destructor Destroy; override;
@@ -32,7 +34,7 @@ public
   function SupportsTargetVoltage: boolean; override;
   function GetTargetVoltageMv: cardinal; override;
   function SetTargetVoltageMv(Millivolts: cardinal): boolean; override;
-  //ไม่ override SetActivityLED โดยตั้งใจ ไฟบนบอร์ดมีวงจรขับของตัวเองอยู่แล้ว
+  procedure SetActivityLED(Active: boolean); override;
 
   //spi
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; override;
@@ -71,6 +73,7 @@ begin
   //ยังไม่เปิดอุปกรณ์ก็ยังไม่รู้ว่าจ่ายอยู่เท่าไร 0 แปลว่าไม่รู้ ไม่ใช่ไม่มีไฟ
   FTargetVoltageMv := 0;
   FVoltageSupported := False;
+  FLedOn := False;
 end;
 
 destructor TCH347Hardware.Destroy;
@@ -153,21 +156,41 @@ end;
 
 //ตั้งเฉพาะขาเลือกแรงดัน (GPIO6) เท่านั้น
 //
-//ห้ามแตะ GPIO4 เด็ดขาด แม้จะรู้ว่าเป็นขาไฟแสดงการทำงานก็ตาม
-//
-//บอร์ดมีวงจรขับไฟดวงนั้นจากทราฟฟิกบนบัสอยู่แล้ว ตราบใดที่ขายังเป็นอินพุต
-//(ปล่อยลอย) ไฟจะกะพริบตามงานเองโดยไม่ต้องมีใครสั่ง พอเราจับมันเป็นเอาต์พุต
-//เมื่อไร วงจรนั้นก็ถูกกดทับทันที ไฟเลยดับสนิททั้งงาน ซึ่งแย่กว่าเดิม
-//
-//เคยพลาดมาแล้วจริง ๆ: รุ่นก่อนหน้าตั้ง GPIO4 เป็นเอาต์พุตแล้วดันขึ้นสูงตอน
-//เปิดอุปกรณ์ ไฟเขียวที่เคยกะพริบตอนอ่าน EEPROM เลยหายไปทั้งดวง
-//
 //iEnable คลุมบิตเดียว ขาที่เหลือไม่ถูกแตะ จึงไม่ต้องอ่านสถานะเดิมกลับมาก่อน
+//และไฟแสดงการทำงานที่ GPIO4 ก็ไม่ขยับตามเวลาสลับแรงดัน เพราะอยู่คนละ mask
 function TCH347Hardware.ApplyVccGPIO(VccBits: byte): boolean;
 begin
   if not FDevOpened then Exit(False);
   Result := CH347GPIO_Set(FDevHandle, CH347_GPIO_VCC, CH347_GPIO_VCC,
                           VccBits and CH347_GPIO_VCC);
+end;
+
+//ไฟแสดงการทำงานอยู่ที่ GPIO4 และต้องสั่งเอง บอร์ดไม่ได้ขับให้
+//
+//เคยเข้าใจผิดว่าบอร์ดกะพริบเองแล้วถอดโค้ดส่วนนี้ออกไป ผลคือไฟไม่ติดเลย
+//วัดจริงแล้ว: สุ่มอ่าน GPIO4 ระหว่างยิง SPI 400 รอบ ค่าไม่ขยับสักครั้งเดียว
+//แปลว่าไม่มีวงจรขับจากทราฟฟิก ต้องเขียนขาเอาเองเหมือนที่โปรแกรมผู้ผลิตทำ
+//
+//ต่อแบบ active low: ระดับต่ำคือไฟติด ตอนไม่มีงานขาอยู่ที่ระดับสูงและไฟดับ
+//
+//mask คลุมเฉพาะ GPIO4 ขาแรงดันที่ GPIO6 จึงไม่ถูกแตะเลย ทั้งสองอยู่คนละ
+//คำสั่งกัน สลับไฟกี่ครั้งก็ไม่ทำให้แรงดันขยับ
+function TCH347Hardware.ApplyLedGPIO(On: boolean): boolean;
+var
+  Level: byte;
+begin
+  if not FDevOpened then Exit(False);
+  if On then Level := 0 else Level := CH347_GPIO_ACT_LED;
+  Result := CH347GPIO_Set(FDevHandle, CH347_GPIO_ACT_LED,
+                          CH347_GPIO_ACT_LED, Level);
+end;
+
+procedure TCH347Hardware.SetActivityLED(Active: boolean);
+begin
+  if not FDevOpened then Exit;
+  if FLedOn = Active then Exit;
+  //ไฟไม่ติดไม่ใช่เหตุให้ล้มงาน จำสถานะไว้เท่าที่สั่งผ่านจริง
+  if ApplyLedGPIO(Active) then FLedOn := Active;
 end;
 
 function TCH347Hardware.SupportsTargetVoltage: boolean;
@@ -204,6 +227,8 @@ begin
     //
     //แต่ถ้ารอบนี้ไม่เคยตั้งแรงดันเลย (เช่น งาน I2C ล้วน ๆ) ก็ไม่ต้องไปแตะขา
     //ด้วยเหตุผลเดียวกับที่ DevOpen ไม่แตะ: ขานี้ใช้ร่วมกับฟังก์ชันอื่น
+    if FLedOn then ApplyLedGPIO(False);
+
     if FVoltageSupported and (FTargetVoltageMv <> 0) then
       ApplyVccGPIO(CH347_GPIO_VCC);
 
@@ -212,6 +237,7 @@ begin
     FDevOpened := false;
     FVoltageSupported := False;
     FTargetVoltageMv := 0;
+    FLedOn := False;
   end;
 end;
 
@@ -238,13 +264,15 @@ begin
 
   Result := CH347SPI_Init(FDevHandle, @FDevSPIConfig);
 
-  //ไม่ยุ่งกับไฟแสดงการทำงาน วงจรบนบอร์ดกะพริบตามทราฟฟิกเองอยู่แล้ว
-  //และครอบคลุมทั้ง SPI และ I2C ซึ่งดีกว่าที่โค้ดนี้เคยทำได้
+  //ติดไฟตอนเริ่มงาน ดับตอนจบ ไม่กะพริบรายทรานสเฟอร์ เพราะการสลับ GPIO
+  //หนึ่งครั้งคือการคุย USB หนึ่งรอบ ทำทุกบล็อกแล้วความเร็วอ่านตกเห็น ๆ
+  if Result then SetActivityLED(True);
 end;
 
 procedure TCH347Hardware.SPIDeinit;
 begin
   if not FDevOpened then Exit;
+  SetActivityLED(False);
 end;
 
 function TCH347Hardware.SPIMaxTransfer: integer;
@@ -285,11 +313,15 @@ procedure TCH347Hardware.I2CInit;
 begin
   if not FDevOpened then Exit;
   CH347I2C_Set(FDevHandle, 1);
+  //EEPROM วิ่งบน I2C ไม่ใช่ SPI รอบก่อนผูกไฟไว้กับ SPIInit อย่างเดียว
+  //อ่าน EEPROM ทีไรไฟจึงไม่ติด ทั้งที่งานเดินอยู่จริง
+  SetActivityLED(True);
 end;
 
 procedure TCH347Hardware.I2CDeinit;
 begin
   if not FDevOpened then Exit;
+  SetActivityLED(False);
 end;
 
 function TCH347Hardware.I2CReadWrite(DevAddr: byte;
