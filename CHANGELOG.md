@@ -3,6 +3,24 @@
 All notable changes to AsProgrammer ProX are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.26.2.0 — the first release cut from the Chipwright repository
+
+- The Linux CI suite could not compile `unittests`: `tools/build.sh` never
+  listed `software/utilfunc.pas`, while the Windows list had it, and the
+  metadata check only compares suite *names* — not their file lists — so the
+  drift stayed invisible until the first tag build. The voltage-resolver
+  tests now compile and run on both platforms.
+- The release-badge check in `tools/check_project_metadata.py` still pointed
+  at the old AsProgrammer-ProX repository; it now requires this repository's
+  badge, matching the new front page.
+- The front page caught up with the code it describes: the voltage-resolution
+  section now shows all four tiers including the MX25U/MX66U name rule and
+  the audited nineteen-prefix list (and why `C225` is deliberately absent),
+  the on-window Target voltage box is documented, and the changelog and CI
+  are linked from the badges. The stale note about a 96 MB log file in git
+  history is gone together with the file itself — the repository history was
+  rewritten before publication.
+
 ## 4.26.1.0 — the voltage database survives an audit of all 1751 catalog entries
 
 - The 1.8V-family id-prefix list was checked against every entry of every

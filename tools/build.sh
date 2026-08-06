@@ -93,7 +93,7 @@ run_suite unittests "$logic" --with-sfdp-corpus \
   software/sfdp.pas software/jedec.pas software/serialnum.pas \
   software/protbits.pas software/opresult.pas software/prodlog.pas \
   software/fileformats.pas software/flashops.pas software/imgcheck.pas \
-  software/ifd.pas
+  software/ifd.pas software/utilfunc.pas
 
 sfdp_map="$tmp/sfdp-map"
 run_suite sfdp_sector_map_tests "$sfdp_map" \

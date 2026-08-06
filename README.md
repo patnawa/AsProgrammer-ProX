@@ -7,6 +7,8 @@
 SPI NOR · SPI NAND · I²C EEPROM · Microwire — across nine programmers.
 
 [![Release](https://img.shields.io/github/v/release/patnawa/ch347_programer_proX?label=release)](https://github.com/patnawa/ch347_programer_proX/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/patnawa/ch347_programer_proX/build.yml?branch=main&label=CI)](https://github.com/patnawa/ch347_programer_proX/actions/workflows/build.yml)
+[![Changelog](https://img.shields.io/badge/changelog-every%20release%27s%20story-blueviolet)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20Linux-blue)](#building)
 [![Built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-orange)](https://www.lazarus-ide.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -47,6 +49,8 @@ Neither is documented by WCH. Both were recovered from the vendor binary's `CH34
 
 > **Options → SPI → CH347 target voltage** — `1.8 V` · `3.3 V` · `Auto`
 
+The same switch sits directly on the main window whenever a CH347 is selected: a **Target voltage** box with the three radio buttons and a `Chip:` line showing the selected part's supply voltage — the same front-screen control the board vendor's own software has. The box and the menu mirror each other, and either applies immediately while the device is open.
+
 The board powers up at 1.8 V and Chipwright restores 1.8 V when it closes, so a rail left high by a previous job can never greet the next chip you seat.
 
 ### How a chip's voltage is worked out
@@ -55,11 +59,14 @@ The board powers up at 1.8 V and Chipwright restores 1.8 V when it closes, so a 
 |:--:|---|---|
 | 1 | the catalogue's `vcc=` attribute | rare, but authoritative |
 | 2 | the `_1.8V` / `_3.3V` name suffix | `W74M12JW_1.8V` |
-| 3 | known-1.8 V JEDEC id prefixes | `W25Q64FW` → `EF6017` |
+| 3 | model names that encode the voltage | `MX25U…` / `MX66U…` → 1.8 V |
+| 4 | known all-1.8 V JEDEC id prefixes | `W25Q64FW` → `EF6017` |
 
-Tier 3 covers the dangerous group: parts like `W25Q64FW` and `MX25U6435F` that are 1.8 V but whose *names say nothing*. The prefixes — `EF60` `EF80` `EF50` `C225` `C860` `2041` `2050` `9D70` `E060` `1C38` — were derived from the catalogue itself, not from memory.
+Tier 4 covers the dangerous group: parts like `W25Q64FW` and `MT25QU256` that are 1.8 V but whose *names say nothing*. The nineteen prefixes — `EF50` `EF60` `EF80` `EF8A` `EF8E` `EF5B` `C860` `C863` `C867` `2041` `2050` `2044` `20BB` `2C5B` `9D70` `9D12` `E060` `1C38` `BA00` — were audited against **all 1,751 entries of the four shipped chip tables**, and `tools/validate_chiplist.py` re-proves the claim on every build, so a future catalogue import cannot quietly poison it.
 
-**Tier 3 may only ever conclude 1.8 V.** It is never allowed to infer 3.3 V from an id, because that is the direction that kills chips.
+`C225` is deliberately absent. Macronix used that id prefix for the 1.8 V MX25U family *and* for 3 V parts (`MX25L1635E`, `MX25L3239E`, `MX25L6439E`) *and* for wide-range MX25V — an id that cannot prove a voltage. That is why MX25U is recognised by **name** in tier 3 instead: the names never collide even where the ids do.
+
+**Tiers 3 and 4 may only ever conclude 1.8 V.** Nothing is ever inferred *up* to 3.3 V, because that is the direction that kills chips.
 
 If none of the three resolves, Chipwright asks:
 
@@ -103,7 +110,10 @@ fpc -Mobjfpc -Sh -Fusoftware -FUtests/lib -otests/unittests.exe tests/unittests.
 ## Known issues
 
 - **The activity LED polarity is inferred, not measured.** It's implemented active-low from observing GPIO4 idle high with the lamp off. If the light sits on constantly and goes *dark* during operations, it's inverted — swap the two `LedBits` assignments in `software/ch347hw.pas`.
-- `software/ezpspy.log` (96 MB) is still in git history from an earlier commit and exceeds GitHub's recommended file size.
+
+## Changelog
+
+Every release tells its story in **[`CHANGELOG.md`](CHANGELOG.md)** — what was wrong, why it mattered, and what the fix protects. Binaries with checksums are on the [releases page](https://github.com/patnawa/ch347_programer_proX/releases); CI rebuilds, re-tests and packages every tagged release from scratch before it is published.
 
 ## Credits
 
