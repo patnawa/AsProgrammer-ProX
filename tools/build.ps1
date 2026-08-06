@@ -333,13 +333,18 @@ if (-not $Release) {
 }
 
 # --- release folder ---
-$out = Join-Path $root "release\AsProgrammer-ProX-$Version"
+$out = Join-Path $root "release\Chipwright-$Version"
 Step "assembling $out"
 Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $out | Out-Null
 
-Copy-Item $exe $out
-Copy-Item $headlessExe $out
+# The build targets are still named AsProgrammer*.exe because the Lazarus
+# project files are, but the shipped program is Chipwright. Rename on the way
+# into the package so the download matches the application. Doing it here and
+# not as a manual step afterwards is the point: CI rebuilds every tagged
+# release from scratch, and a manual rename does not survive that.
+Copy-Item $exe (Join-Path $out "Chipwright.exe")
+Copy-Item $headlessExe (Join-Path $out "ChipwrightCLI.exe")
 Remove-Item -LiteralPath $headlessDir -Recurse -Force
 Copy-Item "$root\chiplist.xml","$root\settings.xml" $out
 if (Test-Path "$root\chiplist-flashrom.xml") { Copy-Item "$root\chiplist-flashrom.xml" $out }
