@@ -3,6 +3,21 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.26.4.0 — the voltage box no longer sits on the chip picture
+
+- The chip picture and the log below it laid out wrongly. The target-voltage
+  box added in 4.26.1.0 was placed at `Top=330` with `Height=68`, so it
+  occupied 330-398 inside `GroupChipSettings` — and `ChipView`, the chip
+  picture, starts at `Top=340`. The two overlapped by 58 pixels. The box was
+  also 188 wide against a parent client width of 156, so it overran sideways
+  as well.
+
+  It now sits below the picture (`ChipView` ends at 570, the box starts at
+  575) and is 184 wide, matching `ChipView`'s column.
+
+- Documentation now points at `patnawa/Chipwright` following the repository
+  rename.
+
 ## 4.26.3.0 — the board lights its own LED
 
 - The green activity light on the CH347 stopped blinking during reads. That

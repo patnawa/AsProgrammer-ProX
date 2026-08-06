@@ -168,7 +168,7 @@ def main() -> int:
             )
         )
         readme = read("README.md")
-        if "img.shields.io/github/v/release/patnawa/ch347_programer_proX" not in readme:
+        if "img.shields.io/github/v/release/patnawa/Chipwright" not in readme:
             raise ValueError("README must use the repository-backed latest-release badge")
         changelog_version = require_match(
             r"^##\s+([0-9.]+)\b", read("CHANGELOG.md"),

@@ -6,8 +6,8 @@
 
 SPI NOR · SPI NAND · I²C EEPROM · Microwire — across nine programmers.
 
-[![Release](https://img.shields.io/github/v/release/patnawa/ch347_programer_proX?label=release)](https://github.com/patnawa/ch347_programer_proX/releases)
-[![CI](https://img.shields.io/github/actions/workflow/status/patnawa/ch347_programer_proX/build.yml?branch=main&label=CI)](https://github.com/patnawa/ch347_programer_proX/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/patnawa/Chipwright?label=release)](https://github.com/patnawa/Chipwright/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/patnawa/Chipwright/build.yml?branch=main&label=CI)](https://github.com/patnawa/Chipwright/actions/workflows/build.yml)
 [![Changelog](https://img.shields.io/badge/changelog-every%20release%27s%20story-blueviolet)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20Linux-blue)](#building)
 [![Built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-orange)](https://www.lazarus-ide.org/)
@@ -109,7 +109,7 @@ fpc -Mobjfpc -Sh -Fusoftware -FUtests/lib -otests/unittests.exe tests/unittests.
 
 ## Changelog
 
-Every release tells its story in **[`CHANGELOG.md`](CHANGELOG.md)** — what was wrong, why it mattered, and what the fix protects. Binaries with checksums are on the [releases page](https://github.com/patnawa/ch347_programer_proX/releases); CI rebuilds, re-tests and packages every tagged release from scratch before it is published.
+Every release tells its story in **[`CHANGELOG.md`](CHANGELOG.md)** — what was wrong, why it mattered, and what the fix protects. Binaries with checksums are on the [releases page](https://github.com/patnawa/Chipwright/releases); CI rebuilds, re-tests and packages every tagged release from scratch before it is published.
 
 ## Credits
 
