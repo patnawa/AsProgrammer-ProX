@@ -3836,10 +3836,32 @@ var
   Want: cardinal;
   MinMv, MaxMv: cardinal;
   ChipVcc: string;
+  OpenedHere: boolean;
 begin
   Result := True;
   if AsProgrammer.Programmer = nil then Exit;
-  if not AsProgrammer.Programmer.SupportsTargetVoltage then Exit;
+  if AsProgrammer.Current_HW <> CHW_CH347 then Exit;
+
+  //โปรแกรมนี้เปิดอุปกรณ์เฉพาะตอนทำงานแล้วปิดทันทีที่จบ ตอนผู้ใช้กดเลือก
+  //แรงดันจากหน้าจอ อุปกรณ์จึงยังไม่ได้เปิด และ SupportsTargetVoltage คืน
+  //False ทำให้ฟังก์ชันนี้ออกไปเงียบ ๆ โดยไม่ได้ตั้งอะไรเลย
+  //
+  //อาการที่ผู้ใช้เจอคือกดเลือก 3.3V แล้ววัดดู ยังได้ 1.8V เหมือนเดิม
+  //
+  //เปิดเองชั่วคราวแล้วปิดคืนจึงเป็นสิ่งที่ต้องทำ ระดับที่ตั้งไว้ค้างอยู่ใน
+  //ฮาร์ดแวร์ต่อไปหลังปิด จึงยังมีผลตอนเริ่มงานจริง
+  OpenedHere := False;
+  if not AsProgrammer.Programmer.SupportsTargetVoltage then
+  begin
+    if not AsProgrammer.Programmer.DevOpen then Exit;
+    OpenedHere := True;
+    if not AsProgrammer.Programmer.SupportsTargetVoltage then
+    begin
+      AsProgrammer.Programmer.DevClose;
+      Exit;
+    end;
+  end;
+  try
 
   Want := SelectedCH347Vcc;
   if Want = 0 then
@@ -3871,6 +3893,10 @@ begin
   end;
 
   LogPrint(Format(STR_CH347_VCC_SET, [Want]));
+  finally
+    //ปิดคืนเฉพาะตัวที่เราเปิดเอง ห้ามไปปิดของงานที่กำลังเดินอยู่
+    if OpenedHere then AsProgrammer.Programmer.DevClose;
+  end;
 end;
 
 //กล่องเลือกแรงดันบนหน้าหลัก ทำตามโปรแกรมของผู้ผลิตบอร์ด CH347Ⅱ V2.13
