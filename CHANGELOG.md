@@ -3,6 +3,121 @@
 All notable changes to AsProgrammer ProX are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.26.1.0 — the voltage database survives an audit of all 1751 catalog entries
+
+- The 1.8V-family id-prefix list was checked against every entry of every
+  shipped chip table, and `C225` turned out to be a trap: Macronix put the
+  MX25U 1.8 V family, the 3 V MX25L1635E/1636E/3239E/6439E and the
+  wide-range MX25V4035/8035 on the same `C225xx` ids. The resolver was
+  reporting those 3 V parts as 1.8 V — electrically harmless (undervolting
+  only mutes a chip) but wrong, and in Auto mode it would have powered them
+  at a level they cannot answer at. `C225` is gone; MX25U/MX66U are now
+  recognized by model name, which never collides even where the ids do.
+- Ten more families that the audit proved unanimously 1.8 V joined the list:
+  Micron MT25QU (`20BB`, this rescues the bare-named MT25QU256 entry) and
+  MT35XU (`2C5B`), ISSI IS25WQ (`9D12`), GigaDevice GD25LF (`C863`) and
+  GD25LB/LR..E (`C867`), Winbond W77Q (`EF8A`), W77T (`EF8E`) and W35T
+  (`EF5B`), XMC `2044`, and Zetta ZD25LQ (`BA00`). Genuinely mixed prefixes
+  (SST/Sanyo `6216`, SST/PCT `BF25`, Atmel `1F4x`, Macronix MX77 `C275`,
+  wide-range GD25WQ/WB and FM25W) stay excluded on purpose.
+- `tools/validate_chiplist.py` now enforces all of this on every build: each
+  `vcc` attribute must be a value the application can actually parse, a name
+  may not carry both 1.8V and 3.3V markers or contradict its `vcc` attribute,
+  and no catalog entry may ever contradict a family on the 1.8V prefix list
+  or the MX25U/MX66U name rule — so the next imported chip table cannot
+  silently poison the voltage detection the CH347 guidance relies on.
+
+## 4.26.0.0 — an on-window voltage switch, like the CH347Ⅱ board's own software
+
+- The CH347 target voltage can now be switched right on the main window. A
+  "Target voltage" box with 1.8 V / 3.3 V / Auto radio buttons appears on the
+  left panel whenever the CH347 is the selected programmer — the same control
+  the board vendor's own software puts on its front screen ("切换电压"),
+  matched by a "Chip:" line that shows the selected chip's supply voltage the
+  way the vendor shows "芯片电压". The box mirrors the existing
+  Options -> SPI -> CH347 target voltage menu in both directions: clicking a
+  radio applies immediately when the device is open, exactly like the menu,
+  and the guidance dialogs' one-click fixes update the radios too. The chip
+  drawing below slides down while the box is shown and takes the space back
+  for other programmers.
+- Everything that reads the chip's supply voltage now goes through the
+  three-tier resolver (catalog `vcc` field, then a 1.8V/3.3V marker in the
+  model name, then JEDEC ids of all-1.8 V families such as `EF60xx` W25Q..JW
+  or `C225xx` MX25U). The chiplist ships a `vcc` attribute on only 5 of 658
+  entries, so the chip panel, the telemetry line, the voltage warning gate's
+  Auto resolution, and the Chip Doctor report were all blind to well-known
+  1.8 V parts whose names don't say so. The resolver never concludes 3.3 V
+  from an id — guessing high is the direction that kills chips.
+
+## 4.25.0.0 — the CH347 probes at 1.8 V, reads the chip's voltage, and shows the way
+
+- Read ID on a voltage-switching CH347 board now always probes at 1.8 V, the
+  one level that damages no chip. The Auto voltage mode used to inherit the
+  catalog voltage of whatever chip was still *selected* — a leftover 3.3 V
+  profile would have put 3.3 V on an unknown, possibly 1.8 V, part in the
+  socket. A menu pinned at 3.3 V is still honored, because that is the only
+  way a 3.3 V-only chip that ignores 1.8 V can be detected at all; the log
+  says so when it happens.
+- Once a chip is identified — by Read ID, the search window, the chip menu,
+  or `--chip` — the program reads its supply voltage from the catalog, shows
+  it on the chip panel (`Vcc 1.8 V`) and in the log, and compares it with the
+  CH347 voltage menu. A mismatch opens a dialog that offers to switch to the
+  right level with one click and names the exact menu (Options -> SPI ->
+  CH347 target voltage); Auto mode just reports what it will apply. The
+  dangerous direction (chip 1.8 V, menu pinned 3.3 V) and the merely mute
+  direction (chip 3.3 V, menu pinned 1.8 V) are told apart in plain words.
+- When no chip answers at 1.8 V, the dead-socket message now explains that a
+  3.3 V-only part often cannot answer at that level and offers to pin 3.3 V
+  for the next attempt — while warning that a badly clipped 1.8 V chip would
+  be destroyed by that, so contact should be checked first. The program never
+  raises the voltage on its own.
+- The 1.8 V warning gate understands the switching board: it stays silent
+  when 1.8 V is what will actually be supplied, and when 3.3 V is pinned
+  against a 1.8 V chip it offers "pin 1.8 V and continue" instead of the old
+  external-supply lecture, which only applies to boards that cannot switch.
+  Non-switching CH347 boards keep the old warning.
+- The three CH347 voltage log strings added in 4.24.x are now represented in
+  `en.po`, so the localization metadata check passes again.
+
+- The CH347 SPI clock defaulted to 60 MHz, the fastest rate the chip offers.
+  A clip lead, a long cable or a breadboard rarely survives that, and a bus
+  that cannot keep up reads back as all FF — indistinguishable from an empty
+  socket. On the reference rig a W25Q64 returned `FFFFFF` at 60 and 30 MHz and
+  a clean `EF4017` at 15 MHz and below. The default is now 15 MHz, matching
+  the rate the CH347 libusb bench has always used. Existing `settings.xml`
+  files keep whatever rate they already recorded.
+- "No chip answered" now adds a second line naming the current clock and
+  pointing at the menu when the CH347 is running at 60 or 30 MHz. The old
+  message only listed the socket, pin 1, the cable and the supply, which sent
+  people to re-seat wiring that was never the problem.
+- The CH347 backend no longer rejects a device just because `CH347GetChipType`
+  answered 0. In the vendor DLL every failure path of that call returns 0 —
+  a failed `DeviceIoControl` and a chip-version byte below 0x18 both land on
+  the same `xor al,al` — so 0 means "a CH341, or the question did not get
+  through", and the two cannot be told apart. Treating 0 as proof of a CH341
+  made a genuine CH347 vanish whenever the query failed. The backend now
+  rejects a device only when the USB PID in its device path positively says
+  CH341, and keeps it in every ambiguous case. The path is read through the
+  same DLL that opened the device, because the two vendor DLLs number their
+  devices independently.
+
+## 4.24.1.0 — CH347 is detected as a CH347, not as a CH341
+
+- Automatic hardware detection no longer mistakes a CH347 for a CH341A. Both
+  chips sit under the same WCH `CH34xPAR` driver and share one device interface
+  GUID, so `CH341DLL.DLL` enumerates and happily opens a CH347 as if it were one
+  of its own. Detection tries CH341 first, so a machine with only a CH347
+  plugged in always settled on CH341 and never reached the CH347 backend. Each
+  backend now checks what it actually opened — CH341 reads the USB PID out of
+  the device path, CH347 asks `CH347GetChipType` — and hands back anything from
+  the other family instead of claiming it. Vendor DLLs too old to export
+  `CH347GetChipType` keep the previous behaviour.
+- Both backends now release the handles they opened while scanning, so a
+  rejected device does not stay claimed against the next programmer selection.
+- The "install the driver" hints pointed at directories that do not ship:
+  `drivers\CH341\` and `drivers\CH343\`. They now name the real installers,
+  `drivers\USBCH341\CH341PAR.EXE` and `drivers\CH34X\CH34XPAR.EXE`.
+
 ## 4.24.0.0 — safer workflows, gated NAND writes, and a real headless CLI
 
 - The GUI can preview Smart Write as an operator-facing plan before

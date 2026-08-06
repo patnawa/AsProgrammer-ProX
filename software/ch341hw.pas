@@ -17,6 +17,7 @@ private
   FDevHandle: Longint;
   FStrError: string;
   procedure SetI2CPins(scl, sda: cardinal);
+  function IsForeignDevice(iIndex: cardinal): boolean;
 public
   constructor Create;
   destructor Destroy; override;
@@ -81,29 +82,55 @@ begin
   result := FStrError;
 end;
 
+//CH341DLL เอา CH347 มาใส่ในรายการอุปกรณ์ของตัวเองด้วย เพราะทั้งสองตระกูล
+//แขวนอยู่ใต้ไดรเวอร์ CH34xPAR ตัวเดียวกันและใช้ interface GUID เดียวกัน
+//CH341OpenDevice จึงเปิด CH347 ผ่านฉลุย ทั้งที่คุยกันคนละโปรโตคอล ถ้าไม่คัดออก
+//ตรงนี้ ProbeProgrammer ซึ่งไล่ CH341 ก่อน จะจับ CH347 เป็น CH341 ทุกครั้ง
+//และ auto-detect จะไม่มีวันไปถึง CH347 เลย
+function TCH341Hardware.IsForeignDevice(iIndex: cardinal): boolean;
+var
+  Name: PAnsiChar;
+begin
+  Name := PAnsiChar(CH341GetDeviceName(iIndex));
+  //DLL รุ่นที่ไม่มี export ตัวนี้คืน nil ก็ปล่อยผ่านเหมือนพฤติกรรมเดิม
+  if Name = nil then Exit(False);
+  Result := WCHDeviceKindFromPath(string(AnsiString(Name))) = wchCH347;
+end;
+
 function TCH341Hardware.DevOpen: boolean;
 var
-  i, err: integer;
+  i: integer;
+  err: integer;
 begin
   if FDevOpened then DevClose;
 
-   for i:=0 to mCH341_MAX_NUMBER-1 do
+  FDevHandle := -1;
+  err := -1;
+
+  for i := 0 to mCH341_MAX_NUMBER-1 do
+  begin
+    err := CH341OpenDevice(i);
+    if err < 0 then Continue;
+
+    //ชื่ออุปกรณ์อ่านได้ก็ต่อเมื่อเปิดแล้ว ตัวที่ไม่ใช่ของเราต้องปิดคืนให้เรียบร้อย
+    //ไม่งั้น handle ค้างและโปรแกรมอื่นเปิดเครื่องเดียวกันไม่ได้
+    if IsForeignDevice(i) then
     begin
-      err := CH341OpenDevice(i);
-      if not err < 0 then
-      begin
-        FDevHandle := i;
-        Break;
-      end;
+      CH341CloseDevice(i);
+      err := -1;
+      Continue;
     end;
 
-    if err < 0 then
-    begin
-      FStrError :=  STR_CONNECTION_ERROR+ FHardwareName +'('+IntToStr(err)+')';
-      FDevHandle := -1;
-      FDevOpened := false;
-      Exit(false);
-    end;
+    FDevHandle := i;
+    Break;
+  end;
+
+  if FDevHandle < 0 then
+  begin
+    FStrError :=  STR_CONNECTION_ERROR+ FHardwareName +'('+IntToStr(err)+')';
+    FDevOpened := false;
+    Exit(false);
+  end;
 
   FDevOpened := true;
   Result := true;

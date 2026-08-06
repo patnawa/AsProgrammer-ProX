@@ -474,35 +474,12 @@ begin
   Result := True;
 end;
 
+//ตารางเดิมย้ายไปอยู่ที่ utilfunc แล้ว เพราะฝั่ง GUI ต้องใช้ตัวเดียวกันตอน
+//เลือกแรงดันอัตโนมัติ และ cli หน่วยนี้ uses main อยู่ main จึงเรียกกลับมาไม่ได้
 function LocalVccRange(const Text: string; out MinMv,
   MaxMv: cardinal): boolean;
-var
-  S: string;
 begin
-  MinMv := 0;
-  MaxMv := 0;
-  S := UpperCase(StringReplace(Trim(Text), ' ', '', [rfReplaceAll]));
-  if (S = '1.8') or (S = '1.8V') then
-  begin
-    MinMv := 1650;
-    MaxMv := 1950;
-  end
-  else if (S = '2.5') or (S = '2.5V') then
-  begin
-    MinMv := 2300;
-    MaxMv := 2700;
-  end
-  else if (S = '3.3') or (S = '3.3V') then
-  begin
-    MinMv := 2700;
-    MaxMv := 3600;
-  end
-  else if (S = '5') or (S = '5V') or (S = '5.0') or (S = '5.0V') then
-  begin
-    MinMv := 4500;
-    MaxMv := 5500;
-  end;
-  Result := MinMv <> 0;
+  Result := VccRangeMv(Text, MinMv, MaxMv);
 end;
 
 function ProductionModeRequested: boolean;

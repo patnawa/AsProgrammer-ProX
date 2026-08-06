@@ -662,6 +662,10 @@ msgstr "Counter and key commands (9Bh) are HMAC-SHA-256 signed and cannot be use
 msgid "No chip answered. Check the socket, the orientation of pin 1, the cable and the supply voltage"
 msgstr "No chip answered. Check the socket, the orientation of pin 1, the cable and the supply voltage"
 
+#: msgstr.str_no_chip_clock
+msgid "The SPI clock is %s. That is often too fast for a clip lead or a long cable, and a bus that cannot keep up reads back as all FF, exactly like an empty socket. Try Hardware -> SPI clock -> 15 MHz or slower, then read the ID again"
+msgstr "The SPI clock is %s. That is often too fast for a clip lead or a long cable, and a bus that cannot keep up reads back as all FF, exactly like an empty socket. Try Hardware -> SPI clock -> 15 MHz or slower, then read the ID again"
+
 #: msgstr.str_detect_one
 msgid "Chip detected and selected: "
 msgstr "Chip detected and selected: "
@@ -1025,6 +1029,102 @@ msgstr "The dump looks like a %s"
 #: msgstr.str_img_suspect
 msgid "Suspicious dump: %s"
 msgstr "Suspicious dump: %s"
+
+#: msgstr.str_ch347_vcc_set
+msgid "CH347 target voltage set to %d mV"
+msgstr "CH347 target voltage set to %d mV"
+
+#: msgstr.str_ch347_vcc_failed
+msgid "CH347 refused to set target voltage to %d mV"
+msgstr "CH347 refused to set target voltage to %d mV"
+
+#: msgstr.str_ch347_vcc_unknown
+msgid "CH347 target voltage left unchanged: the selected chip does not declare a supported supply voltage"
+msgstr "CH347 target voltage left unchanged: the selected chip does not declare a supported supply voltage"
+
+#: msgstr.str_ch347_vcc_guide
+msgid "Voltage menu: Options -> SPI -> CH347 target voltage (\"Auto (match selected chip)\" follows the catalog)"
+msgstr "Voltage menu: Options -> SPI -> CH347 target voltage (\"Auto (match selected chip)\" follows the catalog)"
+
+#: msgstr.str_ch347_vcc_chip
+msgid "Chip supply voltage from the catalog: %s"
+msgstr "Chip supply voltage from the catalog: %s"
+
+#: msgstr.str_ch347_vcc_auto_ok
+msgid "CH347 voltage is on Auto: %d mV will be applied when the operation starts"
+msgstr "CH347 voltage is on Auto: %d mV will be applied when the operation starts"
+
+#: msgstr.str_ch347_vcc_match
+msgid "The pinned CH347 target voltage already suits this chip"
+msgstr "The pinned CH347 target voltage already suits this chip"
+
+#: msgstr.str_ch347_vcc_too_high
+msgid "This chip is a %s part, but the CH347 target voltage is pinned at %s. Powering it there can destroy it permanently"
+msgstr "This chip is a %s part, but the CH347 target voltage is pinned at %s. Powering it there can destroy it permanently"
+
+#: msgstr.str_ch347_vcc_too_low
+msgid "This chip is a %s part, but the CH347 target voltage is pinned at %s. It will most likely not answer until the voltage matches; no damage is done"
+msgstr "This chip is a %s part, but the CH347 target voltage is pinned at %s. It will most likely not answer until the voltage matches; no damage is done"
+
+#: msgstr.str_ch347_vcc_switch_q
+msgid "Switch to %s now?"
+msgstr "Switch to %s now?"
+
+#: msgstr.str_ch347_vcc_switched
+msgid "CH347 target voltage selection changed to %s. It is applied the moment an operation starts"
+msgstr "CH347 target voltage selection changed to %s. It is applied the moment an operation starts"
+
+#: msgstr.str_ch347_vcc_no_rail
+msgid "The catalog says this chip runs at %s, which the CH347 board cannot supply. Power it externally with a proper adapter"
+msgstr "The catalog says this chip runs at %s, which the CH347 board cannot supply. Power it externally with a proper adapter"
+
+#: msgstr.str_ch347_vcc_no_info
+msgid "The catalog does not state this chip's supply voltage. Check the datasheet before powering it; the CH347 keeps its current setting"
+msgstr "The catalog does not state this chip's supply voltage. Check the datasheet before powering it; the CH347 keeps its current setting"
+
+#: msgstr.str_ch347_vcc_ask
+msgid "The catalog does not state the supply voltage for %s.\r\n\r\nOpen the chip datasheet and pick its supply voltage. Nothing is guessed for you here on purpose: sending 3.3 V to a 1.8 V part destroys it permanently, while too low a rail only means the chip does not answer and you can try again.\r\n\r\nThis choice is remembered for this chip until you change it in Options -> SPI -> CH347 target voltage."
+msgstr "The catalog does not state the supply voltage for %s.\r\n\r\nOpen the chip datasheet and pick its supply voltage. Nothing is guessed for you here on purpose: sending 3.3 V to a 1.8 V part destroys it permanently, while too low a rail only means the chip does not answer and you can try again.\r\n\r\nThis choice is remembered for this chip until you change it in Options -> SPI -> CH347 target voltage."
+
+#: msgstr.str_ch347_vcc_ask_18
+msgid "1.8 V"
+msgstr "1.8 V"
+
+#: msgstr.str_ch347_vcc_ask_33
+msgid "3.3 V"
+msgstr "3.3 V"
+
+#: msgstr.str_ch347_vcc_ask_later
+msgid "Decide later"
+msgstr "Decide later"
+
+#: msgstr.str_ch347_vcc_ask_none
+msgid "Voltage left on Auto and no level was confirmed. The board stays at its safe 1.8 V default, so a 3.3 V chip will not answer until you pick a level"
+msgstr "Voltage left on Auto and no level was confirmed. The board stays at its safe 1.8 V default, so a 3.3 V chip will not answer until you pick a level"
+
+#: msgstr.str_ch347_vcc_confirmed
+msgid "Datasheet voltage confirmed for %s: %s"
+msgstr "Datasheet voltage confirmed for %s: %s"
+
+#: msgstr.str_ch347_probe_3v3
+msgid "Probing at 3.3 V because the CH347 target voltage is pinned there. Pick 1.8 V or Auto before inserting a 1.8 V-only chip"
+msgstr "Probing at 3.3 V because the CH347 target voltage is pinned there. Pick 1.8 V or Auto before inserting a 1.8 V-only chip"
+
+#: msgstr.str_ch347_dead_1v8
+msgid "No chip answered at 1.8 V. A 3.3 V-only chip often cannot answer at this level"
+msgstr "No chip answered at 1.8 V. A 3.3 V-only chip often cannot answer at this level"
+
+#: msgstr.str_ch347_dead_1v8_q
+msgid "If you are sure the chip is a 3.3 V part, pin the CH347 target voltage to 3.3 V and read the ID again.\r\nIf it could be a 1.8 V part, keep 1.8 V and check the clip contact first: 3.3 V can destroy a 1.8 V chip.\r\n\r\nPin 3.3 V for the next attempt?"
+msgstr "If you are sure the chip is a 3.3 V part, pin the CH347 target voltage to 3.3 V and read the ID again.\r\nIf it could be a 1.8 V part, keep 1.8 V and check the clip contact first: 3.3 V can destroy a 1.8 V chip.\r\n\r\nPin 3.3 V for the next attempt?"
+
+#: msgstr.str_ch347_dead_3v3
+msgid "No chip answered at 3.3 V. Check the clip and cable. If this could be a 1.8 V part, it may answer only at 1.8 V"
+msgstr "No chip answered at 3.3 V. Check the clip and cable. If this could be a 1.8 V part, it may answer only at 1.8 V"
+
+#: msgstr.str_ch347_volt_fix_q
+msgid "This chip is a 1.8 V part. The CH347 target voltage is not pinned to 1.8 V right now.\r\nPowering a 1.8 V chip at 3.3 V can destroy it permanently.\r\n\r\nPin 1.8 V and continue?"
+msgstr "This chip is a 1.8 V part. The CH347 target voltage is not pinned to 1.8 V right now.\r\nPowering a 1.8 V chip at 3.3 V can destroy it permanently.\r\n\r\nPin 1.8 V and continue?"
 
 #: msgstr.str_timeout_from_chip
 msgid "Busy ceilings taken from the chip: page %d ms, erase %d ms, chip erase %d ms"

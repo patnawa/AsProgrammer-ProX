@@ -114,6 +114,13 @@ resourcestring
                          + 'cannot be used without the root key';
   STR_NO_CHIP            = 'No chip answered. Check the socket, the orientation of pin 1, '
                          + 'the cable and the supply voltage';
+  //สายยาว คลิปหนีบ หรือเบรดบอร์ดมักไปไม่ถึงความเร็วสูงสุดของ CH347
+  //อาการที่ได้คือ FF ทุกไบต์ ซึ่งหน้าตาเหมือนไม่มีชิปเป๊ะ ๆ บอกไปด้วยว่า
+  //ลองลดคล็อกก่อน ไม่งั้นคนใช้จะไปไล่รื้อสายที่ไม่ได้ผิดอะไรเลย
+  STR_NO_CHIP_CLOCK      = 'The SPI clock is %s. That is often too fast for a clip lead or '
+                         + 'a long cable, and a bus that cannot keep up reads back as all '
+                         + 'FF, exactly like an empty socket. Try Hardware -> SPI clock -> '
+                         + '15 MHz or slower, then read the ID again';
   STR_DETECT_ONE         = 'Chip detected and selected: ';
   STR_DETECT_MANY        = 'This ID matches %d chips, pick the right one from the list';
   STR_DETECT_NONE        = 'This ID is not in chiplist.xml and the chip has no SFDP table. '
@@ -242,6 +249,74 @@ resourcestring
                            'NAME on the command line to work on one):';
   STR_IMG_KIND           = 'The dump looks like a %s';
   STR_IMG_SUSPECT        = 'Suspicious dump: %s';
+
+  STR_CH347_VCC_SET      = 'CH347 target voltage set to %d mV';
+  STR_CH347_VCC_FAILED   = 'CH347 refused to set target voltage to %d mV';
+  STR_CH347_VCC_UNKNOWN  = 'CH347 target voltage left unchanged: the selected '+
+                           'chip does not declare a supported supply voltage';
+  //ชุดชี้ทางเรื่องแรงดันของ CH347 หลังตรวจพบชิป
+  STR_CH347_VCC_GUIDE    = 'Voltage menu: Options -> SPI -> CH347 target '
+                         + 'voltage ("Auto (match selected chip)" follows '
+                         + 'the catalog)';
+  STR_CH347_VCC_CHIP     = 'Chip supply voltage from the catalog: %s';
+  STR_CH347_VCC_AUTO_OK  = 'CH347 voltage is on Auto: %d mV will be applied '
+                         + 'when the operation starts';
+  STR_CH347_VCC_MATCH    = 'The pinned CH347 target voltage already suits '
+                         + 'this chip';
+  STR_CH347_VCC_TOO_HIGH = 'This chip is a %s part, but the CH347 target '
+                         + 'voltage is pinned at %s. Powering it there can '
+                         + 'destroy it permanently';
+  STR_CH347_VCC_TOO_LOW  = 'This chip is a %s part, but the CH347 target '
+                         + 'voltage is pinned at %s. It will most likely not '
+                         + 'answer until the voltage matches; no damage is '
+                         + 'done';
+  STR_CH347_VCC_SWITCH_Q = 'Switch to %s now?';
+  STR_CH347_VCC_SWITCHED = 'CH347 target voltage selection changed to %s. '
+                         + 'It is applied the moment an operation starts';
+  STR_CH347_VCC_NO_RAIL  = 'The catalog says this chip runs at %s, which the '
+                         + 'CH347 board cannot supply. Power it externally '
+                         + 'with a proper adapter';
+  STR_CH347_VCC_ASK      = 'The catalog does not state the supply voltage for %s.'
+                         + LineEnding + LineEnding
+                         + 'Open the chip datasheet and pick its supply voltage. '
+                         + 'Nothing is guessed for you here on purpose: sending '
+                         + '3.3 V to a 1.8 V part destroys it permanently, while '
+                         + 'too low a rail only means the chip does not answer '
+                         + 'and you can try again.'
+                         + LineEnding + LineEnding
+                         + 'This choice is remembered for this chip until you '
+                         + 'change it in Options -> SPI -> CH347 target voltage.';
+  STR_CH347_VCC_ASK_18   = '1.8 V';
+  STR_CH347_VCC_ASK_33   = '3.3 V';
+  STR_CH347_VCC_ASK_LATER= 'Decide later';
+  STR_CH347_VCC_ASK_NONE = 'Voltage left on Auto and no level was confirmed. '
+                         + 'The board stays at its safe 1.8 V default, so a '
+                         + '3.3 V chip will not answer until you pick a level';
+  STR_CH347_VCC_CONFIRMED= 'Datasheet voltage confirmed for %s: %s';
+
+  STR_CH347_VCC_NO_INFO  = 'The catalog does not state this chip''s supply '
+                         + 'voltage. Check the datasheet before powering it; '
+                         + 'the CH347 keeps its current setting';
+  STR_CH347_PROBE_3V3    = 'Probing at 3.3 V because the CH347 target voltage '
+                         + 'is pinned there. Pick 1.8 V or Auto before '
+                         + 'inserting a 1.8 V-only chip';
+  STR_CH347_DEAD_1V8     = 'No chip answered at 1.8 V. A 3.3 V-only chip '
+                         + 'often cannot answer at this level';
+  STR_CH347_DEAD_1V8_Q   = 'If you are sure the chip is a 3.3 V part, pin '
+                         + 'the CH347 target voltage to 3.3 V and read the '
+                         + 'ID again.'#13#10
+                         + 'If it could be a 1.8 V part, keep 1.8 V and '
+                         + 'check the clip contact first: 3.3 V can destroy '
+                         + 'a 1.8 V chip.'#13#10#13#10
+                         + 'Pin 3.3 V for the next attempt?';
+  STR_CH347_DEAD_3V3     = 'No chip answered at 3.3 V. Check the clip and '
+                         + 'cable. If this could be a 1.8 V part, it may '
+                         + 'answer only at 1.8 V';
+  STR_CH347_VOLT_FIX_Q   = 'This chip is a 1.8 V part. The CH347 target '
+                         + 'voltage is not pinned to 1.8 V right now.'#13#10
+                         + 'Powering a 1.8 V chip at 3.3 V can destroy it '
+                         + 'permanently.'#13#10#13#10
+                         + 'Pin 1.8 V and continue?';
   STR_TIMEOUT_FROM_CHIP  = 'Busy ceilings taken from the chip: page %d ms, erase %d ms, '
                          + 'chip erase %d ms';
   STR_GLOBAL_UNLOCK      = 'WPS is set, so the block protect bits decide nothing. '

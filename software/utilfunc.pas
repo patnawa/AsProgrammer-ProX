@@ -18,6 +18,122 @@ function IsNumber(strSource: string): boolean;
 
 function UpdateCRC32(InitCRC: Cardinal; BufPtr: Pointer; Len: Int64): Cardinal;
 
+//ไดรเวอร์ CH34xPAR ตัวเดียวรับทั้ง CH341 และ CH347 และ CH341DLL.DLL ก็ใส่
+//อุปกรณ์ทั้งสองตระกูลลงในรายการเดียวกัน เปิดข้ามตระกูลได้ทั้งที่โปรโตคอลคนละอย่าง
+//ทางเดียวที่แยกออกคือดู PID ในพาธของอุปกรณ์ที่ CH341GetDeviceName คืนมา
+type
+  TWCHDeviceKind = (wchUnknown, wchCH341, wchCH347);
+
+function WCHDeviceKindFromPath(const Path: string): TWCHDeviceKind;
+
+//ชนิดชิปที่ CH347GetChipType คืนมา ค่าตามหัวไฟล์ของ WCH
+//อยู่ที่นี่เพราะเป็นข้อมูลล้วน ๆ หน่วยทดสอบจึงเรียกได้โดยไม่ต้องมี DLL
+const
+  CH347_CHIP_CH341 = 0;
+  CH347_CHIP_CH347T = 1;
+  CH347_CHIP_CH347F = 2;
+  CH347_CHIP_CH339W = 3;
+  CH347_CHIP_UNKNOWN = -1;
+
+//แบ็กเอนด์ CH347 ควรรับอุปกรณ์ที่เปิดได้ตัวนี้ไว้ไหม
+//
+//CH347GetChipType คืน 0 ทั้งตอนที่อุปกรณ์เป็น CH341 จริง และตอนที่ถามไม่สำเร็จ
+//ในไบนารีของ WCH ทางออกที่ล้มเหลวทุกเส้น (DeviceIoControl ไม่ผ่าน หรือไบต์
+//เวอร์ชันชิปต่ำกว่า 0x18) จบที่ xor al,al เหมือนกันหมด แยกสองกรณีนี้ไม่ได้เลย
+//ดังนั้น 0 เดี่ยว ๆ ไม่ใช่หลักฐานว่าเป็น CH341 และห้ามใช้ปฏิเสธอุปกรณ์
+//
+//กติกาคือปฏิเสธเฉพาะตอนที่ "รู้แน่" ว่าเป็น CH341 ซึ่งมีอยู่ทางเดียวคือ PID
+//ในพาธของอุปกรณ์ ที่เหลือทั้งหมดรับไว้ก่อน เพราะการรับ CH341 มาผิดตัวแค่ทำให้
+//เปิดแล้วคุยไม่รู้เรื่อง แต่การปฏิเสธ CH347 ของจริงทำให้เครื่องหายไปทั้งตัว
+function CH347GateAccepts(ChipType: integer; const Path: string): boolean;
+
+//บอร์ดโปรแกรมเมอร์ CH347Ⅱ V2.13 ต่อขา GPIO ของ CH347 ไว้สองเส้น
+//
+//  GPIO6 ($40) เลือกแรงดันฝั่งเป้าหมาย ระดับต่ำ = 3.3V ระดับสูง = 1.8V
+//  GPIO4 ($10) ไฟแสดงการทำงานบนบอร์ด
+//
+//ค่าเหล่านี้ถอดจากจุดเรียก CH347GPIO_Set ในโปรแกรมของผู้ผลิต (สองจุดที่ต่างกัน
+//แค่ไบต์ข้อมูล $00 กับ $40 โดยแยกทางด้วย ItemIndex ของกลุ่มปุ่มเลือกแรงดัน)
+//แล้วยืนยันซ้ำกับเครื่องจริงด้วย CH347GPIO_Get ซึ่งอ่านทิศทางได้ $50 พอดีกับ
+//สองขานี้ ไม่ใช่การเดาจากเอกสาร
+//
+//ระดับตอนเปิดเครื่องคือ 1.8V ทั้งฝั่งฮาร์ดแวร์และฝั่งโปรแกรมของผู้ผลิต ตั้งใจ
+//ให้เป็นค่าที่ปลอดภัยที่สุดไว้ก่อน กันจ่ายไฟเกินใส่ชิป 1.8V แล้วพัง
+const
+  CH347_GPIO_VCC     = $40;   //GPIO6 เลือกแรงดัน
+  CH347_GPIO_ACT_LED = $10;   //GPIO4 ไฟแสดงการทำงาน
+  CH347_VCC_1V8_MV   = 1800;
+  CH347_VCC_3V3_MV   = 3300;
+
+//แปลงแรงดันเป้าหมายเป็นบิตข้อมูลของ GPIO6
+//คืน False เมื่อไม่ใช่ระดับที่บอร์ดนี้จ่ายได้ และเมื่อนั้น DataBits จะเป็นค่า
+//ของ 1.8V ไว้ให้ เผื่อผู้เรียกพลาดไม่ตรวจผลลัพธ์ จะได้ไม่กลายเป็นจ่าย 3.3V
+function CH347VccDataBits(Millivolts: cardinal; out DataBits: byte): boolean;
+
+//เลือกแรงดันที่เหมาะกับช่วง Vcc ของชิป
+//
+//ชิปที่รับได้ทั้งสองระดับให้เลือกค่าต่ำไว้ก่อน เพราะจ่ายเกินทำชิปพังถาวร
+//ส่วนจ่ายขาดแค่คุยไม่รู้เรื่องแล้วลองใหม่ได้ ช่วงที่ว่างหรือกลับหัวถือว่า
+//ไม่รู้ คืน False ไม่เดาให้ ผู้เรียกต้องไปถามผู้ใช้เอง
+function CH347VccForChip(VccMinMv, VccMaxMv: cardinal;
+  out Millivolts: cardinal): boolean;
+
+//แปลงช่อง Vcc ของแค็ตตาล็อก (เช่น "3.3" หรือ "1.8V") เป็นช่วงมิลลิโวลต์
+//
+//รับเฉพาะระดับมาตรฐานที่เขียนไว้ในแค็ตตาล็อกจริง ๆ ข้อความอื่นคืน False
+//และช่วงศูนย์ ไม่ใช่พยายามแกะตัวเลขเอง เพราะเดาผิดข้างสูงทำชิปพัง
+function VccRangeMv(const Text: string; out MinMv, MaxMv: cardinal): boolean;
+
+//คำตัดสินหลังรู้จักชิปแล้ว สำหรับบอร์ด CH347 ที่สลับแรงดันได้
+//ใช้เลือกว่าจะบอกทางผู้ใช้ว่าอย่างไร ไม่ใช่สลับแรงดันให้เองเงียบ ๆ
+type
+  TCH347VccAdvice = (
+    cvaChipVccUnknown,   //แค็ตตาล็อกไม่ระบุแรงดัน ต้องเปิดดาต้าชีตเอง
+    cvaNoUsableRail,     //ชิปต้องการระดับที่บอร์ดนี้จ่ายไม่ได้ (เช่น 5V)
+    cvaAutoWillApply,    //เมนูเป็น Auto โปรแกรมจะตั้งให้เองตอนเริ่มงาน
+    cvaPinnedMatches,    //ระดับที่ปักหมุดไว้อยู่ในช่วงที่ชิปรับได้แล้ว
+    cvaPinnedTooHigh,    //ปักไว้สูงกว่าที่ชิปทนได้ จ่ายจริงเมื่อไรชิปพัง
+    cvaPinnedTooLow      //ปักไว้ต่ำกว่าที่ชิปต้องการ ชิปแค่ไม่ตอบ ไม่พัง
+  );
+
+//ตัดสินจากช่อง vcc ของแค็ตตาล็อกกับระดับที่ผู้ใช้ปักหมุดไว้ (0 = Auto)
+//
+//WantMv คือระดับที่บอร์ดควรจ่ายให้ชิปตัวนี้ เชื่อถือได้เฉพาะเมื่อคำตอบ
+//ไม่ใช่สองแบบแรก นอกนั้นคง 1.8V ไว้ ทิศทางเดียวกับผู้ช่วยตัวอื่นในไฟล์นี้:
+//พลาดต้องพลาดไปทางต่ำ
+//
+//การเทียบระดับที่ปักไว้ใช้ช่วงของชิป ไม่ใช่เทียบเท่ากับ WantMv ตรง ๆ
+//เพราะชิปช่วงกว้างรับได้หลายระดับ ระดับที่อยู่ในช่วงถือว่าใช้ได้ แม้ไม่ใช่
+//ค่าที่โหมด Auto จะเลือกให้
+function CH347VccAdvise(const CatalogVcc: string; PinnedMv: cardinal;
+  out WantMv: cardinal): TCH347VccAdvice;
+
+//ชื่อระดับแรงดันของบอร์ด ใช้คำเดียวกับเมนูเสมอ ข้อความชี้ทางจะได้ไม่หลงทาง
+//และไม่ผ่านการจัดรูปเลขตามท้องถิ่น ซึ่งเปลี่ยนจุดทศนิยมเป็นจุลภาคได้
+function CH347VccLevelText(Millivolts: cardinal): string;
+
+//ข้อความแรงดันจากแค็ตตาล็อกสำหรับแสดงผล: เติม " V" เมื่อไม่มีหน่วยติดมา
+//ช่องว่างคืนช่องว่าง ผู้เรียกต้องตัดสินใจเองว่าจะพูดถึงมันไหม
+function CatalogVccDisplay(const Raw: string): string;
+
+//หาแรงดันของชิปให้ได้ก่อนจะไปตัดสินใจอะไรต่อ
+//
+//ปัญหาคือ chiplist.xml มีแอตทริบิวต์ vcc อยู่แค่ 5 รายการจาก 658 รายการ
+//ผู้เรียกที่ดูช่อง vcc อย่างเดียวจึงได้ค่าว่างกับชิปเกือบทุกตัว แล้วก็เงียบ
+//ทั้งที่ควรจะเตือน ที่นี่จึงไล่หาสามทางเรียงตามความน่าเชื่อถือ:
+//
+//  1. ช่อง vcc ในแค็ตตาล็อก ระบุมาตรง ๆ เชื่อได้ที่สุด
+//  2. ส่วนท้ายชื่อรุ่น _1.8V / _3.3V ตามธรรมเนียมของ chiplist.xml
+//  3. รหัส JEDEC ที่รู้แน่ว่าเป็นตระกูล 1.8V เช่น EF60xx (Winbond W25Q..JW/FW
+//     และ W74M) หรือ C225xx (Macronix MX25U) ซึ่งชื่อรุ่นไม่ได้บอกไว้เลย
+//
+//ทางที่สามสรุปได้เฉพาะ 1.8V เท่านั้น และห้ามสรุปเป็น 3.3V จากรหัสเด็ดขาด
+//เพราะทิศทางของความผิดพลาดไม่เท่ากัน: เดาสูงเกินคือจ่าย 3.3V ใส่ชิป 1.8V
+//แล้วชิปพังถาวร ส่วนเดาต่ำเกินคือชิปไม่ตอบ แล้วลองใหม่ได้
+//
+//คืนสตริงรูปแบบเดียวกับช่อง vcc ("1.8" / "3.3") หรือค่าว่างเมื่อไม่รู้จริง ๆ
+function ChipVccText(const CatalogVcc, ChipName, ChipID: string): string;
+
 implementation
 
 const
@@ -159,6 +275,200 @@ begin
   except
     on EConvertError do Result:=false;
   end;
+end;
+
+//พาธหน้าตาแบบนี้: \\?\usb#vid_1a86&pid_55db&mi_02#7&2887b016&0&0002#{guid}
+//อ่านเลขสี่หลักฐานสิบหกหลัง pid_ ออกมาแล้วเทียบกับตารางที่รู้จัก
+//ที่ไม่รู้จักคืน wchUnknown ไม่ใช่เดา ผู้เรียกจะได้เลือกเองว่าจะปล่อยผ่านไหม
+function WCHDeviceKindFromPath(const Path: string): TWCHDeviceKind;
+var
+  p: integer;
+  Hex: string;
+  PID: integer;
+begin
+  Result := wchUnknown;
+
+  p := Pos('pid_', LowerCase(Path));
+  if p = 0 then Exit;
+
+  Hex := Copy(Path, p + 4, 4);
+  if Length(Hex) < 4 then Exit;
+  if not TryStrToInt('$' + Hex, PID) then Exit;
+
+  case PID of
+    //CH341A ในโหมด EPP/MEM คือ 5512 ส่วน 5584 คือตัวเดียวกันหลังลง CH341PAR
+    $5512, $5584: Result := wchCH341;
+    //CH347T โหมด 1/2/3 และ CH347F ทุกตัวใช้ CH347DLL ไม่ใช่ CH341DLL
+    $55DA, $55DB, $55DC, $55DD, $55DE, $55E7: Result := wchCH347;
+  end;
+end;
+
+function CH347GateAccepts(ChipType: integer; const Path: string): boolean;
+begin
+  //ตอบว่าเป็นตระกูล CH347 มาชัด ๆ ก็จบ ไม่ต้องไปดูพาธให้เสียเวลา
+  if (ChipType = CH347_CHIP_CH347T) or (ChipType = CH347_CHIP_CH347F) or
+     (ChipType = CH347_CHIP_CH339W) then Exit(True);
+
+  //ที่เหลือคลุมเครือ ตัดออกได้เฉพาะเมื่อพาธยืนยันว่าเป็น CH341
+  //พาธว่างหรืออ่านไม่ได้ก็นับว่าไม่รู้ และไม่รู้แปลว่ารับไว้
+  Result := WCHDeviceKindFromPath(Path) <> wchCH341;
+end;
+
+function CH347VccDataBits(Millivolts: cardinal; out DataBits: byte): boolean;
+begin
+  //ตั้งค่าปลอดภัยไว้ก่อนเสมอ แล้วค่อยลดลงเมื่อรู้แน่ว่าผู้เรียกขอ 3.3V
+  DataBits := CH347_GPIO_VCC;
+  if Millivolts = CH347_VCC_3V3_MV then
+  begin
+    DataBits := 0;
+    Exit(True);
+  end;
+  Result := Millivolts = CH347_VCC_1V8_MV;
+end;
+
+function CH347VccForChip(VccMinMv, VccMaxMv: cardinal;
+  out Millivolts: cardinal): boolean;
+begin
+  Millivolts := CH347_VCC_1V8_MV;
+
+  if (VccMinMv = 0) or (VccMaxMv = 0) or (VccMinMv > VccMaxMv) then Exit(False);
+
+  //ไล่จากระดับต่ำขึ้นสูง ตัวแรกที่อยู่ในช่วงคือคำตอบ
+  if (CH347_VCC_1V8_MV >= VccMinMv) and (CH347_VCC_1V8_MV <= VccMaxMv) then
+    Exit(True);
+
+  if (CH347_VCC_3V3_MV >= VccMinMv) and (CH347_VCC_3V3_MV <= VccMaxMv) then
+  begin
+    Millivolts := CH347_VCC_3V3_MV;
+    Exit(True);
+  end;
+
+  //ชิปที่ต้องการ 5V หรือระดับอื่นที่บอร์ดนี้จ่ายไม่ได้ตกมาที่นี่
+  Result := False;
+end;
+
+function VccRangeMv(const Text: string; out MinMv, MaxMv: cardinal): boolean;
+var
+  S: string;
+begin
+  MinMv := 0;
+  MaxMv := 0;
+  S := UpperCase(StringReplace(Trim(Text), ' ', '', [rfReplaceAll]));
+  if (S = '1.8') or (S = '1.8V') then
+  begin
+    MinMv := 1650;
+    MaxMv := 1950;
+  end
+  else if (S = '2.5') or (S = '2.5V') then
+  begin
+    MinMv := 2300;
+    MaxMv := 2700;
+  end
+  else if (S = '3.3') or (S = '3.3V') then
+  begin
+    MinMv := 2700;
+    MaxMv := 3600;
+  end
+  else if (S = '5') or (S = '5V') or (S = '5.0') or (S = '5.0V') then
+  begin
+    MinMv := 4500;
+    MaxMv := 5500;
+  end;
+  Result := MinMv <> 0;
+end;
+
+//รหัส JEDEC สี่หลักแรกของตระกูลที่เป็น 1.8V ล้วน
+//
+//ตรวจทานกับตารางชิปทุกไฟล์ที่มากับโปรแกรม (chiplist, flashrom, ezp,
+//imsprog รวม 1751 รายการ): ทุกรายการที่ขึ้นต้นด้วยรหัสเหล่านี้เป็นชิป 1.8V
+//ทั้งหมด ไม่มีสมาชิกแรงดันอื่นปนเลย และ tools\validate_chiplist.py คุม
+//ข้อกำหนดนี้ไว้ในทุก build กันตารางรุ่นหลังลากรหัสไหนไปใช้กับชิปแรงดันอื่น
+//
+//C225 เคยอยู่ในรายการนี้และเป็นกับดัก: Macronix แปะรหัส C225xx ให้ทั้ง
+//MX25U (1.8V) และ MX25L1635E/1636E/3239E/6439E (3V) กับ MX25V4035/8035
+//(2.3-3.6V) รหัสจึงสรุปแรงดันไม่ได้ ตระกูล MX25U ใช้กติกาชื่อรุ่นใน
+//ChipVccText แทน เพราะชื่อไม่ชนกันแม้รหัสชน ห้ามเอา C225 กลับมาใส่
+const
+  Vcc18Prefixes: array[0..18] of string = (
+    'EF50',   //Winbond W25Q..BW
+    'EF60',   //Winbond W25Q..EW/FW/JW, W74M..JW
+    'EF80',   //Winbond W25Q..JW-IM, W25Q512NW-IM
+    'EF8A',   //Winbond W77Q..JW/NW secure flash
+    'EF8E',   //Winbond W77T..NW secure flash
+    'EF5B',   //Winbond W35T..NW
+    'C860',   //GigaDevice GD25LQ/LD/LB/LR
+    'C863',   //GigaDevice GD25LF
+    'C867',   //GigaDevice GD25LB..E/LR..E
+    '2041',   //XMC XM25QU/LU/RU
+    '2050',   //XMC XM25QU/LU
+    '2044',   //XMC XM25RU256C
+    '20BB',   //Micron MT25QU, N25Q..A11/..1E
+    '2C5B',   //Micron MT35XU
+    '9D70',   //ISSI IS25WP
+    '9D12',   //ISSI IS25WQ
+    'E060',   //Boya BY25Q..AL, ACE ACE25A..G
+    '1C38',   //EON EN25S
+    'BA00'    //Zetta ZD25LQ
+  );
+
+function ChipVccText(const CatalogVcc, ChipName, ChipID: string): string;
+var
+  N, I: string;
+  k: integer;
+begin
+  //1. ระบุมาในแค็ตตาล็อกแล้ว จบ
+  Result := Trim(CatalogVcc);
+  if Result <> '' then Exit;
+
+  //2. ชื่อรุ่นบอกไว้เอง
+  N := UpperCase(ChipName);
+  if Pos('1.8V', N) > 0 then Exit('1.8');
+  if Pos('3.3V', N) > 0 then Exit('3.3');
+
+  //2.5 ตระกูลที่สะกดแรงดันไว้ในชื่อ: MX25U/MX66U คือสาย 1.8V ของ Macronix
+  //ตัดสินจากชื่อ ไม่ใช่จากรหัส เพราะ Macronix ใช้รหัส C225xx ปนกันทั้ง
+  //MX25U (1.8V), MX25L1635E/3239E/6439E (3V) และ MX25V (ช่วงกว้าง)
+  //ชื่อรุ่นไม่เคยชนกัน รหัสชน
+  if (Pos('MX25U', N) = 1) or (Pos('MX66U', N) = 1) then Exit('1.8');
+
+  //3. รหัส JEDEC ของตระกูล 1.8V ที่ชื่อไม่ได้บอก
+  I := UpperCase(Trim(ChipID));
+  if Length(I) >= 4 then
+    for k := Low(Vcc18Prefixes) to High(Vcc18Prefixes) do
+      if Copy(I, 1, 4) = Vcc18Prefixes[k] then Exit('1.8');
+
+  //ไม่รู้ ต้องบอกว่าไม่รู้ ห้ามเดาเป็น 3.3 เพราะนั่นคือทิศที่ทำชิปพัง
+  Result := '';
+end;
+
+function CH347VccAdvise(const CatalogVcc: string; PinnedMv: cardinal;
+  out WantMv: cardinal): TCH347VccAdvice;
+var
+  MinMv, MaxMv: cardinal;
+begin
+  WantMv := CH347_VCC_1V8_MV;
+  if not VccRangeMv(CatalogVcc, MinMv, MaxMv) then Exit(cvaChipVccUnknown);
+  if not CH347VccForChip(MinMv, MaxMv, WantMv) then Exit(cvaNoUsableRail);
+  if PinnedMv = 0 then Exit(cvaAutoWillApply);
+  if (PinnedMv >= MinMv) and (PinnedMv <= MaxMv) then Exit(cvaPinnedMatches);
+  if PinnedMv > MaxMv then Exit(cvaPinnedTooHigh);
+  Result := cvaPinnedTooLow;
+end;
+
+function CH347VccLevelText(Millivolts: cardinal): string;
+begin
+  case Millivolts of
+    CH347_VCC_1V8_MV: Result := '1.8 V';
+    CH347_VCC_3V3_MV: Result := '3.3 V';
+    else Result := IntToStr(Millivolts) + ' mV';
+  end;
+end;
+
+function CatalogVccDisplay(const Raw: string): string;
+begin
+  Result := Trim(Raw);
+  if Result = '' then Exit;
+  if Pos('V', UpperCase(Result)) = 0 then Result := Result + ' V';
 end;
 
 function UpdateCRC32(InitCRC: Cardinal; BufPtr: Pointer; Len: Int64): Cardinal;

@@ -72,6 +72,22 @@ public
     out Capabilities: TProgrammerMemoryCapabilities): boolean; virtual;
   function SupportsProtocol(Protocol: TMemoryProtocol): boolean;
 
+  //แรงดันฝั่งเป้าหมาย
+  //
+  //เครื่องส่วนใหญ่จ่ายระดับเดียวตายตัว ค่าเริ่มต้นจึงเป็น "ตั้งไม่ได้" และ
+  //ผู้เรียกต้องถาม SupportsTargetVoltage ก่อนเสมอ ไม่ใช่เรียก Set แล้วดูว่า
+  //คืน False ไหม เพราะ False ยังแปลว่า "ตั้งได้แต่ระดับนี้ไม่รองรับ" ได้ด้วย
+  //
+  //GetTargetVoltageMv คืน 0 เมื่อไม่รู้ว่าตอนนี้จ่ายอยู่เท่าไร ห้ามตีความ 0
+  //ว่าไม่มีไฟ
+  function SupportsTargetVoltage: boolean; virtual;
+  function GetTargetVoltageMv: cardinal; virtual;
+  function SetTargetVoltageMv(Millivolts: cardinal): boolean; virtual;
+
+  //ไฟแสดงการทำงานบนบอร์ด เครื่องที่ไม่มีไฟดวงนี้ไม่ต้องทำอะไร
+  //ตั้งใจให้เงียบ ไม่คืนค่า เพราะไฟไม่ติดไม่ใช่เหตุให้งานเขียนชิปล้มเหลว
+  procedure SetActivityLED(Active: boolean); virtual;
+
   //I2C
   procedure I2CInit; virtual; abstract;
   procedure I2CDeinit; virtual; abstract;
@@ -216,6 +232,26 @@ begin
       end;
   end;
   Result := Capabilities.Known;
+end;
+
+function TBaseHardware.SupportsTargetVoltage: boolean;
+begin
+  Result := False;
+end;
+
+function TBaseHardware.GetTargetVoltageMv: cardinal;
+begin
+  Result := 0;
+end;
+
+function TBaseHardware.SetTargetVoltageMv(Millivolts: cardinal): boolean;
+begin
+  Result := False;
+end;
+
+procedure TBaseHardware.SetActivityLED(Active: boolean);
+begin
+  //เครื่องที่ไม่มีไฟแสดงการทำงานก็ไม่ต้องทำอะไร
 end;
 
 function TBaseHardware.SupportsProtocol(Protocol: TMemoryProtocol): boolean;

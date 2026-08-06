@@ -502,6 +502,53 @@ object MainForm: TMainForm
         TabOrder = 7
       end
     end
+    object GroupCH347Vcc: TGroupBox
+      Left = 6
+      Height = 68
+      Top = 330
+      Width = 188
+      Caption = 'Target voltage'
+      TabOrder = 8
+      Visible = False
+      object RadioCH347Vcc1V8: TRadioButton
+        Left = 8
+        Height = 19
+        Top = 4
+        Width = 55
+        Caption = '1.8 V'
+        Checked = True
+        TabStop = True
+        TabOrder = 0
+        OnChange = RadioCH347VccChange
+      end
+      object RadioCH347Vcc3V3: TRadioButton
+        Left = 68
+        Height = 19
+        Top = 4
+        Width = 55
+        Caption = '3.3 V'
+        TabOrder = 1
+        OnChange = RadioCH347VccChange
+      end
+      object RadioCH347VccAuto: TRadioButton
+        Left = 128
+        Height = 19
+        Top = 4
+        Width = 52
+        Caption = 'Auto'
+        TabOrder = 2
+        OnChange = RadioCH347VccChange
+      end
+      object LabelCH347ChipVcc: TLabel
+        Left = 8
+        Height = 15
+        Top = 27
+        Width = 172
+        AutoSize = False
+        Caption = 'Chip: ?'
+        ParentColor = False
+      end
+    end
     object ChipView: TPaintBox
       Left = 8
       Height = 230
@@ -873,7 +920,6 @@ object MainForm: TMainForm
           object MenuCH347SPIClock60MHz: TMenuItem
             AutoCheck = True
             Caption = '60 MHz'
-            Checked = True
             RadioItem = True
           end
           object MenuCH347SPIClock30MHz: TMenuItem
@@ -886,6 +932,7 @@ object MainForm: TMainForm
             Tag = 2
             AutoCheck = True
             Caption = '15 MHz'
+            Checked = True
             RadioItem = True
           end
           object MenuCH347SPIClock7_5MHz: TMenuItem
@@ -917,6 +964,30 @@ object MainForm: TMainForm
             AutoCheck = True
             Caption = '468.75 KHz'
             RadioItem = True
+          end
+        end
+        object MenuCH347Vcc: TMenuItem
+          Caption = 'CH347 target voltage'
+          object MenuCH347Vcc1V8: TMenuItem
+            Tag = 1800
+            AutoCheck = True
+            Caption = '1.8 V'
+            Checked = True
+            RadioItem = True
+            OnClick = MenuCH347VccClick
+          end
+          object MenuCH347Vcc3V3: TMenuItem
+            Tag = 3300
+            AutoCheck = True
+            Caption = '3.3 V'
+            RadioItem = True
+            OnClick = MenuCH347VccClick
+          end
+          object MenuCH347VccAuto: TMenuItem
+            AutoCheck = True
+            Caption = 'Auto (match selected chip)'
+            RadioItem = True
+            OnClick = MenuCH347VccClick
           end
         end
         object MenuArduinoSPIClock: TMenuItem

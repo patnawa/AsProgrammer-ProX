@@ -17,7 +17,7 @@ unit CH347DLL;
 interface
 
 uses
-  SysUtils;
+  SysUtils, utilfunc;
 
 //SPI Controller Configuration
 type _SPI_CONFIG = packed record
@@ -52,9 +52,41 @@ const
   mCH341A_CMD_I2C_STM_DLY =	$0F;		// Maximum value of single command delay of command flow of I2C interface
   mCH341A_CMD_I2C_STM_END =	$00;		// Command flow of I2C interface: Command package ends in advance
 
+//ค่าคงที่ของชนิดชิปกับกติกาการคัดอุปกรณ์อยู่ใน utilfunc เพราะเป็นข้อมูลล้วน
+//ทดสอบได้โดยไม่ต้องมี DLL จริง ที่นี่แค่ re-export ให้ผู้เรียกเดิมไม่ต้องแก้
+
 //True when CH347DLL.DLL is present and every entry point resolved.
 //False plus a reason otherwise; callers may show the reason once.
 function CH347DriverAvailable(out Error: string): boolean;
+
+//ถามว่าอุปกรณ์ที่เปิดไว้ที่ดัชนีนี้เป็นชิปตระกูลไหน คืน CH347_CHIP_UNKNOWN
+//เมื่อ DLL รุ่นนั้นไม่มี export ตัวนี้ (รุ่นเก่าไม่มี) ผู้เรียกต้องรับมือได้
+function CH347ChipType(iIndex: cardinal): integer;
+
+//พาธของอุปกรณ์ที่ดัชนีนี้ คืนสตริงว่างเมื่อถามไม่ได้
+//
+//ตั้งใจอ่านผ่าน CH341GetDeviceName ของ CH347DLL.DLL ไม่ใช่ของ CH341DLL.DLL
+//เพราะ DLL ตัวนี้ใช้ตารางแฮนเดิลร่วมกันทั้งสองตระกูล ดัชนีที่ CH347OpenDevice
+//เปิดไว้จึงเป็นดัชนีเดียวกับที่ฟังก์ชันนี้อ่าน ส่วน DLL คนละไฟล์กันไล่ลำดับ
+//อุปกรณ์ของใครของมัน เอามาปนกันแล้วจะได้พาธของเครื่องอื่นเมื่อเสียบหลายตัว
+//ต้องเรียกหลังเปิดอุปกรณ์สำเร็จแล้วเท่านั้น
+function CH347DeviceName(iIndex: cardinal): string;
+
+//มี export ของ GPIO ให้ใช้ไหม
+//
+//แยกถามต่างหากเพราะสองตัวนี้ผูกแบบไม่บังคับ DLL รุ่นเก่าขาดไปก็ยังอ่านเขียน
+//ชิปได้ตามปกติ เสียแค่สลับแรงดันกับไฟแสดงการทำงานไม่ได้ ผู้เรียกจึงต้องถาม
+//ก่อนจะไปโฆษณาความสามารถนี้กับผู้ใช้
+function CH347GPIOAvailable: boolean;
+
+//อ่านทิศทางกับระดับของ GPIO ทั้งแปดขาในไบต์เดียว บิต n คือ GPIOn
+//ทิศทาง 1 = ขาออก
+function CH347GPIO_Get(iIndex: cardinal; iDir: pbyte;
+  iData: pbyte): boolean; stdcall;
+
+//ตั้ง GPIO เฉพาะขาที่ธงใน iEnable เปิดไว้ ขาที่ไม่ได้เลือกไม่ถูกแตะ
+function CH347GPIO_Set(iIndex: cardinal; iEnable: byte;
+  iSetDirOut: byte; iSetDataOut: byte): boolean; stdcall;
 
 function CH347OpenDevice(DevI: cardinal): integer; stdcall;
 function CH347CloseDevice(iIndex: cardinal): boolean; stdcall;
@@ -119,6 +151,12 @@ type
   T_CH347StreamI2C = function(iIndex: cardinal; iWriteLength: cardinal;
     iWriteBuffer: pointer; iReadLength: cardinal;
     oReadBuffer: pointer): boolean; stdcall;
+  T_CH347GetChipType = function(iIndex: cardinal): byte; stdcall;
+  T_CH341GetDeviceName = function(iIndex: cardinal): Pointer; stdcall;
+  T_CH347GPIO_Get = function(iIndex: cardinal; iDir: pbyte;
+    iData: pbyte): boolean; stdcall;
+  T_CH347GPIO_Set = function(iIndex: cardinal; iEnable: byte;
+    iSetDirOut: byte; iSetDataOut: byte): boolean; stdcall;
 
 var
   Lib: HMODULE = 0;
@@ -140,6 +178,11 @@ var
   p_CH347I2C_Set: T_CH347I2C_Set = nil;
   p_CH347I2C_SetDelaymS: T_CH347I2C_SetDelaymS = nil;
   p_CH347StreamI2C: T_CH347StreamI2C = nil;
+  //ตัวเลือกเสริม ไม่ได้อยู่ในชุดที่บังคับต้องมี DLL รุ่นเก่าไม่มี export นี้
+  p_CH347GetChipType: T_CH347GetChipType = nil;
+  p_CH341GetDeviceName: T_CH341GetDeviceName = nil;
+  p_CH347GPIO_Get: T_CH347GPIO_Get = nil;
+  p_CH347GPIO_Set: T_CH347GPIO_Set = nil;
 
 function Resolve(const Name: string; out Proc: FARPROC): boolean;
 begin
@@ -186,6 +229,18 @@ begin
       FreeLibrary(Lib);
       Lib := 0;
     end;
+    //ผูกแยกจากชุดบังคับ ขาดไปก็ยังใช้ CH347 ได้ตามปกติ แค่แยกชิปไม่ออก
+    if Lib <> 0 then
+    begin
+      p_CH347GetChipType :=
+        T_CH347GetChipType(GetProcAddress(Lib, 'CH347GetChipType'));
+      p_CH341GetDeviceName :=
+        T_CH341GetDeviceName(GetProcAddress(Lib, 'CH341GetDeviceName'));
+      p_CH347GPIO_Get :=
+        T_CH347GPIO_Get(GetProcAddress(Lib, 'CH347GPIO_Get'));
+      p_CH347GPIO_Set :=
+        T_CH347GPIO_Set(GetProcAddress(Lib, 'CH347GPIO_Set'));
+    end;
     //ตั้งธงเป็นอันสุดท้าย หลังพอยน์เตอร์ทุกตัวพร้อมใช้งานแล้วจริง ๆ
     LoadTried := True;
   end;
@@ -199,6 +254,47 @@ function CH347DriverAvailable(out Error: string): boolean;
 begin
   Result := EnsureCH347;
   if Result then Error := '' else Error := LoadError;
+end;
+
+function CH347ChipType(iIndex: cardinal): integer;
+begin
+  if not EnsureCH347 then Exit(CH347_CHIP_UNKNOWN);
+  if p_CH347GetChipType = nil then Exit(CH347_CHIP_UNKNOWN);
+  Result := p_CH347GetChipType(iIndex);
+end;
+
+function CH347DeviceName(iIndex: cardinal): string;
+var
+  Name: Pointer;
+begin
+  Result := '';
+  if not EnsureCH347 then Exit;
+  if p_CH341GetDeviceName = nil then Exit;
+  Name := p_CH341GetDeviceName(iIndex);
+  if Name = nil then Exit;
+  Result := string(AnsiString(PAnsiChar(Name)));
+end;
+
+function CH347GPIOAvailable: boolean;
+begin
+  Result := EnsureCH347 and (p_CH347GPIO_Get <> nil) and
+            (p_CH347GPIO_Set <> nil);
+end;
+
+function CH347GPIO_Get(iIndex: cardinal; iDir: pbyte;
+  iData: pbyte): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  if p_CH347GPIO_Get = nil then Exit(False);
+  Result := p_CH347GPIO_Get(iIndex, iDir, iData);
+end;
+
+function CH347GPIO_Set(iIndex: cardinal; iEnable: byte;
+  iSetDirOut: byte; iSetDataOut: byte): boolean; stdcall;
+begin
+  if not EnsureCH347 then Exit(False);
+  if p_CH347GPIO_Set = nil then Exit(False);
+  Result := p_CH347GPIO_Set(iIndex, iEnable, iSetDirOut, iSetDataOut);
 end;
 
 function CH347OpenDevice(DevI: cardinal): integer; stdcall;
@@ -307,6 +403,33 @@ end;
 function CH347DriverAvailable(out Error: string): boolean;
 begin
   Error := 'the CH347 vendor driver is only available on Windows';
+  Result := False;
+end;
+
+function CH347ChipType(iIndex: cardinal): integer;
+begin
+  Result := CH347_CHIP_UNKNOWN;
+end;
+
+function CH347DeviceName(iIndex: cardinal): string;
+begin
+  Result := '';
+end;
+
+function CH347GPIOAvailable: boolean;
+begin
+  Result := False;
+end;
+
+function CH347GPIO_Get(iIndex: cardinal; iDir: pbyte;
+  iData: pbyte): boolean; stdcall;
+begin
+  Result := False;
+end;
+
+function CH347GPIO_Set(iIndex: cardinal; iEnable: byte;
+  iSetDirOut: byte; iSetDataOut: byte): boolean; stdcall;
+begin
   Result := False;
 end;
 

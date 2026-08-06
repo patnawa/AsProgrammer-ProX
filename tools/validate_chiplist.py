@@ -13,12 +13,57 @@ Exit code 0 when everything is fine, 1 when there is an error. Warnings do
 not fail the build: chips that genuinely share an id are normal.
 """
 
+import re
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from pathlib import Path
 
 MAX_PAGE = 2048
 PAGE_KEYWORDS = {"SSTB", "SSTW"}
+
+# The only vcc spellings software/utilfunc.pas VccRangeMv understands. A value
+# outside this set does not fail in the application, it silently resolves to
+# "voltage unknown" -- which disables the 1.8 V warning for exactly the chip
+# somebody bothered to annotate.
+VCC_GRAMMAR = {"1.8", "1.8V", "2.5", "2.5V", "3.3", "3.3V",
+               "5", "5V", "5.0", "5.0V"}
+
+# Loaded from software/utilfunc.pas in main(). Every id prefix listed there
+# claims "all chips with this prefix are 1.8 V parts"; the check below holds
+# each catalog entry to that claim. C225 is the cautionary tale: Macronix put
+# MX25U (1.8 V), MX25L1635E/3239E/6439E (3 V) and MX25V (wide) on the same
+# C225xx ids, so a prefix that once looked unanimous became a wrong-voltage
+# report the first time a colliding part was added to the tables.
+VCC18_PREFIXES = []
+
+# ChipVccText also trusts these model-name prefixes as all-1.8 V families.
+VCC18_NAME_RULES = ("MX25U", "MX66U")
+
+
+def load_vcc18_prefixes(rep):
+    src = Path(__file__).resolve().parent.parent / "software" / "utilfunc.pas"
+    try:
+        text = src.read_text(encoding="utf-8")
+    except OSError:
+        rep.warn(str(src), "not readable; the 1.8V-family prefix checks were skipped")
+        return []
+    match = re.search(
+        r"Vcc18Prefixes\s*:\s*array\[[^\]]*\]\s*of\s*string\s*=\s*\((.*?)\);",
+        text, re.DOTALL)
+    if not match:
+        rep.warn(str(src), "Vcc18Prefixes not found; the 1.8V-family prefix "
+                           "checks were skipped")
+        return []
+    return re.findall(r"'([0-9A-Fa-f]{4})'", match.group(1))
+
+
+def implied_non_18(name_upper, vcc):
+    """A marker in the name or the vcc attribute that says 'not a 1.8V part'."""
+    if "3.3V" in name_upper or "2.5V" in name_upper or "5.0V" in name_upper:
+        return True
+    v = vcc.strip()
+    return bool(v) and not v.startswith("1.8")
 
 # The erase opcodes a 25 series part can actually define, and the size each one
 # covers on a part that follows the modern convention.
@@ -178,17 +223,42 @@ def check_chip(rep, path, protocol, vendor, elem):
     # --- vcc ---
     raw_vcc = attrs.get("vcc")
     if raw_vcc is not None:
-        try:
-            vcc = float(raw_vcc)
-        except ValueError:
-            rep.error(where, f"vcc is not a number: {raw_vcc!r}")
-        else:
-            # Getting this wrong in the permissive direction destroys the part
-            # the first time somebody powers it, so an out of range value is an
-            # error rather than a warning.
-            if not 1.0 <= vcc <= 5.5:
-                rep.error(where, f"vcc {vcc} is outside anything a serial "
-                                 f"flash part runs at")
+        # Getting this wrong in the permissive direction destroys the part the
+        # first time somebody powers it, so anything the application cannot
+        # parse is an error rather than a warning: an unparseable value reads
+        # back as "voltage unknown" and silently disables the 1.8 V warning.
+        if raw_vcc.strip().replace(" ", "").upper() not in VCC_GRAMMAR:
+            rep.error(where, f"vcc {raw_vcc!r} is not a value the application "
+                             f"can parse (use 1.8, 2.5, 3.3 or 5, optional V)")
+
+    # --- voltage consistency ---
+    # The three-tier voltage resolver believes, in order: the vcc attribute,
+    # a 1.8V/3.3V marker in the name, and the 1.8V-only id-prefix list. These
+    # tiers must not disagree, and the all-1.8V family claims must stay true
+    # for every entry in every table.
+    name_upper = name.upper()
+    raw_vcc = raw_vcc or ""
+    if "1.8V" in name_upper and "3.3V" in name_upper:
+        rep.error(where, "name carries both a 1.8V and a 3.3V marker")
+    if "1.8V" in name_upper and raw_vcc.strip() and \
+            not raw_vcc.strip().startswith("1.8"):
+        rep.error(where, f"name says 1.8V but vcc says {raw_vcc!r}")
+    if "3.3V" in name_upper and raw_vcc.strip() and \
+            not raw_vcc.strip().startswith("3.3"):
+        rep.error(where, f"name says 3.3V but vcc says {raw_vcc!r}")
+
+    cid = chip_id.upper()
+    if len(cid) >= 4 and cid[:4] in VCC18_PREFIXES and \
+            implied_non_18(name_upper, raw_vcc):
+        rep.error(where, f"id prefix {cid[:4]} is on the all-1.8V family list "
+                         f"in software/utilfunc.pas, but this entry claims "
+                         f"another voltage; the prefix can no longer prove "
+                         f"1.8V and must be removed from Vcc18Prefixes")
+    if name_upper.startswith(VCC18_NAME_RULES) and \
+            implied_non_18(name_upper, raw_vcc):
+        rep.error(where, f"the {name_upper[:5]} name rule in ChipVccText "
+                         f"treats this family as 1.8V, but this entry claims "
+                         f"another voltage")
 
     return chip_id.upper() if chip_id else None
 
@@ -254,6 +324,10 @@ def main(argv):
 
     rep = Report()
     total = 0
+
+    VCC18_PREFIXES[:] = load_vcc18_prefixes(rep)
+    if VCC18_PREFIXES:
+        print(f"  1.8V family prefixes under guard: {len(VCC18_PREFIXES)}")
 
     for path in argv[1:]:
         try:

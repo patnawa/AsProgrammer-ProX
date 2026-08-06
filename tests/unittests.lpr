@@ -17,7 +17,7 @@ program unittests;
 
 uses
   SysUtils, Classes, Math, sfdp, jedec, serialnum, spi25, protbits, opresult,
-  prodlog, flashops, imgcheck, ifd;
+  prodlog, flashops, imgcheck, ifd, utilfunc;
 
 var
   Failures: integer = 0;
@@ -977,6 +977,129 @@ end;
 
 // ---------------------------------------------------------------- IFD
 
+//แรงดันเป้าหมายของบอร์ด CH347Ⅱ V2.13
+//
+//ตรรกะล้วน ๆ ทดสอบได้โดยไม่ต้องมีเครื่องจริง ที่สำคัญที่สุดคือทิศทางความ
+//ปลอดภัย: ทุกทางที่ตอบว่าไม่รู้หรือไม่รองรับ ต้องจบที่ 1.8V ไม่ใช่ 3.3V
+procedure TestCH347Vcc;
+var
+  Bits: byte;
+  Mv, MinMv, MaxMv: cardinal;
+begin
+  WriteLn('-- CH347 target voltage --');
+
+  Check('3.3V drives GPIO6 low',
+    CH347VccDataBits(CH347_VCC_3V3_MV, Bits) and (Bits = 0));
+  Check('1.8V drives GPIO6 high',
+    CH347VccDataBits(CH347_VCC_1V8_MV, Bits) and (Bits = CH347_GPIO_VCC));
+
+  //ระดับที่บอร์ดจ่ายไม่ได้ต้องถูกปฏิเสธ ไม่ใช่ปัดเป็นค่าใกล้เคียง
+  Check('5V rejected', not CH347VccDataBits(5000, Bits));
+  Check('5V still leaves the safe level in Bits', Bits = CH347_GPIO_VCC);
+  Check('2.5V rejected', not CH347VccDataBits(2500, Bits));
+  Check('zero rejected', not CH347VccDataBits(0, Bits));
+
+  //เลือกตามช่วงของชิป
+  Check('1.8V part picks 1.8V',
+    CH347VccForChip(1650, 1950, Mv) and (Mv = CH347_VCC_1V8_MV));
+  Check('3.3V part picks 3.3V',
+    CH347VccForChip(2700, 3600, Mv) and (Mv = CH347_VCC_3V3_MV));
+  //ชิปที่กินได้ทั้งสองระดับต้องได้ค่าต่ำ จ่ายเกินทำชิปพัง จ่ายขาดแค่ลองใหม่
+  Check('wide range prefers the lower rail',
+    CH347VccForChip(1700, 3600, Mv) and (Mv = CH347_VCC_1V8_MV));
+  Check('5V part has no usable rail', not CH347VccForChip(4500, 5500, Mv));
+  Check('5V part still reports the safe level', Mv = CH347_VCC_1V8_MV);
+  Check('empty range refuses to guess', not CH347VccForChip(0, 0, Mv));
+  Check('inverted range refuses to guess', not CH347VccForChip(3600, 2700, Mv));
+
+  //ช่องข้อความของแค็ตตาล็อกต้องแปลงเป็นช่วงเดิมกับที่ CLI เคยใช้
+  Check('catalog 3.3 parses',
+    VccRangeMv('3.3', MinMv, MaxMv) and (MinMv = 2700) and (MaxMv = 3600));
+  Check('catalog 1.8V parses',
+    VccRangeMv('1.8V', MinMv, MaxMv) and (MinMv = 1650) and (MaxMv = 1950));
+  Check('catalog blank rejected', not VccRangeMv('', MinMv, MaxMv));
+  Check('catalog junk rejected', not VccRangeMv('about 3 volts', MinMv, MaxMv));
+
+  //ต่อกันทั้งสายแบบที่ GUI ใช้จริง: ข้อความ -> ช่วง -> ระดับ -> บิต
+  Check('3.3 catalog entry ends up driving GPIO6 low',
+    VccRangeMv('3.3', MinMv, MaxMv) and
+    CH347VccForChip(MinMv, MaxMv, Mv) and
+    CH347VccDataBits(Mv, Bits) and (Bits = 0));
+  Check('1.8 catalog entry ends up driving GPIO6 high',
+    VccRangeMv('1.8', MinMv, MaxMv) and
+    CH347VccForChip(MinMv, MaxMv, Mv) and
+    CH347VccDataBits(Mv, Bits) and (Bits = CH347_GPIO_VCC));
+
+  //สองขานี้ต้องไม่ทับกัน ไม่งั้นสลับแรงดันทีไรไฟกะพริบตาม
+  Check('vcc and led pins are distinct',
+    (CH347_GPIO_VCC and CH347_GPIO_ACT_LED) = 0);
+
+  //ตัวตัดสินคำแนะนำหลังรู้จักชิป: ใช้เลือกข้อความชี้ทาง ไม่ใช่สลับไฟเอง
+  //ทุกทางที่ไม่รู้ต้องทิ้ง WantMv ไว้ที่ 1.8V เหมือนผู้ช่วยตัวอื่น
+  Mv := 12345;
+  Check('advice: blank catalog text is unknown',
+    (CH347VccAdvise('', 0, Mv) = cvaChipVccUnknown) and
+    (Mv = CH347_VCC_1V8_MV));
+  Check('advice: junk catalog text is unknown',
+    CH347VccAdvise('about 3 volts', CH347_VCC_3V3_MV, Mv) = cvaChipVccUnknown);
+  Mv := 12345;
+  Check('advice: 5V part has no usable rail',
+    (CH347VccAdvise('5', CH347_VCC_3V3_MV, Mv) = cvaNoUsableRail) and
+    (Mv = CH347_VCC_1V8_MV));
+  Check('advice: 2.5V part has no usable rail',
+    CH347VccAdvise('2.5', 0, Mv) = cvaNoUsableRail);
+  Check('advice: auto resolves a 1.8 part to 1.8',
+    (CH347VccAdvise('1.8', 0, Mv) = cvaAutoWillApply) and
+    (Mv = CH347_VCC_1V8_MV));
+  Check('advice: auto resolves a 3.3 part to 3.3',
+    (CH347VccAdvise('3.3', 0, Mv) = cvaAutoWillApply) and
+    (Mv = CH347_VCC_3V3_MV));
+  Check('advice: pinned level inside the chip range is fine',
+    CH347VccAdvise('1.8', CH347_VCC_1V8_MV, Mv) = cvaPinnedMatches);
+  Check('advice: 3.3 pinned on a 1.8 part is the dangerous direction',
+    (CH347VccAdvise('1.8', CH347_VCC_3V3_MV, Mv) = cvaPinnedTooHigh) and
+    (Mv = CH347_VCC_1V8_MV));
+  Check('advice: 1.8 pinned on a 3.3 part is only mute, never fatal',
+    (CH347VccAdvise('3.3', CH347_VCC_1V8_MV, Mv) = cvaPinnedTooLow) and
+    (Mv = CH347_VCC_3V3_MV));
+
+  //ข้อความระดับแรงดันต้องสะกดตรงกับเมนู และห้ามแปรตาม locale
+  Check('level text 1.8', CH347VccLevelText(CH347_VCC_1V8_MV) = '1.8 V');
+  Check('level text 3.3', CH347VccLevelText(CH347_VCC_3V3_MV) = '3.3 V');
+  Check('level text of an odd value stays raw millivolts',
+    CH347VccLevelText(2500) = '2500 mV');
+
+  //ข้อความแรงดันจากแค็ตตาล็อก: เติมหน่วยเมื่อไม่มี คงเดิมเมื่อมีแล้ว
+  Check('catalog display adds the unit', CatalogVccDisplay('1.8') = '1.8 V');
+  Check('catalog display keeps an existing unit',
+    CatalogVccDisplay(' 3.3V ') = '3.3V');
+  Check('catalog display of blank stays blank', CatalogVccDisplay('  ') = '');
+
+  //ตัวหาแรงดันสามชั้น: ช่อง vcc ชนะเสมอ แล้วค่อยดูท้ายชื่อรุ่น แล้วค่อย
+  //ดูรหัส JEDEC และห้ามสรุปเป็น 3.3 จากรหัสเด็ดขาด
+  Check('vcc resolver: the catalog field wins over everything',
+    ChipVccText('3.3', 'SOMENAME_1.8V', 'EF6017') = '3.3');
+  Check('vcc resolver: 1.8V name suffix',
+    ChipVccText('', 'W25Q80BW_1.8V', '') = '1.8');
+  Check('vcc resolver: 3.3V name suffix',
+    ChipVccText('', 'SOMECHIP_3.3V', '') = '3.3');
+  Check('vcc resolver: EF60 id is a 1.8V family even without a telltale name',
+    ChipVccText('', 'W25Q64JW', 'EF6017') = '1.8');
+  Check('vcc resolver: an MX25U name is 1.8V by the name rule',
+    ChipVccText('', 'MX25U6435F', 'C22537') = '1.8');
+  //C225 ห้ามตัดสินจากรหัส: MX25L6439E (3V) ใช้รหัสเดียวกับ MX25U6435F
+  Check('vcc resolver: a 3V MX25L sharing the C225 id stays unknown',
+    ChipVccText('', 'MX25L6439E', 'C22537') = '');
+  Check('vcc resolver: a lower-case id still matches',
+    ChipVccText('', '', 'ef6017') = '1.8');
+  Check('vcc resolver: a 3.3V-family id is never guessed at',
+    ChipVccText('', 'W25Q64JV', 'EF4017') = '');
+  Check('vcc resolver: a short id is not matched',
+    ChipVccText('', 'CHIP', 'EF6') = '');
+  Check('vcc resolver: unknown everything stays empty',
+    ChipVccText('', '', '') = '');
+end;
+
 procedure TestIFD;
 var
   Buf: array of byte;
@@ -1298,10 +1421,147 @@ begin
   Check(Format('%d tables in the corpus were all decoded', [Count]), Count > 0);
 end;
 
+// -------------------------------------------------- WCH device classification
+
+procedure TestWCHDeviceKind;
+const
+  //พาธจริงที่ CH341GetDeviceName คืนมาตอนเสียบ CH347T ไว้ตัวเดียว
+  CH347T = '\\?\usb#vid_1a86&pid_55db&mi_02#7&2887b016&0&0002#' +
+           '{5446f048-98b4-4ef0-96e8-27994bac0d00}';
+  CH341A = '\\?\usb#vid_1a86&pid_5512#6&1a2b3c4d&0&1#' +
+           '{5446f048-98b4-4ef0-96e8-27994bac0d00}';
+begin
+  WriteLn('WCH: telling CH341 and CH347 apart by device path');
+
+  Check('a CH347T is not a CH341',
+        WCHDeviceKindFromPath(CH347T) = wchCH347);
+  Check('a CH341A still reads as a CH341',
+        WCHDeviceKindFromPath(CH341A) = wchCH341);
+  Check('CH341PAR''s 5584 also reads as a CH341',
+        WCHDeviceKindFromPath('\\?\usb#vid_1a86&pid_5584#x') = wchCH341);
+  Check('CH347F reads as a CH347',
+        WCHDeviceKindFromPath('\\?\usb#vid_1a86&pid_55de#x') = wchCH347);
+  Check('upper case paths classify the same',
+        WCHDeviceKindFromPath('\\?\USB#VID_1A86&PID_55DB#X') = wchCH347);
+  //ไม่รู้จักต้องคืน unknown ไม่ใช่เดา ผู้เรียกจะได้ปล่อยผ่านตามพฤติกรรมเดิม
+  Check('an unlisted PID is unknown, not guessed',
+        WCHDeviceKindFromPath('\\?\usb#vid_1a86&pid_7523#x') = wchUnknown);
+  Check('a path with no PID is unknown',
+        WCHDeviceKindFromPath('\\?\usb#nothing') = wchUnknown);
+  Check('an empty path is unknown',
+        WCHDeviceKindFromPath('') = wchUnknown);
+  Check('a truncated PID is unknown',
+        WCHDeviceKindFromPath('\\?\usb#vid_1a86&pid_55') = wchUnknown);
+  Check('a non-hex PID is unknown',
+        WCHDeviceKindFromPath('\\?\usb#vid_1a86&pid_zzzz#x') = wchUnknown);
+end;
+
+// ------------------------------------------------ CH347 backend device gate
+
+//ตัวหาแรงดันสามชั้น
+//
+//ชั้นที่สามคือหัวใจ: chiplist.xml กรอกช่อง vcc ไว้แค่ 5 จาก 658 รายการ
+//ถ้าดูช่องนั้นอย่างเดียว ชิป 1.8V เกือบทั้งหมดจะหลุดด่านเตือนไปเงียบ ๆ
+procedure TestChipVccText;
+begin
+  WriteLn('-- chip voltage resolver --');
+
+  //ชั้น 1: ช่อง vcc ชนะเสมอ
+  Check('catalog vcc wins over everything',
+    ChipVccText('3.3', 'W74M12JW_1.8V', 'EF6018') = '3.3');
+
+  //ชั้น 2: ส่วนท้ายชื่อรุ่น
+  Check('name suffix 1.8V is read',
+    ChipVccText('', 'W74M12JW_1.8V', '') = '1.8');
+  Check('name suffix 3.3V is read',
+    ChipVccText('', 'MX25L6433F_3.3V', '') = '3.3');
+
+  //ชั้น 2.5: ตระกูลที่สะกดแรงดันไว้ในชื่อ Macronix MX25U/MX66U คือ 1.8V
+  //ต้องตัดสินจากชื่อ ไม่ใช่รหัส เพราะรหัส C225xx ถูกใช้ปนกับ MX25L (3V)
+  //และ MX25V (ช่วงกว้าง)
+  Check('Macronix MX25U name is 1.8V',
+    ChipVccText('', 'MX25U6435F', 'C22537') = '1.8');
+  Check('Macronix MX66U name is 1.8V',
+    ChipVccText('', 'MX66U51235F', 'C2253A') = '1.8');
+  Check('a 3V MX25L on the same C225 id stays unknown',
+    ChipVccText('', 'MX25L3239E', 'C22536') = '');
+  Check('a wide-range MX25V on a C225 id stays unknown',
+    ChipVccText('', 'MX25V4035', 'C22553') = '');
+
+  //ชั้น 3: รหัส JEDEC ของตระกูล 1.8V ที่ชื่อรุ่นไม่ได้บอก
+  //นี่คือกลุ่มที่ของเดิมพลาดทั้งหมด
+  Check('Winbond EF60xx is 1.8V even when the name is silent',
+    ChipVccText('', 'W25Q64FW', 'EF6017') = '1.8');
+  Check('Winbond EF80xx is 1.8V',
+    ChipVccText('', 'W25Q64JW-IM', 'EF8017') = '1.8');
+  Check('GigaDevice C860xx is 1.8V',
+    ChipVccText('', 'GD25LQ32', 'C86016') = '1.8');
+  Check('lower case id still matches',
+    ChipVccText('', 'W25Q64FW', 'ef6017') = '1.8');
+
+  //ตระกูลที่เพิ่มหลังไล่ตรวจแค็ตตาล็อกทั้งสี่ไฟล์
+  Check('Micron MT25QU (20BB) is 1.8V without any name marker',
+    ChipVccText('', 'MT25QU256', '20BB19') = '1.8');
+  Check('ISSI IS25WQ (9D12) is 1.8V',
+    ChipVccText('', 'IS25WQ040', '9D1253') = '1.8');
+  Check('GigaDevice GD25LB..ME (C867) is 1.8V',
+    ChipVccText('', 'GD25LB512ME', 'C8671A') = '1.8');
+  Check('Winbond W77Q secure flash (EF8A) is 1.8V',
+    ChipVccText('', 'W77Q64JW', 'EF8A17') = '1.8');
+
+  //ห้ามสรุป 3.3V จากรหัส เดาสูงเกินคือทิศที่ทำชิปพัง
+  Check('a 3.3V family id stays unknown, never guessed high',
+    ChipVccText('', 'W25Q64', 'EF4017') = '');
+  Check('an unknown id stays unknown',
+    ChipVccText('', 'SOMECHIP', '123456') = '');
+  Check('everything empty stays unknown',
+    ChipVccText('', '', '') = '');
+  Check('a short id does not crash the prefix test',
+    ChipVccText('', 'X', 'EF') = '');
+end;
+
+procedure TestCH347Gate;
+const
+  CH347Path = '\\?\usb#vid_1a86&pid_55db&mi_02#7&2887b016&0&0002#{guid}';
+  CH341Path = '\\?\usb#vid_1a86&pid_5512#6&1a2b3c4d&0&1#{guid}';
+begin
+  WriteLn('CH347: deciding which opened devices the backend keeps');
+
+  Check('a CH347T is kept',
+        CH347GateAccepts(CH347_CHIP_CH347T, CH347Path));
+  Check('a CH347F is kept',
+        CH347GateAccepts(CH347_CHIP_CH347F, CH347Path));
+  Check('a CH339W is kept',
+        CH347GateAccepts(CH347_CHIP_CH339W, ''));
+
+  //หัวใจของบั๊ก: CH347GetChipType คืน 0 ทั้งตอนเป็น CH341 และตอนถามไม่สำเร็จ
+  //ถ้าเชื่อ 0 อย่างเดียว CH347 ของจริงจะถูกปิดทิ้งและเครื่องหายไปทั้งตัว
+  Check('chip type 0 with a CH347 path is kept, not mistaken for a CH341',
+        CH347GateAccepts(CH347_CHIP_CH341, CH347Path));
+  Check('chip type 0 with an unreadable path is kept',
+        CH347GateAccepts(CH347_CHIP_CH341, ''));
+  Check('chip type 0 with an unlisted PID is kept',
+        CH347GateAccepts(CH347_CHIP_CH341, '\\?\usb#vid_1a86&pid_7523#x'));
+
+  //ปฏิเสธได้ทางเดียวคือ PID ยืนยันว่าเป็น CH341 จริง
+  Check('chip type 0 with a real CH341 path is rejected',
+        not CH347GateAccepts(CH347_CHIP_CH341, CH341Path));
+  Check('a CH341 path is rejected even when the chip type is unknown',
+        not CH347GateAccepts(CH347_CHIP_UNKNOWN, CH341Path));
+
+  //DLL รุ่นเก่าไม่มี export ตัวนี้ ต้องคงพฤติกรรมเดิมคือรับไว้ก่อน
+  Check('an old DLL that cannot answer keeps the device',
+        CH347GateAccepts(CH347_CHIP_UNKNOWN, ''));
+  Check('an old DLL with a CH347 path keeps the device',
+        CH347GateAccepts(CH347_CHIP_UNKNOWN, CH347Path));
+end;
+
 begin
   WriteLn('AsProgrammer ProX unit tests');
   WriteLn;
 
+  TestWCHDeviceKind;
+  TestCH347Gate;
   TestSFDPWinbond;
   TestSFDPNoSignature;
   TestSFDPPowerOfTwoDensity;
@@ -1329,6 +1589,8 @@ begin
   TestProgEraseFail;
   TestImgCheck;
   TestIFD;
+  TestCH347Vcc;
+  TestChipVccText;
   TestSFDPCorpus;
 
   WriteLn;

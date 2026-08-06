@@ -42,3 +42,9 @@ tmp/operationrunner-*/
 # fixes the three bugs this has (ids printed with %hhx lose their leading zeros,
 # GBK part names are not decoded, and it reads past the end of the file).
 ezp_parser
+
+# Chip dumps read off real hardware - may contain serials, keys or board config.
+# Never publish these.
+*.bin
+!firmware/**/*.bin
+ezpspy.log

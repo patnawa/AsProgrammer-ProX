@@ -5,7 +5,7 @@ unit ch347hw;
 interface
 
 uses
-  Classes, SysUtils, basehw, msgstr, ch347dll, ch341dll;
+  Classes, SysUtils, basehw, msgstr, ch347dll, ch341dll, utilfunc;
 
 type
 
@@ -17,6 +17,11 @@ private
   FDevHandle: Longint;
   FStrError: string;
   FDevSPIConfig: _SPI_CONFIG;
+  FTargetVoltageMv: cardinal;
+  FVoltageSupported: boolean;
+  FLedOn: boolean;
+  //เขียนทั้งสองขาในการเรียกเดียว จะได้ไม่ต้องอ่านสถานะกลับมาก่อนทุกครั้ง
+  function ApplyGPIO(VccBits, LedBits: byte): boolean;
 public
   constructor Create;
   destructor Destroy; override;
@@ -24,6 +29,11 @@ public
   function GetLastError: string; override;
   function DevOpen: boolean; override;
   procedure DevClose; override;
+
+  function SupportsTargetVoltage: boolean; override;
+  function GetTargetVoltageMv: cardinal; override;
+  function SetTargetVoltageMv(Millivolts: cardinal): boolean; override;
+  procedure SetActivityLED(Active: boolean); override;
 
   //spi
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; override;
@@ -59,6 +69,10 @@ begin
   FDevHandle := -1;
   FHardwareName := 'CH347';
   FHardwareID := CHW_CH347;
+  //ยังไม่เปิดอุปกรณ์ก็ยังไม่รู้ว่าจ่ายอยู่เท่าไร 0 แปลว่าไม่รู้ ไม่ใช่ไม่มีไฟ
+  FTargetVoltageMv := 0;
+  FVoltageSupported := False;
+  FLedOn := False;
 end;
 
 destructor TCH347Hardware.Destroy;
@@ -73,39 +87,149 @@ end;
 
 function TCH347Hardware.DevOpen: boolean;
 var
-  i, err: integer;
+  i: integer;
+  err: integer;
 begin
   if FDevOpened then DevClose;
 
-   for i:=0 to mCH341_MAX_NUMBER-1 do
+  FDevHandle := -1;
+  err := -1;
+
+  for i := 0 to mCH341_MAX_NUMBER-1 do
+  begin
+    //CH347OpenDevice คืน HANDLE ไม่ใช่ดัชนี ล้มเหลวคือ INVALID_HANDLE_VALUE
+    //ค่าที่ใช้ได้เป็นบวกเสมอในทางปฏิบัติ แต่เทียบกับ -1 ตรง ๆ ตามสัญญาของ WCH
+    err := CH347OpenDevice(i);
+    if (err = -1) or (err = 0) then Continue;
+
+    //CH347DLL ครอบ API ของ CH341 ไว้ด้วย และไล่เจออุปกรณ์ CH341 เหมือนกัน
+    //ตัวที่ไม่ใช่ CH347 ต้องปิดคืน ไม่งั้นเลือก CH341 ทีหลังแล้วเปิดไม่ได้
+    //
+    //ห้ามตัดสินจาก CH347GetChipType = 0 เพียงอย่างเดียว เพราะ 0 คือทั้ง
+    //"เป็น CH341" และ "ถามไม่สำเร็จ" ดูรายละเอียดที่ utilfunc.CH347GateAccepts
+    if not CH347GateAccepts(CH347ChipType(i), CH347DeviceName(i)) then
     begin
-      err := CH347OpenDevice(i);
-      if not err < 0 then
-      begin
-        FDevHandle := i;
-        Break;
-      end;
+      CH347CloseDevice(i);
+      err := -1;
+      Continue;
     end;
 
-    if err < 0 then
-    begin
-      FStrError :=  STR_CONNECTION_ERROR+ FHardwareName +'('+IntToStr(err)+')';
-      FDevHandle := -1;
-      FDevOpened := false;
-      Exit(false);
-    end;
+    FDevHandle := i;
+    Break;
+  end;
+
+  if FDevHandle < 0 then
+  begin
+    FStrError :=  STR_CONNECTION_ERROR+ FHardwareName +'('+IntToStr(err)+')';
+    FDevOpened := false;
+    Exit(false);
+  end;
 
   FDevOpened := true;
+
+  //บอร์ด CH347Ⅱ V2.13 สลับแรงดันด้วย GPIO6 ส่วน DLL รุ่นเก่าไม่มี export ของ
+  //GPIO เลย เครื่องแบบนั้นจ่ายตามที่ฮาร์ดแวร์ตั้งไว้อย่างเดียว บอกผู้ใช้ว่า
+  //ตั้งไม่ได้ดีกว่าปล่อยให้กดแล้วเงียบ
+  FVoltageSupported := CH347GPIOAvailable;
+  if FVoltageSupported then
+  begin
+    //ตั้ง 1.8V ทุกครั้งที่เปิด ตรงกับที่ฮาร์ดแวร์และโปรแกรมของผู้ผลิตทำ
+    //เหตุผลเดียวกัน: ถ้าเผลอค้าง 3.3V ไว้จากงานก่อน แล้วงานนี้เป็นชิป 1.8V
+    //ชิปพังตั้งแต่ยังไม่ทันสั่งอะไร ค่าต่ำสุดจึงเป็นค่าเริ่มต้นที่ถูกต้อง
+    FLedOn := False;
+    if ApplyGPIO(CH347_GPIO_VCC, CH347_GPIO_ACT_LED) then
+      FTargetVoltageMv := CH347_VCC_1V8_MV
+    else
+    begin
+      //ผูก export ได้แต่สั่งไม่ผ่าน แปลว่าไม่รู้ว่าตอนนี้จ่ายอยู่เท่าไร
+      //อย่าอ้างว่าตั้งได้ทั้งที่เพิ่งตั้งไม่สำเร็จ
+      FVoltageSupported := False;
+      FTargetVoltageMv := 0;
+    end;
+  end
+  else
+    FTargetVoltageMv := 0;
+
   Result := true;
+end;
+
+//ตั้งทั้งขาแรงดันและขาไฟแสดงการทำงานพร้อมกัน
+//
+//iEnable คลุมทั้งสองบิต ขาที่ไม่ได้อยู่ใน mask จะไม่ถูกแตะ จึงไม่ต้องอ่าน
+//สถานะเดิมกลับมาก่อน ประหยัดการคุย USB ไปหนึ่งรอบต่อการสลับหนึ่งครั้ง
+function TCH347Hardware.ApplyGPIO(VccBits, LedBits: byte): boolean;
+const
+  Mask = CH347_GPIO_VCC or CH347_GPIO_ACT_LED;
+begin
+  if not FDevOpened then Exit(False);
+  //ทั้งสองขาเป็นขาออก ทิศทางจึงเท่ากับ mask เสมอ
+  Result := CH347GPIO_Set(FDevHandle, Mask, Mask,
+                          (VccBits or LedBits) and Mask);
+end;
+
+function TCH347Hardware.SupportsTargetVoltage: boolean;
+begin
+  Result := FDevOpened and FVoltageSupported;
+end;
+
+function TCH347Hardware.GetTargetVoltageMv: cardinal;
+begin
+  Result := FTargetVoltageMv;
+end;
+
+function TCH347Hardware.SetTargetVoltageMv(Millivolts: cardinal): boolean;
+var
+  VccBits: byte;
+  LedBits: byte;
+begin
+  if not SupportsTargetVoltage then Exit(False);
+  //ระดับที่บอร์ดจ่ายไม่ได้ต้องปฏิเสธ ไม่ใช่ปัดเป็นค่าใกล้เคียง การปัดขึ้น
+  //ทำชิปพัง ส่วนการปัดลงทำให้ผู้ใช้เชื่อว่าตั้งได้แล้วทั้งที่ไม่ได้ตั้ง
+  if not CH347VccDataBits(Millivolts, VccBits) then Exit(False);
+
+  if FLedOn then LedBits := 0 else LedBits := CH347_GPIO_ACT_LED;
+
+  Result := ApplyGPIO(VccBits, LedBits);
+  if Result then FTargetVoltageMv := Millivolts;
+end;
+
+procedure TCH347Hardware.SetActivityLED(Active: boolean);
+var
+  VccBits: byte;
+  LedBits: byte;
+begin
+  if not FDevOpened then Exit;
+  if not FVoltageSupported then Exit;
+  if FLedOn = Active then Exit;
+
+  //ไฟดวงนี้ต่อแบบ active low ระดับต่ำคือติด ค่าที่อ่านได้จากเครื่องตอนไม่มี
+  //งานคือ $FF ทั้งไบต์ ซึ่งรวมขานี้ด้วย แปลว่าสูง = ดับ
+  if Active then LedBits := 0 else LedBits := CH347_GPIO_ACT_LED;
+
+  //แรงดันต้องคงเดิมระหว่างสลับไฟ อ่านจากค่าที่จำไว้ ไม่ใช่เดาเป็นศูนย์
+  if not CH347VccDataBits(FTargetVoltageMv, VccBits) then
+    VccBits := CH347_GPIO_VCC;
+
+  //ไฟไม่ติดไม่ใช่เหตุให้ล้มงาน จำสถานะไว้เท่าที่สั่งผ่านจริง
+  if ApplyGPIO(VccBits, LedBits) then FLedOn := Active;
 end;
 
 procedure TCH347Hardware.DevClose;
 begin
   if FDevHandle >= 0 then
   begin
+    //คืนบอร์ดให้อยู่ในสภาพปลอดภัยก่อนปล่อย: ดับไฟและลดกลับเป็น 1.8V
+    //ระดับที่ค้างไว้ยังอยู่จนกว่าจะถอดสาย โปรแกรมตัวถัดไปที่เปิดต่อจะเจอ
+    //ค่านี้ ถ้าปล่อยค้าง 3.3V ไว้แล้วคนถัดไปเสียบชิป 1.8V คือชิปพัง
+    if FVoltageSupported then
+      ApplyGPIO(CH347_GPIO_VCC, CH347_GPIO_ACT_LED);
+
     CH347CloseDevice(FDevHandle);
     FDevHandle := -1;
     FDevOpened := false;
+    FVoltageSupported := False;
+    FTargetVoltageMv := 0;
+    FLedOn := False;
   end;
 end;
 
@@ -131,11 +255,17 @@ begin
   end;
 
   Result := CH347SPI_Init(FDevHandle, @FDevSPIConfig);
+
+  //ติดไฟตอนเริ่มงานแล้วดับตอนจบ ไม่กะพริบรายทรานสเฟอร์ เพราะการสลับ GPIO
+  //หนึ่งครั้งคือการคุย USB หนึ่งรอบ ถ้าทำทุกบล็อกที่อ่าน ความเร็วอ่านทั้งชิป
+  //จะตกลงอย่างเห็นได้ชัดเพื่อแลกกับไฟกะพริบ ซึ่งไม่คุ้ม
+  if Result then SetActivityLED(True);
 end;
 
 procedure TCH347Hardware.SPIDeinit;
 begin
   if not FDevOpened then Exit;
+  SetActivityLED(False);
 end;
 
 function TCH347Hardware.SPIMaxTransfer: integer;

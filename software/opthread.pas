@@ -54,10 +54,25 @@ procedure OpProcessMessages;
 implementation
 
 uses
-  opresult;
+  opresult, basehw;
 
 var
   CancelEvent: TEvent;
+
+//ดับไฟแสดงการทำงานให้ชัวร์เมื่องานจบ
+//
+//ไฟติดตอน SPIInit และดับตอน SPIDeinit ซึ่งอยู่คนละฟังก์ชันกัน งานที่จบด้วย
+//ข้อผิดพลาดหรือถูกยกเลิกจะข้าม ExitProgMode25 ไป ไฟจึงค้างติดทั้งที่ไม่มีงาน
+//เหลืออยู่ แล้วครั้งต่อไปผู้ใช้ก็อ่านไฟดวงนี้ไม่ได้อีกเลย
+//
+//ที่นี่คือจุดเดียวที่ทุกงานวิ่งผ่านและจบแน่นอนทุกทาง จึงเป็นที่ที่ถูกต้อง
+//เครื่องที่ไม่มีไฟดวงนี้ SetActivityLED เป็นตัวเปล่า เรียกไปก็ไม่เสียอะไร
+procedure QuiesceActivityLED;
+begin
+  if AsProgrammer = nil then Exit;
+  if AsProgrammer.Programmer = nil then Exit;
+  AsProgrammer.Programmer.SetActivityLED(False);
+end;
 
 constructor TOpThread.CreateOp(AProc: TNestedOp);
 begin
@@ -107,11 +122,14 @@ end;
 function RunOperation(AProc: TNestedOp): string;
 var
   T: TOpThread;
+  Nested: boolean;
 begin
   Result := '';
+  //งานที่ซ้อนอยู่ในงานใหญ่ยังไม่จบจริง ห้ามดับไฟแทนงานที่ยังทำอยู่
+  Nested := InWorkerThread;
 
   //ห้ามเรียกซ้อน เพราะตอนนี้อยู่บน thread เบื้องหลังอยู่แล้ว
-  if (not UseWorkerThread) or InWorkerThread then
+  if (not UseWorkerThread) or Nested then
   begin
     try
       AProc();
@@ -122,6 +140,7 @@ begin
         OpFail('operation raised an exception: ' + Result);
       end;
     end;
+    if not Nested then QuiesceActivityLED;
     Exit;
   end;
 
@@ -141,6 +160,8 @@ begin
   finally
     T.WaitFor;
     T.Free;
+    //ถึงตรงนี้ worker จบแน่นอนแล้ว ไม่ว่าจะจบด้วยทางไหน
+    QuiesceActivityLED;
   end;
 end;
 

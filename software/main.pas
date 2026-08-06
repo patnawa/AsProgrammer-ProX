@@ -53,6 +53,15 @@ type
     MenuCH347SPIClock3_75MHz: TMenuItem;
     MenuCH347SPIClock1_875MHz: TMenuItem;
     MenuCH347SPIClock937_5KHz: TMenuItem;
+    MenuCH347Vcc: TMenuItem;
+    MenuCH347Vcc1V8: TMenuItem;
+    MenuCH347Vcc3V3: TMenuItem;
+    MenuCH347VccAuto: TMenuItem;
+    GroupCH347Vcc: TGroupBox;
+    RadioCH347Vcc1V8: TRadioButton;
+    RadioCH347Vcc3V3: TRadioButton;
+    RadioCH347VccAuto: TRadioButton;
+    LabelCH347ChipVcc: TLabel;
     MenuSendAB: TMenuItem;
     StartAddressEdit: TEdit;
     GroupChipSettings: TGroupBox;
@@ -318,6 +327,8 @@ type
     procedure BzHelpMenuItemClick(Sender: TObject);
     procedure DebugconsoleMenuItemClick(Sender: TObject);
     procedure ListcomportsMenuItemClick(Sender: TObject);
+    procedure MenuCH347VccClick(Sender: TObject);
+    procedure RadioCH347VccChange(Sender: TObject);
     procedure SpeedButton1Click(Sender: TObject);
     procedure StartAddressEditChange(Sender: TObject);
     procedure StartAddressEditKeyPress(Sender: TObject; var Key: char);
@@ -527,6 +538,18 @@ var
 
   //รหัส 9Fh ที่อ่านได้ครั้งล่าสุด ใช้ตอนบันทึกชิปใหม่ลงตารางของผู้ใช้
   LastID9F: string = '';
+
+  //บอร์ด CH347 ที่เสียบอยู่พิสูจน์แล้วว่าสลับแรงดันด้วย GPIO ได้
+  //
+  //จำข้ามการปิดอุปกรณ์ เพราะด่านเตือนแรงดันทำงานก่อนงานจะเปิดอุปกรณ์
+  //และตัวชี้ทางทำงานหลังงานปิดอุปกรณ์ไปแล้ว ทั้งคู่ต้องรู้ว่าเมนูแรงดัน
+  //กดแล้วมีผลจริงไหม จะได้ไม่ชี้ไปเมนูที่ไม่ทำอะไรบนบอร์ดรุ่นเก่า
+  //ค่าอัปเดตทุกครั้งที่เปิด CH347 สำเร็จ เสียบบอร์ดคนละรุ่นก็ตามทัน
+  CH347VoltageControlSeen: boolean = False;
+
+  //กล่องเลือกแรงดันบนหน้าหลักกำลังถูกตั้งค่าจากโค้ด OnChange ของปุ่มใน
+  //กล่องยิงทั้งตอนผู้ใช้คลิกและตอนโค้ดสะท้อนสถานะเมนู กระจกต้องไม่สะท้อนกลับ
+  CH347VccPanelUpdating: boolean = False;
 
   //ไฟล์งานที่โหลดไว้ ถ้ามี
   CurrentJob: TJobFile;
@@ -1116,9 +1139,9 @@ procedure LogDriverHint;
 begin
   case AsProgrammer.Current_HW of
     CHW_CH341:
-      LogPrint(STR_DRIVER_HINT + 'drivers\CH341\CH341PAR.EXE (WCH CH341PAR)');
+      LogPrint(STR_DRIVER_HINT + 'drivers\USBCH341\CH341PAR.EXE (WCH CH341PAR)');
     CHW_CH347:
-      LogPrint(STR_DRIVER_HINT + 'drivers\CH343\CH343 (WCH CH347PAR)');
+      LogPrint(STR_DRIVER_HINT + 'drivers\CH34X\CH34XPAR.EXE (WCH CH34xPAR)');
     CHW_FT232H:
       LogPrint(STR_DRIVER_HINT + 'drivers\FT232\CDM212364_Setup.exe (FTDI D2XX)');
     CHW_USBASP, CHW_AVRISP:
@@ -1137,6 +1160,12 @@ begin
     result := false;
     Exit;
   end;
+
+  //DevOpen ของ CH347 เพิ่งบังคับ 1.8V ไปแล้วถ้าบอร์ดสลับได้ จดไว้ตรงนี้
+  //เพราะหลังปิดอุปกรณ์ SupportsTargetVoltage กลับเป็น False ทั้งที่ข้อเท็จจริง
+  //ของบอร์ดไม่ได้หายไปไหน
+  if AsProgrammer.Current_HW = CHW_CH347 then
+    CH347VoltageControlSeen := AsProgrammer.Programmer.SupportsTargetVoltage;
 
   LogPrint(STR_CURR_HW+AsProgrammer.Programmer.HardwareName);
   result := true
@@ -1945,6 +1974,15 @@ begin
   end;
 end;
 
+//ห้ามอ่าน CurrentICParam.Vcc ตรง ๆ เพื่อตัดสินใจเรื่องแรงดัน เพราะ
+//chiplist.xml ใส่แอตทริบิวต์ vcc ไว้แค่ 5 รายการจาก 658 รายการ ผู้เรียกที่
+//ดูช่องนั้นอย่างเดียวจะได้ค่าว่างเกือบตลอดแล้วเงียบทั้งที่ควรเตือน
+function CurrentChipVccText: string;
+begin
+  Result := ChipVccText(CurrentICParam.Vcc, CurrentICParam.Name,
+                        CurrentICParam.ID);
+end;
+
 procedure TMainForm.UpdateTelemetry;
 var
   ConnectionText, InterfaceText, ChipText, IDText, IdentityText: string;
@@ -2062,11 +2100,8 @@ begin
   else
     AddressText := 'addressing by selected protocol';
 
-  VoltageText := Trim(CurrentICParam.Vcc);
-  if VoltageText = '' then
-    VoltageText := 'VCC not specified'
-  else if Pos('V', UpperCase(VoltageText)) = 0 then
-    VoltageText := VoltageText + ' V';
+  VoltageText := CatalogVccDisplay(CurrentChipVccText);
+  if VoltageText = '' then VoltageText := 'VCC not specified';
 
   if CurrentICParam.Name <> '' then
     ChipText := CurrentICParam.Name
@@ -2359,6 +2394,10 @@ end;
 
 //สรุปข้อมูลชิปที่เลือกไว้ ลงในช่องว่างของแผงด้านซ้าย
 //เป็นข้อมูลที่ต้องดูบ่อยที่สุดตอนทำงานจริง
+//นิยามอยู่ข้างกลไกเมนูแรงดันของ CH347 แต่ UpdateChipInfo ต้องเรียกมัน
+//ทุกครั้งที่ข้อมูลชิปเปลี่ยน เพื่อให้ช่อง "Chip:" ในกล่องแรงดันตามทัน
+procedure RefreshCH347VccPanel; forward;
+
 procedure UpdateChipInfo;
 var
   s, v: string;
@@ -2389,6 +2428,16 @@ begin
          IntToHex(CurrentSectorOpcode, 2) + 'h)';
   end;
 
+  //แรงดันของชิปต้องมองเห็นตรงแผงข้อมูล ไม่ใช่ซ่อนอยู่ใน log อย่างเดียว
+  //ผู้ใช้ CH347 ต้องใช้ค่านี้ตัดสินว่าจะตั้งเมนูแรงดันไว้ที่ไหน
+  //ผ่านตัวหาสามชั้น เพราะช่อง vcc ดิบว่างเปล่ากับชิปเกือบทุกตัว
+  v := CatalogVccDisplay(CurrentChipVccText);
+  if v <> '' then
+  begin
+    if s <> '' then s := s + LineEnding;
+    s := s + 'Vcc     ' + v;
+  end;
+
   if CurrentICParam.Note <> '' then
   begin
     if s <> '' then s := s + LineEnding;
@@ -2412,6 +2461,9 @@ begin
   ChipDetected := (CurrentICParam.Size > 0) or (UISize > 0);
   MainForm.ChipView.Invalidate;
   MainForm.UpdateWorkflowState;
+
+  //ช่อง "Chip:" ในกล่องแรงดันของ CH347 แสดงค่าเดียวกันนี้ ต้องตามให้ทัน
+  RefreshCH347VccPanel;
 end;
 
 //แผงด้านซ้ายในไฟล์ฟอร์มถูกวางไว้แบบพิกัดตายตัวและแคบเกินไป
@@ -2459,12 +2511,23 @@ begin
   MainForm.Label6.Left := cx;
   MainForm.StartAddressEdit.Left := cx + 20;
 
+  //กล่องเลือกแรงดันของ CH347 อยู่ใต้แถวแอดเดรส โผล่เฉพาะตอนเลือก CH347
+  MainForm.GroupCH347Vcc.Left := 6;
+  MainForm.GroupCH347Vcc.Width := PanelW - 12;
+  MainForm.GroupCH347Vcc.Top := 330;
+
   //ภาพชิปกินพื้นที่ที่เหลือทั้งหมดด้านล่าง และยืดตามความสูงหน้าต่าง
+  //ถ้ากล่องแรงดันโผล่ ภาพชิปขยับลงไปต่อท้าย ถ้าหุบก็ทวงพื้นที่คืน
   MainForm.ChipView.Left := 6;
   MainForm.ChipView.Width := PanelW - 12;
-  MainForm.ChipView.Top := 330;
+  if MainForm.GroupCH347Vcc.Visible then
+    MainForm.ChipView.Top := MainForm.GroupCH347Vcc.Top +
+                             MainForm.GroupCH347Vcc.Height + 6
+  else
+    MainForm.ChipView.Top := 330;
   MainForm.ChipView.Anchors := [akLeft, akTop, akRight, akBottom];
-  MainForm.ChipView.Height := MainForm.GroupChipSettings.ClientHeight - 336;
+  MainForm.ChipView.Height := MainForm.GroupChipSettings.ClientHeight -
+                              MainForm.ChipView.Top - 6;
   if MainForm.ChipView.Height < 160 then MainForm.ChipView.Height := 160;
 end;
 
@@ -3750,8 +3813,264 @@ begin
   end;
 end;
 
+//แรงดันที่ผู้ใช้เลือกไว้ในเมนู หน่วยเป็นมิลลิโวลต์ ศูนย์แปลว่า "ตามชิป"
+function SelectedCH347Vcc: cardinal;
+begin
+  Result := CH347_VCC_1V8_MV;
+  if MainForm.MenuCH347VccAuto.Checked then Exit(0);
+  if MainForm.MenuCH347Vcc3V3.Checked then Exit(CH347_VCC_3V3_MV);
+  if MainForm.MenuCH347Vcc1V8.Checked then Exit(CH347_VCC_1V8_MV);
+end;
+
+//ตั้งแรงดันฝั่งเป้าหมายให้ตรงกับที่เลือกไว้ ก่อนเริ่มคุยกับชิป
+//
+//คืน True เมื่อ "ไม่มีอะไรต้องทำ" ด้วย เพราะเครื่องที่ตั้งแรงดันไม่ได้ไม่ใช่
+//ความผิดพลาด แค่ไม่มีความสามารถนี้ ผู้เรียกจึงเอาไปคุมการหยุดงานได้ตรง ๆ
+//
+//โหมดอัตโนมัติอ่านช่วง Vcc จากชิปที่เลือก ถ้าชิปนั้นไม่ได้ระบุช่วงไว้จะไม่เดา
+//แต่คงค่าเดิมไว้แล้วเตือน เพราะการเดาผิดข้างสูงทำชิปพัง
+//แรงดันของชิปที่เลือกอยู่ ผ่านตัวหาสามชั้นใน utilfunc
+//
+function ApplyCH347Vcc: boolean;
+var
+  Want: cardinal;
+  MinMv, MaxMv: cardinal;
+  ChipVcc: string;
+begin
+  Result := True;
+  if AsProgrammer.Programmer = nil then Exit;
+  if not AsProgrammer.Programmer.SupportsTargetVoltage then Exit;
+
+  Want := SelectedCH347Vcc;
+  if Want = 0 then
+  begin
+    MinMv := 0;
+    MaxMv := 0;
+    ChipVcc := CurrentChipVccText;
+    if ChipVcc <> '' then
+      //ช่วงในแค็ตตาล็อกเขียนเป็นข้อความ เช่น "3.3" ใช้ตัวแปลงเดียวกับ CLI
+      if not VccRangeMv(ChipVcc, MinMv, MaxMv) then
+      begin
+        MinMv := 0;
+        MaxMv := 0;
+      end;
+
+    if not CH347VccForChip(MinMv, MaxMv, Want) then
+    begin
+      LogPrint(STR_CH347_VCC_UNKNOWN);
+      Exit;
+    end;
+  end;
+
+  if AsProgrammer.Programmer.GetTargetVoltageMv = Want then Exit;
+
+  if not AsProgrammer.Programmer.SetTargetVoltageMv(Want) then
+  begin
+    LogPrint(Format(STR_CH347_VCC_FAILED, [Want]));
+    Exit(False);
+  end;
+
+  LogPrint(Format(STR_CH347_VCC_SET, [Want]));
+end;
+
+//กล่องเลือกแรงดันบนหน้าหลัก ทำตามโปรแกรมของผู้ผลิตบอร์ด CH347Ⅱ V2.13
+//ซึ่งวางกลุ่มปุ่ม "切换电压" (3.3V/1.8V) กับช่องแสดงแรงดันของชิปไว้บน
+//หน้าจอเลย ไม่ต้องมุดเมนู
+//
+//เมนู Options -> SPI -> CH347 target voltage ยังเป็นแหล่งความจริงหนึ่งเดียว
+//กล่องนี้เป็นกระจกของเมนู จะโผล่เฉพาะตอนที่เครื่องที่เลือกคือ CH347
+procedure RefreshCH347VccPanel;
+var
+  ChipVcc: string;
+  WasVisible: boolean;
+begin
+  WasVisible := MainForm.GroupCH347Vcc.Visible;
+  CH347VccPanelUpdating := True;
+  try
+    MainForm.GroupCH347Vcc.Visible := AsProgrammer.Current_HW = CHW_CH347;
+    MainForm.RadioCH347VccAuto.Checked := MainForm.MenuCH347VccAuto.Checked;
+    MainForm.RadioCH347Vcc3V3.Checked := MainForm.MenuCH347Vcc3V3.Checked;
+    MainForm.RadioCH347Vcc1V8.Checked := MainForm.MenuCH347Vcc1V8.Checked;
+
+    //แรงดันของชิปที่เลือกอยู่ วางข้างปุ่มให้เทียบกันได้ในสายตาเดียว
+    //แบบเดียวกับช่อง "芯片电压" ของโปรแกรมผู้ผลิต
+    ChipVcc := CatalogVccDisplay(CurrentChipVccText);
+    if ChipVcc = '' then ChipVcc := '?';
+    MainForm.LabelCH347ChipVcc.Caption := 'Chip: ' + ChipVcc;
+  finally
+    CH347VccPanelUpdating := False;
+  end;
+
+  //ภาพชิปต้องขยับหลบหรือทวงพื้นที่คืน ตามการโผล่หายของกล่องนี้
+  if WasVisible <> MainForm.GroupCH347Vcc.Visible then LayoutLeftPanel;
+end;
+
+procedure TMainForm.MenuCH347VccClick(Sender: TObject);
+begin
+  //ตั้งให้เห็นผลทันทีที่เลือก ผู้ใช้จะได้ไม่ต้องเดาว่าต้องกดอ่านก่อนไหม
+  //อุปกรณ์ที่ยังไม่ได้เปิดจะโดน ApplyCH347Vcc ตอนเริ่มงานอยู่แล้ว
+  ApplyCH347Vcc;
+  RefreshCH347VccPanel;
+end;
+
+procedure TMainForm.RadioCH347VccChange(Sender: TObject);
+begin
+  if CH347VccPanelUpdating then Exit;
+  //ปุ่มที่เพิ่งดับก็ยิง OnChange มาด้วย สนใจเฉพาะตัวที่เพิ่งติด
+  if not (Sender as TRadioButton).Checked then Exit;
+
+  MenuCH347VccAuto.Checked := RadioCH347VccAuto.Checked;
+  MenuCH347Vcc3V3.Checked := RadioCH347Vcc3V3.Checked;
+  MenuCH347Vcc1V8.Checked := RadioCH347Vcc1V8.Checked;
+  //เส้นทางเดียวกับการคลิกที่เมนูทุกประการ รวมทั้งการจ่ายจริงทันที
+  MenuCH347VccClick(Sender);
+end;
+
+//ติ๊กเมนูแรงดันของ CH347 ให้เป็นระดับที่ขอ แล้วพยายามจ่ายจริงทันที
+//
+//ติ๊กทั้งสามรายการเองตรง ๆ ไม่พึ่งกลไก RadioItem ของ LCL เพราะพฤติกรรม
+//ตอนตั้ง Checked จากโค้ด (ไม่ใช่ผู้ใช้คลิก) ต่างจากตอนคลิกจริง
+//อุปกรณ์ที่ปิดอยู่จะได้ระดับนี้ตอนงานถัดไปเริ่ม เหมือนผู้ใช้เลือกเมนูเอง
+procedure PinCH347VccMenu(Millivolts: cardinal);
+begin
+  MainForm.MenuCH347VccAuto.Checked := False;
+  MainForm.MenuCH347Vcc3V3.Checked := Millivolts = CH347_VCC_3V3_MV;
+  MainForm.MenuCH347Vcc1V8.Checked := Millivolts <> CH347_VCC_3V3_MV;
+  LogPrint(Format(STR_CH347_VCC_SWITCHED,
+                  [CH347VccLevelText(SelectedCH347Vcc)]));
+  ApplyCH347Vcc;
+  RefreshCH347VccPanel;
+end;
+
+//หลังรู้แล้วว่าชิปตัวนี้คืออะไร: บอกแรงดันที่ชิปต้องการ เทียบกับที่ตั้งไว้
+//แล้วชี้ทางแก้ที่เมนู ไม่สลับให้เองเงียบ ๆ นอกจากผู้ใช้ตอบตกลงในกล่องถาม
+//
+//เรียกจาก SelectChipAny เพราะทุกทางที่ได้ชิปมา (Read ID, หน้าต่างค้นหา,
+//เมนูเลือกชิป, CLI) ไหลผ่านที่นั่นหมด โหมด CLI ได้แค่บรรทัดใน log
+//
+//พูดเฉพาะกับบอร์ดที่พิสูจน์แล้วว่าสลับแรงดันได้ บอร์ดที่สลับไม่ได้ยังอยู่ใต้
+//ด่าน VoltageWarningOK แบบเดิม ชี้ไปเมนูที่กดแล้วไม่มีผลมีแต่จะพาหลงทาง
+//ชื่อชิปที่เพิ่งถามเรื่องแรงดันไปแล้วในรอบนี้ กันถามซ้ำทุกครั้งที่ตรวจชิป
+var
+  AskedVccForChip: string = '';
+
+//ถามผู้ใช้เมื่อไม่มีทางไหนบอกแรงดันของชิปตัวนี้ได้เลย
+//
+//ไม่เดาให้เด็ดขาด เพราะสองทิศทางไม่เท่ากัน: เดาสูงเกินคือจ่าย 3.3V ใส่ชิป
+//1.8V แล้วชิปพังถาวร ส่วนเดาต่ำเกินแค่ชิปไม่ตอบแล้วลองใหม่ได้ ทางที่ถูกคือ
+//ให้คนเปิดดาต้าชีตแล้วบอกมา
+//
+//ต้องถามจากที่นี่เท่านั้น เพราะเส้นทางนี้อยู่บน UI thread ส่วนงานจริงวิ่งบน
+//worker ซึ่งเปิดกล่องข้อความไม่ได้
+//
+//คำตอบไปปักหมุดที่เมนูโดยตรง ไม่ใช่เก็บในตัวแปรลับ ผู้ใช้จะได้เห็นค่าที่
+//กำลังใช้อยู่ตลอดเวลา และเปลี่ยนเองได้ทีหลังจากที่เดิม
+procedure AskChipVccFromDatasheet;
+var
+  Key: string;
+begin
+  if AsProgrammer.Current_HW <> CHW_CH347 then Exit;
+  //ปักหมุดไว้แล้วแปลว่าผู้ใช้ตัดสินใจไปแล้ว ไม่ต้องไปกวนอีก
+  if SelectedCH347Vcc <> 0 then Exit;
+
+  Key := UpperCase(Trim(CurrentICParam.Name));
+  if Key = '' then Exit;
+  if Key = AskedVccForChip then Exit;
+  //จำไว้ก่อนถาม ผู้ใช้กด "ไว้ก่อน" แล้วจะได้ไม่โดนถามซ้ำทุกครั้งที่ตรวจชิป
+  AskedVccForChip := Key;
+
+  case QuestionDlg('AsProgrammer',
+         Format(STR_CH347_VCC_ASK, [CurrentICParam.Name]), mtWarning,
+         [mrNo, STR_CH347_VCC_ASK_18, mrYes, STR_CH347_VCC_ASK_33,
+          mrCancel, STR_CH347_VCC_ASK_LATER], 0) of
+    mrNo:
+      begin
+        PinCH347VccMenu(CH347_VCC_1V8_MV);
+        LogPrint(Format(STR_CH347_VCC_CONFIRMED,
+          [CurrentICParam.Name, CH347VccLevelText(CH347_VCC_1V8_MV)]));
+      end;
+    mrYes:
+      begin
+        PinCH347VccMenu(CH347_VCC_3V3_MV);
+        LogPrint(Format(STR_CH347_VCC_CONFIRMED,
+          [CurrentICParam.Name, CH347VccLevelText(CH347_VCC_3V3_MV)]));
+      end;
+  else
+    //ไม่เลือกก็ไม่เป็นไร แต่ต้องบอกให้ชัดว่าจะเกิดอะไรขึ้นต่อจากนี้
+    LogPrint(STR_CH347_VCC_ASK_NONE);
+  end;
+end;
+
+procedure CH347ChipVccGuidance;
+var
+  WantMv: cardinal;
+  ChipText, PinnedText, WantText: string;
+  Mismatch: string;
+  Advice: TCH347VccAdvice;
+begin
+  if AsProgrammer.Current_HW <> CHW_CH347 then Exit;
+  if not CH347VoltageControlSeen then Exit;
+
+  //ผ่านตัวหาสามชั้น ไม่ใช่ช่อง vcc ดิบ ไม่งั้นคำเตือน "ปักไว้สูงเกิน" จะไม่
+  //ทำงานกับชิปเกือบทุกตัว เพราะแค็ตตาล็อกแทบไม่เคยกรอกช่องนั้นไว้
+  ChipText := CatalogVccDisplay(CurrentChipVccText);
+  Advice := CH347VccAdvise(CurrentChipVccText, SelectedCH347Vcc, WantMv);
+
+  case Advice of
+    cvaChipVccUnknown:
+      begin
+        LogPrint(STR_CH347_VCC_NO_INFO);
+        //ไม่รู้แล้วเดาไม่ได้ ต้องให้คนเปิดดาต้าชีตแล้วยืนยันมา
+        AskChipVccFromDatasheet;
+        LogPrint(STR_CH347_VCC_GUIDE);
+      end;
+    cvaNoUsableRail:
+      LogPrint(Format(STR_CH347_VCC_NO_RAIL, [ChipText]));
+    cvaAutoWillApply:
+      begin
+        LogPrint(Format(STR_CH347_VCC_CHIP, [ChipText]));
+        LogPrint(Format(STR_CH347_VCC_AUTO_OK, [WantMv]));
+      end;
+    cvaPinnedMatches:
+      begin
+        LogPrint(Format(STR_CH347_VCC_CHIP, [ChipText]));
+        LogPrint(STR_CH347_VCC_MATCH);
+      end;
+    cvaPinnedTooHigh, cvaPinnedTooLow:
+      begin
+        PinnedText := CH347VccLevelText(SelectedCH347Vcc);
+        WantText := CH347VccLevelText(WantMv);
+        if Advice = cvaPinnedTooHigh then
+          Mismatch := Format(STR_CH347_VCC_TOO_HIGH, [ChipText, PinnedText])
+        else
+          Mismatch := Format(STR_CH347_VCC_TOO_LOW, [ChipText, PinnedText]);
+
+        LogPrint(Format(STR_CH347_VCC_CHIP, [ChipText]));
+        LogPrint(Mismatch);
+
+        if CLIMode then
+        begin
+          LogPrint(STR_CH347_VCC_GUIDE);
+          Exit;
+        end;
+
+        if MessageDlg('AsProgrammer',
+             Mismatch + '.' + LineEnding + LineEnding +
+             Format(STR_CH347_VCC_SWITCH_Q, [WantText]) + LineEnding +
+             STR_CH347_VCC_GUIDE,
+             mtWarning, [mbYes, mbNo], 0) = mrYes then
+          PinCH347VccMenu(WantMv)
+        else
+          LogPrint(STR_CH347_VCC_GUIDE);
+      end;
+  end;
+end;
+
 function EnterProgModeSPI25: boolean;
 begin
+  //ตั้งแรงดันก่อนปลุกบัสเสมอ ถ้าตั้งไม่ได้ตามที่ขอต้องไม่เดินงานต่อ
+  //การเขียนชิป 1.8V ด้วยไฟ 3.3V ทำให้ชิปพังถาวร ยอมล้มงานดีกว่า
+  if not ApplyCH347Vcc then Exit(False);
   Result := EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
 end;
 
@@ -4660,6 +4979,7 @@ begin
 end;
 
 //ตัวช่วยของงานเทียบข้อมูล ตัวจริงอยู่ท้ายไฟล์ แต่มีผู้เรียกอยู่ก่อนหน้านั้น
+function FastSPIClockWarning: string; forward;
 function ReportDiff(const A, B: array of byte; Size: integer): integer; forward;
 function UIChipSize: cardinal; forward;
 procedure MarkDiffInEditor(const A, B: array of byte; Size: integer); forward;
@@ -4748,6 +5068,8 @@ begin
   if not (ID.Got9F or ID.Got90 or ID.GotAB or ID.Got15) then
   begin
     LogPrint(STR_ID_NO_ANSWER);
+    if FastSPIClockWarning <> '' then
+      LogPrint(Format(STR_NO_CHIP_CLOCK, [FastSPIClockWarning]));
     if CLIMode then Exit(False);
     Result := MessageDlg('AsProgrammer', STR_ID_NO_ANSWER_Q, mtWarning, [mbYes, mbNo], 0) = mrYes;
     Exit;
@@ -4764,6 +5086,8 @@ end;
 //CH341A จ่าย 3.3-5V, CH347 กับ FT232H จ่าย 3.3V ทั้งหมดสูงเกินไปสำหรับชิป 1.8V
 //ต่อผิดครั้งเดียวชิปพังถาวร จึงต้องถามก่อนทุกครั้ง
 function VoltageWarningOK: boolean;
+var
+  VMinMv, VMaxMv, VWantMv: cardinal;
 begin
   Result := True;
   //Strict production has already passed the typed measured electrical gate.
@@ -4775,16 +5099,44 @@ begin
   //  W25Q64FW  W25Q256FW  (id EF60xx)   MX25U6435F   GD25LQ32
   //ทั้งหมดนี้พังทันทีถ้าได้รับ 3.3V ซึ่งเป็นสิ่งที่เกิดขึ้นบ่อยที่สุด
   //ตอนนี้จึงเชื่อค่า vcc ใน chiplist ก่อน แล้วค่อยถอยไปดูชื่อ
-  if CurrentICParam.Vcc <> '' then
-  begin
-    //ระบุมาแล้วว่าแรงดันเท่าไร ถ้าไม่ใช่ 1.8 ก็ไม่ต้องเตือน
-    if Pos('1.8', CurrentICParam.Vcc) = 0 then Exit;
-  end
-  else
-    if Pos('1.8V', UpperCase(CurrentICParam.Name)) = 0 then Exit;
+  //ตัวหาสามชั้นรวมทั้งช่อง vcc ชื่อรุ่น และรหัส JEDEC ไว้แล้ว ชั้นที่สาม
+  //คือชั้นที่จับกลุ่มใหญ่ที่ว่านี้ได้ (EF60xx, C225xx, C860xx ฯลฯ) ซึ่ง
+  //ทั้งช่อง vcc และชื่อรุ่นไม่ได้บอกอะไรเลย
+  if Pos('1.8', ChipVccText(CurrentICParam.Vcc, CurrentICParam.Name,
+                            CurrentICParam.ID)) = 0 then Exit;
 
   //Bus Pirate ตั้งขาเป็น open-drain แล้วจ่ายไฟจากภายนอกได้ จึงไม่เตือน
   if AsProgrammer.Current_HW in [CHW_BUZZPIRAT, CHW_ARDUINO] then Exit;
+
+  //CH347 ที่พิสูจน์แล้วว่าสลับแรงดันได้: ตัดสินจากระดับที่จะจ่ายจริง
+  //ไม่ใช่จากชื่อรุ่นเครื่อง คำเตือนเรื่องไฟเลี้ยงภายนอกไม่เกี่ยวกับบอร์ดนี้
+  if (AsProgrammer.Current_HW = CHW_CH347) and CH347VoltageControlSeen then
+  begin
+    //ปักหมุด 1.8V ไว้ หรือ Auto ที่อ่านช่วงจากแค็ตตาล็อกได้ (ชิปตรงหน้า
+    //ผ่านด่านบนมาแปลว่าเป็นชิป 1.8V ช่วงที่อ่านได้จึงลงเอยที่ 1.8V เสมอ):
+    //ระดับที่จะจ่ายคือ 1.8V จริง ไม่มีอะไรต้องเตือน
+    if SelectedCH347Vcc = CH347_VCC_1V8_MV then Exit;
+    if (SelectedCH347Vcc = 0) and
+       VccRangeMv(CurrentChipVccText, VMinMv, VMaxMv) and
+       CH347VccForChip(VMinMv, VMaxMv, VWantMv) and
+       (VWantMv = CH347_VCC_1V8_MV) then Exit;
+
+    //ปัก 3.3V ค้างไว้ หรือ Auto ที่ตัดสินไม่ได้เพราะแค็ตตาล็อกไม่บอกช่วง:
+    //เสนอปัก 1.8V ให้ชัดก่อนเดินต่อ ทั้งสองปุ่มปลอดภัย ไม่มีปุ่มไหนแปลว่า
+    //"จ่าย 3.3V ใส่ชิป 1.8V ต่อไป"
+    if CLIMode then
+    begin
+      LogPrint(STR_VOLT_ABORTED);
+      Exit(False);
+    end;
+    Result := MessageDlg('AsProgrammer', STR_CH347_VOLT_FIX_Q,
+                         mtWarning, [mbYes, mbNo], 0) = mrYes;
+    if Result then
+      PinCH347VccMenu(CH347_VCC_1V8_MV)
+    else
+      LogPrint(STR_VOLT_ABORTED);
+    Exit;
+  end;
 
   if CLIMode then
   begin
@@ -6121,6 +6473,10 @@ begin
   //Some backends (including EZP2023+) use firmware defaults and have no menu
   //branch below.  Never leak an uninitialized stack byte into SPIInit.
   Speed := 0;
+  //แต่สำหรับ CH347 เลข 0 ไม่ใช่ค่ากลาง ๆ มันคือ 60MHz ซึ่งเร็วที่สุดที่ตั้งได้
+  //"ยังไม่ได้เลือก" จึงห้ามแปลว่า "เร็วสุด" ตั้งพื้นไว้ที่ 15MHz เท่าค่าปริยาย
+  //ของเมนู ถ้ามีรายการไหนติ๊กอยู่ โค้ดข้างล่างจะทับค่านี้เองอยู่แล้ว
+  if AsProgrammer.Current_HW = CHW_CH347 then Speed := 2;
   if AsProgrammer.Current_HW = CHW_ARDUINO then
   begin
     if MainForm.MenuArduinoISP8Mhz.Checked then Speed := MainForm.MenuArduinoISP8Mhz.Tag;
@@ -6187,6 +6543,19 @@ begin
   if OverrideSpeed <> 0 then Speed := OverrideSpeed;
 
   result := speed;
+end;
+
+//ชื่อคล็อกปัจจุบัน ถ้าเร็วพอที่จะเป็นสาเหตุของ "ไม่มีชิปตอบ" คืนสตริงว่างถ้าไม่ใช่
+//
+//CH347 ตั้งได้ถึง 60MHz ซึ่งเกินกว่าที่สายหนีบหรือสายยาวจะรับไหวเกือบทุกกรณี
+//บัสที่วิ่งไม่ทันอ่านกลับมาเป็น FF ทั้งหมด หน้าตาเหมือนซ็อกเก็ตว่างทุกประการ
+//เตือนเฉพาะสองสเต็ปบนสุด ต่ำกว่านั้นถือว่าปัญหาน่าจะอยู่ที่อื่นจริง ๆ
+function FastSPIClockWarning: string;
+begin
+  Result := '';
+  if AsProgrammer.Current_HW <> CHW_CH347 then Exit;
+  if MainForm.MenuCH347SPIClock60MHz.Checked then Result := '60 MHz';
+  if MainForm.MenuCH347SPIClock30MHz.Checked then Result := '30 MHz';
 end;
 
 
@@ -8258,6 +8627,8 @@ begin
     AsProgrammer.Current_HW := CHW_FT232H;
   end;
 
+  //กล่องเลือกแรงดันบนหน้าหลักผูกกับ CH347 เท่านั้น โผล่และหุบตามเครื่องที่เลือก
+  RefreshCH347VccPanel;
 end;
 
 //ไล่เปิดอุปกรณ์ทีละตัว เพื่อดูว่ามีเครื่องโปรแกรมตัวไหนเสียบอยู่จริง
@@ -8466,6 +8837,10 @@ begin
   if not Result then
     Result := findchip.SelectChip(ChipListFile5, AName);
   UpdateChipInfo;
+
+  //รู้จักชิปแล้วก็รู้แรงดันที่มันต้องการแล้ว บอกตอนนี้เลย ไม่ใช่รอให้กดอ่าน
+  //แล้วชิปเงียบ (ปัก 1.8 ไว้กับชิป 3.3) หรือแย่กว่านั้นคือพัง (กลับกัน)
+  if Result then CH347ChipVccGuidance;
 end;
 
 procedure TMainForm.ChipClick(Sender: TObject);
@@ -8659,9 +9034,9 @@ var
   begin
     case AsProgrammer.Current_HW of
       CHW_CH341:
-        Result := 'Install drivers\CH341\CH341PAR.EXE (WCH CH341PAR).';
+        Result := 'Install drivers\USBCH341\CH341PAR.EXE (WCH CH341PAR).';
       CHW_CH347:
-        Result := 'Install drivers\CH343\CH343 (WCH CH347PAR).';
+        Result := 'Install drivers\CH34X\CH34XPAR.EXE (WCH CH34xPAR).';
       CHW_FT232H:
         Result := 'Install drivers\FT232\CDM212364_Setup.exe (FTDI D2XX).';
       CHW_USBASP, CHW_AVRISP:
@@ -8790,28 +9165,31 @@ begin
       end;
     end;
 
+    //ผ่านตัวหาสามชั้น (ช่อง vcc, ท้ายชื่อรุ่น, รหัส JEDEC) ไม่ใช่ช่องดิบ
+    //ไม่งั้นหมอตรวจจะบอกว่า "ไม่รู้แรงดัน" กับชิป 1.8V ที่รู้จักดีอย่าง
+    //W25Q64JW แล้วปล่อยให้ตรวจสดด้วยราง 3.3V
     if CurrentICParam.Name = '' then
       Lines.Add('[WARN] No chip profile is selected. Pick the exact part first.')
     else
       Lines.Add(Format('[INFO] Selected chip: %s (%d bytes, VCC %s)',
         [CurrentICParam.Name, CurrentICParam.Size,
-         IfThen(Trim(CurrentICParam.Vcc) = '', 'not specified',
-                CurrentICParam.Vcc)]));
+         IfThen(Trim(CurrentChipVccText) = '', 'not specified',
+                CurrentChipVccText)]));
 
-    if Trim(CurrentICParam.Vcc) = '' then
+    if Trim(CurrentChipVccText) = '' then
       Lines.Add('[WARN] Chip voltage is unknown. Check the datasheet and ' +
                 'measure VCC before connecting.')
-    else if Pos('1.8', CurrentICParam.Vcc) > 0 then
+    else if Pos('1.8', CurrentChipVccText) > 0 then
       Lines.Add('[WARN] This is a 1.8 V part. Do not connect ordinary ' +
                 '3.3/5 V power or signals; use a verified 1.8 V adapter.')
     else
-      Lines.Add('[INFO] Profile voltage: ' + CurrentICParam.Vcc +
+      Lines.Add('[INFO] Profile voltage: ' + CurrentChipVccText +
                 '. Verify the actual rail with a meter; the application ' +
                 'cannot measure it.');
 
     LiveCheckAllowed := (CurrentICParam.Name <> '') and
-      (CurrentICParam.Size > 0) and (Trim(CurrentICParam.Vcc) <> '') and
-      (Pos('1.8', CurrentICParam.Vcc) = 0);
+      (CurrentICParam.Size > 0) and (Trim(CurrentChipVccText) <> '') and
+      (Pos('1.8', CurrentChipVccText) = 0);
     if Opened and ProtocolSupported and (not LiveCheckAllowed) then
       Lines.Add('[WARN] Live chip probing was skipped because a selected, ' +
                 'sized, non-1.8 V profile is required before the doctor ' +
@@ -10086,6 +10464,7 @@ var
   Err45, Mode45: string;
   FamilyName, MatchVendor: string;
   VendorMatchCount, VendorMatchIndex, p: integer;
+  ProbeMv: cardinal;
 begin
   OpBegin(opkDetect);
   //เริ่มตรวจใหม่ = ลืมของเก่าไว้ก่อน ถ้าตรวจไม่สำเร็จก็ต้องไม่เหลือสถานะ
@@ -10098,6 +10477,32 @@ begin
       exit;
     end;
     LockControl();
+
+    //CH347: เลือกแรงดันที่จะใช้แหย่ถามรหัส
+    //
+    //DevOpen เพิ่งบังคับ 1.8V ไปแล้ว ซึ่งเป็นระดับเดียวที่ไม่ทำชิปตัวไหนพัง
+    //โหมด Auto จึงแหย่ที่ 1.8V เสมอ: ค่า Vcc ของชิปที่ "เลือกค้างไว้" ใช้
+    //ไม่ได้ เพราะชิปในซ็อกเก็ตตอนนี้อาจเป็นคนละตัวกัน ยกขึ้น 3.3V เฉพาะเมื่อ
+    //ผู้ใช้ปักหมุดไว้เองเท่านั้น (นั่นคือทางเดียวที่ชิป 3.3V ที่เงียบใส่
+    //1.8V จะยอมคุยด้วย) ศูนย์ = เครื่องนี้คุมแรงดันไม่ได้
+    ProbeMv := 0;
+    if (AsProgrammer.Current_HW = CHW_CH347) and
+       AsProgrammer.Programmer.SupportsTargetVoltage then
+    begin
+      ProbeMv := SelectedCH347Vcc;
+      if ProbeMv = 0 then ProbeMv := CH347_VCC_1V8_MV;
+      if AsProgrammer.Programmer.GetTargetVoltageMv <> ProbeMv then
+      begin
+        if AsProgrammer.Programmer.SetTargetVoltageMv(ProbeMv) then
+          LogPrint(Format(STR_CH347_VCC_SET, [ProbeMv]))
+        else
+        begin
+          LogPrint(Format(STR_CH347_VCC_FAILED, [ProbeMv]));
+          ProbeMv := AsProgrammer.Programmer.GetTargetVoltageMv;
+        end;
+      end;
+      if ProbeMv = CH347_VCC_3V3_MV then LogPrint(STR_CH347_PROBE_3V3);
+    end;
 
     FillByte(ID.ID9FH, 3, $FF);
     FillByte(ID.ID90H, 2, $FF);
@@ -10169,6 +10574,31 @@ begin
     if IsDeadID(ID.ID9FH) then
     begin
       LogPrint(STR_NO_CHIP);
+      if FastSPIClockWarning <> '' then
+        LogPrint(Format(STR_NO_CHIP_CLOCK, [FastSPIClockWarning]));
+
+      //ความเงียบบนบอร์ดที่สลับแรงดันได้มีคำอธิบายเพิ่มอีกทาง: แรงดันไม่ตรง
+      //กับชิป บอกทางต่อจากระดับที่เพิ่งใช้แหย่ไป แต่ห้ามยกแรงดันให้เอง
+      //เพราะชิป 1.8V ที่แค่หนีบไม่แน่นจะพังคาที่ถ้าเดาผิด
+      if ProbeMv = CH347_VCC_1V8_MV then
+      begin
+        LogPrint(STR_CH347_DEAD_1V8);
+        if CLIMode then
+          LogPrint(STR_CH347_VCC_GUIDE)
+        else if MessageDlg('AsProgrammer',
+                  STR_CH347_DEAD_1V8 + '.' + LineEnding + LineEnding +
+                  STR_CH347_DEAD_1V8_Q,
+                  mtConfirmation, [mbYes, mbNo], 0) = mrYes then
+          PinCH347VccMenu(CH347_VCC_3V3_MV)
+        else
+          LogPrint(STR_CH347_VCC_GUIDE);
+      end
+      else if ProbeMv = CH347_VCC_3V3_MV then
+      begin
+        LogPrint(STR_CH347_DEAD_3V3);
+        LogPrint(STR_CH347_VCC_GUIDE);
+      end;
+
       OpFail('no chip answered');
       Exit;
     end;
