@@ -18,7 +18,9 @@ SPI NOR · SPI NAND · I²C EEPROM · Microwire — across nine programmers.
 ---
 
 <div align="center">
-<img src="assets/chipwright-main.png" alt="Chipwright main window" width="820">
+<img src="assets/chipwright-main.png" alt="Chipwright reading a Winbond W74M12JWSSIQ over a CH347" width="880">
+<br>
+<sub>A Winbond <code>W74M12JWSSIQ</code> identified live as <code>EF6018</code> — 16 MiB, 1.8 V — with the target rail already matched to it.</sub>
 </div>
 
 ---
