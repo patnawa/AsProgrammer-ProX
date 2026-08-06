@@ -62,7 +62,7 @@ operation-engine dependency graph. Ordinary CI does not open hardware.
 ## Live hardware tests
 
 Dedicated self-hosted runners execute the separate
-[`hardware-in-loop.yml`](https://github.com/patnawa/AsProgrammer-ProX/blob/main/.github/workflows/hardware-in-loop.yml)
+[`hardware-in-loop.yml`](https://github.com/patnawa/Chipwright/blob/main/.github/workflows/hardware-in-loop.yml)
 workflow.
 Its weekly schedule is read-only. See [Hardware in the loop](hardware-in-loop.md)
 before provisioning a runner or enabling a destructive sacrificial-fixture run.

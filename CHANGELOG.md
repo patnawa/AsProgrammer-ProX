@@ -3,6 +3,39 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.26.5.0 — the activity LED lights for EEPROM too
+
+- The activity LED works again, and now lights for I2C work as well as SPI.
+
+  This took three attempts, and the measurement should have come first.
+  Sampling GPIO4 across 400 SPI transactions returned `dir1_lvl1` four
+  hundred times out of four hundred: the pin never moves on its own. The
+  board does not blink the lamp from bus traffic, so software has to drive
+  it, exactly as the vendor binary does from its two `CH347GPIO_Set` call
+  sites.
+
+  The original defect was never that the LED was software-driven. It was
+  that only `SPIInit`/`SPIDeinit` lit it, and EEPROM runs over I2C — so
+  reading an EEPROM lit nothing at all. 4.26.3.0 removed the software
+  control on the mistaken belief that the hardware would take over, which
+  left the lamp dark for every operation instead of just the I2C ones.
+
+  `SetActivityLED` now drives GPIO4 through its own mask, so the LED and the
+  target-voltage pin at GPIO6 can never disturb each other. It is lit from
+  both `SPIInit` and `I2CInit`, cleared from both Deinits and from
+  `DevClose`, and `QuiesceActivityLED` in `RunOperation` still catches
+  operations that end by throwing.
+
+- `DevOpen` no longer writes GPIO at all. The CH347T multiplexes its GPIO
+  pins, and claiming one before anything has asked for it disturbed
+  unrelated buses. The hardware powers up at 1.8V by itself, `ApplyCH347Vcc`
+  still sets the level before every SPI operation, and `DevClose` still
+  winds a raised rail back down, so nothing about the safety behaviour
+  changes.
+
+- The About box and the remaining documentation now point at
+  `patnawa/Chipwright`.
+
 ## 4.26.4.0 — the voltage box no longer sits on the chip picture
 
 - The chip picture and the log below it laid out wrongly. The target-voltage

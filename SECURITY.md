@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately through the repository's
-[GitHub Security Advisories](https://github.com/patnawa/AsProgrammer-ProX/security/advisories/new).
+[GitHub Security Advisories](https://github.com/patnawa/Chipwright/security/advisories/new).
 Do not open a public issue for an unpatched vulnerability.
 
 Include the affected version/commit, platform, programmer, reproduction steps,
@@ -56,5 +56,5 @@ verify the attestation with GitHub CLI where policy requires it:
 
 ```bash
 sha256sum -c SHA256SUMS.txt
-gh attestation verify AsProgrammer-ProX-*.zip --repo patnawa/AsProgrammer-ProX
+gh attestation verify AsProgrammer-ProX-*.zip --repo patnawa/Chipwright
 ```

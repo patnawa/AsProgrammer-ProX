@@ -12055,7 +12055,7 @@ begin
       s.Add('Version ' + PROX_VERSION);
       s.Add('');
       s.Add('Serial flash and EEPROM programmer for SPI, I2C and MicroWire.');
-      s.Add('https://github.com/patnawa/AsProgrammer-ProX');
+      s.Add('https://github.com/patnawa/Chipwright');
       s.Add('');
       s.Add('--- Build ---');
       s.Add('Executable   ' + ExeName);
@@ -12189,7 +12189,7 @@ begin
   //เครดิตย้ายมาอยู่ที่นี่ที่เดียว แถบ log ตอนเปิดโปรแกรมไม่ต้องแสดงแล้ว
   credits :=
     'Chipwright ' + PROX_VERSION + LineEnding +
-    'https://github.com/patnawa/AsProgrammer-ProX' + LineEnding + LineEnding +
+    'https://github.com/patnawa/Chipwright' + LineEnding + LineEnding +
     'Built on:' + LineEnding +
     '  nofeletru - AsProgrammer / UsbAsp-flash' + LineEnding +
     '  https://github.com/nofeletru/UsbAsp-flash' + LineEnding + LineEnding +
