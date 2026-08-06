@@ -3,7 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File tools\build.ps1
 #   powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Release
 #
-# -Release also zips the result into release\AsProgrammer-ProX-<version>.zip,
+# -Release also zips the result into release\Chipwright-<version>.zip,
 # with the runtime DLLs and data files already in place, so the zip is what
 # someone can actually run. The DLLs are fetched from the upstream release the
 # first time, because they are not kept in the repository.
@@ -459,7 +459,7 @@ try {
   }
 }
 
-$zipOut = "$root\release\AsProgrammer-ProX-$Version.zip"
+$zipOut = "$root\release\Chipwright-$Version.zip"
 Remove-Item $zipOut -ErrorAction SilentlyContinue
 
 # The entries are added one at a time so the paths inside the zip are written

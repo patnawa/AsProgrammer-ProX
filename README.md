@@ -29,7 +29,7 @@ That sounds obvious. It wasn't happening: the chip catalogue carries a voltage f
 
 | Programmer | SPI | I²C | Microwire | Notes |
 |---|:---:|:---:|:---:|---|
-| **CH347** (T / F) | ✓ | ✓ | — | **target voltage 1.8 V / 3.3 V**, activity LED |
+| **CH347** (T / F) | ✓ | ✓ | — | **target voltage 1.8 V / 3.3 V** |
 | **CH341A** | ✓ | ✓ | ✓ | the classic black/green dongle |
 | **FT232H** | ✓ | ✓ | ✓ | |
 | **EZP2023+** | ✓ | — | — | native whole-chip read / write / erase |
@@ -43,9 +43,9 @@ That sounds obvious. It wasn't happening: the chip catalogue carries a voltage f
 
 ## CH347 target voltage
 
-The **CH347 II V2.13** board is the only one of the nine with a switchable target rail. It's driven from **GPIO6** — low = 3.3 V, high = 1.8 V — while **GPIO4** runs the activity LED.
+The **CH347 II V2.13** board is the only one of the nine with a switchable target rail. It's driven from **GPIO6** — low = 3.3 V, high = 1.8 V. That pin assignment is not documented by WCH; it was recovered from the vendor binary's `CH347GPIO_Set` call sites and then confirmed against real hardware.
 
-Neither is documented by WCH. Both were recovered from the vendor binary's `CH347GPIO_Set` call sites and then confirmed against real hardware, which reports a GPIO direction mask of `0x50` — exactly those two pins and nothing else.
+GPIO6 is also the *only* pin Chipwright drives. The board's green activity LED blinks from bus traffic through its own circuit — SPI and I²C alike — so the software deliberately leaves GPIO4 untouched rather than replacing a lamp that already works with one that wouldn't.
 
 > **Options → SPI → CH347 target voltage** — `1.8 V` · `3.3 V` · `Auto`
 
@@ -106,10 +106,6 @@ Add `-Release` to zip a runnable release folder with the DLLs in place. Tests:
 ```sh
 fpc -Mobjfpc -Sh -Fusoftware -FUtests/lib -otests/unittests.exe tests/unittests.lpr && ./tests/unittests.exe
 ```
-
-## Known issues
-
-- **The activity LED polarity is inferred, not measured.** It's implemented active-low from observing GPIO4 idle high with the lamp off. If the light sits on constantly and goes *dark* during operations, it's inverted — swap the two `LedBits` assignments in `software/ch347hw.pas`.
 
 ## Changelog
 

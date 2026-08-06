@@ -1,7 +1,36 @@
 # Changelog
 
-All notable changes to AsProgrammer ProX are recorded here. The version in the
+All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
+
+## 4.26.3.0 — the board lights its own LED
+
+- The green activity light on the CH347 stopped blinking during reads. That
+  was a regression introduced with target-voltage support, and the fix is to
+  stop touching the pin at all.
+
+  Before that feature existed nothing ever wrote GPIO4, so the pin stayed an
+  input and the board's own circuit blinked the LED from bus traffic —
+  covering SPI and I2C alike, with no software involvement. `DevOpen` then
+  began claiming GPIO4 as a driven output and parking it high, which
+  suppressed that circuit outright.
+
+  EEPROM reads never stood a chance either way: the software LED was only
+  wired into `SPIInit`/`SPIDeinit`, and EEPROM runs over I2C.
+
+  Checked against the hardware before changing any code — releasing GPIO4
+  back to input moves the GPIO direction mask from `0x50` to `0x40` and
+  leaves GPIO6 and the target voltage untouched.
+
+  `ApplyGPIO` is now `ApplyVccGPIO` and masks GPIO6 only. The
+  `SetActivityLED` override is gone; `TBaseHardware`'s no-op stands.
+  `QuiesceActivityLED` stays in `RunOperation` for backends that really do
+  have a software-controlled lamp. A hardware LED that already worked for
+  both buses beats a software one that only knew about SPI.
+
+- The application is now called **Chipwright**, in the window title, the
+  command line, the About box, the compare report and the version resource.
+  Release packages are named `Chipwright-<version>.zip`.
 
 ## 4.26.2.0 — the first release cut from the Chipwright repository
 
