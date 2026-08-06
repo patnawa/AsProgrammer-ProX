@@ -1,297 +1,116 @@
 <div align="center">
 
-# AsProgrammer ProX
+# Chipwright
 
-**Safe, open-source flash and EEPROM programming for affordable USB hardware**
+**A flash programmer that refuses to guess your chip's voltage.**
 
-SPI NOR · SPI NAND reads · gated NAND mutation · I²C · MicroWire · DataFlash · Windows GUI · headless Windows/Linux CLI
+SPI NOR · SPI NAND · I²C EEPROM · Microwire — across nine programmers.
 
-[![latest release](https://img.shields.io/github/v/release/patnawa/AsProgrammer-ProX?display_name=tag&sort=semver&style=flat-square&color=2BB3F3)](https://github.com/patnawa/AsProgrammer-ProX/releases/latest)
-[![build](https://github.com/patnawa/AsProgrammer-ProX/actions/workflows/build.yml/badge.svg)](https://github.com/patnawa/AsProgrammer-ProX/actions/workflows/build.yml)
-![platform](https://img.shields.io/badge/GUI-Windows%20x86-94A3B8?style=flat-square)
-![cli](https://img.shields.io/badge/headless-Windows%20%2F%20Linux%20CH347-3DD68C?style=flat-square)
-![toolchain](https://img.shields.io/badge/toolchain-Lazarus%204.8%20%2F%20FPC%203.2.2-F5A524?style=flat-square)
-![license](https://img.shields.io/badge/license-MIT-3DD68C?style=flat-square)
+[![Release](https://img.shields.io/github/v/release/patnawa/ch347_programer_proX?label=release)](https://github.com/patnawa/ch347_programer_proX/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20Linux-blue)](#building)
+[![Built with](https://img.shields.io/badge/built%20with-Lazarus%20%2F%20FPC-orange)](https://www.lazarus-ide.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 </div>
 
-AsProgrammer ProX reads, writes, erases, verifies, diagnoses, and safely
-updates serial memory. Its transactional Smart Write path takes two matching
-snapshots, previews the preservation plan, changes only what is necessary,
-and verifies every affected block.
+---
 
-> **Voltage is a hardware safety boundary.** A 1.8 V chip can be destroyed by
-> 3.3 V. Confirm the part, orientation, adapter, voltage, and common ground
-> before connecting power. Start with a read-only ID check.
+## Why this exists
 
-## Current release: 4.24.0.0
+Sending **3.3 V to a 1.8 V flash chip destroys it permanently**. Sending too little only means the chip doesn't answer, and you try again.
 
-[Download the Windows ZIP](https://github.com/patnawa/AsProgrammer-ProX/releases/download/v4.24.0.0/AsProgrammer-ProX-4.24.0.0.zip) ·
-[SHA-256 checksums](https://github.com/patnawa/AsProgrammer-ProX/releases/download/v4.24.0.0/SHA256SUMS.txt) ·
-[release notes](https://github.com/patnawa/AsProgrammer-ProX/releases/tag/v4.24.0.0)
+Those two outcomes are not equally bad — so Chipwright never treats them as if they were. Every path that cannot work out a chip's supply voltage **fails low**, and when it genuinely doesn't know, it stops and asks you to check the datasheet rather than quietly picking one.
 
-Released 2 August 2026. The bundle contains the Windows GUI and the LCL-free
-`AsProgrammerCLI.exe`. Version 4.24 adds Smart Write preview, the shared
-operation runner, gated SPI NAND erase/write, hardened release and HIL
-automation, and 17 aligned hardware-free test suites. The published ZIP is
-checksummed and carries GitHub build-provenance attestation.
-
-## Choose a task
-
-| I want to… | Start here |
-|---|---|
-| Download the current release | [4.24.0.0 release and assets](https://github.com/patnawa/AsProgrammer-ProX/releases/tag/v4.24.0.0) |
-| Read or recover a chip | [Five-minute safe start](#five-minute-safe-start) |
-| Preview or write an image | [Safe write workflow](#safe-write-workflow) |
-| Automate a bench | [Command line](#command-line) |
-| Use Windows or Linux without a GUI | [Headless CLI](#headless-cli-windows-and-linux) |
-| Add a chip or translation | [Contributing](CONTRIBUTING.md) |
-| Build or run tests | [Testing guide](docs/testing.md) |
-| Validate real programmers | [Hardware-in-loop guide](docs/hardware-in-loop.md) |
-| Understand a release | [Changelog](CHANGELOG.md) · [release process](docs/releasing.md) |
-| Report a vulnerability | [Security policy](SECURITY.md) |
-
-## Why this fork
-
-Smart Write and production programming treat mutation as a guarded
-transaction rather than a sequence of unrelated buttons.
-
-| Capability | Safety property |
-|---|---|
-| **Smart Write preview and execution** | Shows erase blocks/opcodes, program pages, preserved bytes, verification coverage, backup policy, and worst-case time before confirmation. The GUI previews and executes the shared planner/engine output directly; the LCL-free CLI and tests exercise those layers through a presentation-neutral runner. |
-| **Preservation-aware SPI NOR updates** | A `0→1` change erases only its containing block and restores untouched neighbours from the trusted snapshot. Pure `1→0` changes skip erase. |
-| **Differential EEPROM updates** | 24Cxx, 93xx, and 95xx write only differing pages, then verify every touched page. |
-| **Trusted snapshots and backups** | Two full reads must match before existing content is trusted. Smart Write and gated NAND mutation require durable backups; explicitly destructive diagnostics such as Surface scan remain opt-in and are not recoverable. |
-| **Identity and electrical gates** | Repeated JEDEC identity, typed programmer capabilities, voltage policy, WEL/BUSY checks, protection decoding, exact transfer counts, and cleanup are enforced. Unattended and strict-production paths fail closed; interactive overrides are explicit. |
-| **SFDP and four-byte support** | Uses JESD216 geometry, timings, erase maps, and address strategies instead of guessing from capacity. |
-| **Dump and chip diagnostics** | Detects blank/silent buses, repeating wrapped dumps, unstable contacts, remarked capacity, slow-wearing blocks, and uncorrectable NAND ECC. |
-| **Production evidence** | Supports HMAC-authenticated jobs, retained image handles, full verification, signed durable evidence, and local anti-replay state. |
-
-The full release history, including withdrawn behavior and hardware findings,
-lives in [CHANGELOG.md](CHANGELOG.md).
+That sounds obvious. It wasn't happening: the chip catalogue carries a voltage field on only **5 of its 658 entries**, and every voltage decision in the program read that field directly. Auto-voltage never worked, and the guard meant to stop a pinned 3.3 V rail reaching a 1.8 V part *could never fire.* Chipwright fixes that.
 
 ## Supported programmers
 
-| Programmer | SPI | I²C | MicroWire | Notes |
-|---|:--:|:--:|:--:|---|
-| **CH347** | ● | ● | | Fast USB 2.0 option. Windows vendor-DLL backend; CH347 SPI also has a Linux libusb backend. |
-| **CH341A** | ● | ● | ● | Common black/green programmer. Check board voltage modifications before use. |
-| **FT232H** | ● | ● | ● | D2XX backend, up to 30 MHz. |
-| **UsbAsp** | ● | ● | ● | Uses libusb. |
-| **Buzzpirat / Bus Pirate** | ● | ● | | Flexible open-drain/pull-up support; comparatively slow. |
-| **AVRISP (LUFA)** | ● | ● | ● | |
-| **Arduino** | ● | ● | ● | |
-| **serprog** | ● | | | Pico, STM32, ESP32, frser-duino, and other flashrom-compatible serial programmers. |
-| **EZP2023+** | ◐ | | | Identify, read, whole-chip erase/write, and full verify. Its firmware cannot expose raw SPI, so SFDP, protection decoding, Smart Write, and chip-health tests are unavailable. |
+| Programmer | SPI | I²C | Microwire | Notes |
+|---|:---:|:---:|:---:|---|
+| **CH347** (T / F) | ✓ | ✓ | — | **target voltage 1.8 V / 3.3 V**, activity LED |
+| **CH341A** | ✓ | ✓ | ✓ | the classic black/green dongle |
+| **FT232H** | ✓ | ✓ | ✓ | |
+| **EZP2023+** | ✓ | — | — | native whole-chip read / write / erase |
+| **AVRISP mkII** | ✓ | ✓ | ✓ | |
+| **USBasp** | ✓ | ✓ | ✓ | |
+| **Arduino** | ✓ | ✓ | ✓ | |
+| **Bus Pirate** | ✓ | ✓ | — | open-drain, external supply |
+| **serprog** | ✓ | — | — | flashrom serial protocol |
 
-Supported families include 25-series SPI NOR, 45-series DataFlash, 95-series
-SPI EEPROM, 24-series I²C EEPROM, 93-series MicroWire EEPROM, and KB9012 EC.
-SPI NAND supports identification, bad-block scanning, and ECC-checked reads
-from the Windows command line. Phase 3 erase/write paths are implemented but
-disabled by default until a sacrificial-chip validation record exists; there
-is no GUI NAND workflow yet. See
-[the NAND design status and safety gate](docs/design-spi-nand.md).
+**Chip families:** 25-series SPI NOR · SPI NAND · 24-series I²C EEPROM · 93-series Microwire · 45/95-series.
 
-## Five-minute safe start
+## CH347 target voltage
 
-1. Download the
-   [4.24.0.0 Windows ZIP](https://github.com/patnawa/AsProgrammer-ProX/releases/download/v4.24.0.0/AsProgrammer-ProX-4.24.0.0.zip)
-   and its [checksum file](https://github.com/patnawa/AsProgrammer-ProX/releases/download/v4.24.0.0/SHA256SUMS.txt),
-   verify the SHA-256 value, extract the complete folder, and run
-   `AsProgrammer.exe`.
-2. Select the programmer under **Hardware**. For EZP2023+, install the signed
-   device-mode package described in `drivers/EZP2023Plus/README.md`.
-3. Confirm the chip voltage and pin 1. Connect the chip with target power off.
-4. Press **Read ID** (`F5`). For an unlisted SPI NOR, use
-   **Chip → Detect chip via SFDP**.
-5. Enable **Options → Read twice and compare**, then press **Read** (`Ctrl+R`).
-   Save the dump somewhere separate before attempting any change.
-6. Run the offline dump scan or compare its hash with a known-good reference.
+The **CH347 II V2.13** board is the only one of the nine with a switchable target rail. It's driven from **GPIO6** — low = 3.3 V, high = 1.8 V — while **GPIO4** runs the activity LED.
 
-### SPI NOR wiring
+Neither is documented by WCH. Both were recovered from the vendor binary's `CH347GPIO_Set` call sites and then confirmed against real hardware, which reports a GPIO direction mask of `0x50` — exactly those two pins and nothing else.
 
-The exact programmer header varies; confirm its manual. This repository's
-existing reference diagram shows the chip-side signals:
+> **Options → SPI → CH347 target voltage** — `1.8 V` · `3.3 V` · `Auto`
 
-![SPI 25-series connection diagram](schemeSPI25.gif)
+The board powers up at 1.8 V and Chipwright restores 1.8 V when it closes, so a rail left high by a previous job can never greet the next chip you seat.
 
-Other included diagrams: [I²C](schemeI2C.gif) ·
-[MicroWire](schemeMW.gif) · [DataFlash](schemeSPI45.gif).
+### How a chip's voltage is worked out
 
-## Safe write workflow
+| | Source | Example |
+|:--:|---|---|
+| 1 | the catalogue's `vcc=` attribute | rare, but authoritative |
+| 2 | the `_1.8V` / `_3.3V` name suffix | `W74M12JW_1.8V` |
+| 3 | known-1.8 V JEDEC id prefixes | `W25Q64FW` → `EF6017` |
 
-The GUI's workflow strip follows **Connect → Identify → Read/backup → Preview
-→ Confirm → Execute → Verify**. Disabled steps explain the missing
-prerequisite in their tooltip.
+Tier 3 covers the dangerous group: parts like `W25Q64FW` and `MX25U6435F` that are 1.8 V but whose *names say nothing*. The prefixes — `EF60` `EF80` `EF50` `C225` `C860` `2041` `2050` `9D70` `E060` `1C38` — were derived from the catalogue itself, not from memory.
 
-1. Read and save the original content.
-2. Open the replacement image and confirm it fits the selected range.
-3. Choose **Smart Write preview** (`Ctrl+Shift+P`). Review which blocks will
-   erase, what data will be preserved, backup status, verification coverage,
-   and the declared worst-case time.
-4. Confirm only when the detected identity, voltage, address range, and plan
-   all match the intended device.
-5. Keep power and the clip stable until full verification completes. `Esc`
-   requests cancellation at a cleanup-safe boundary; it cannot undo a block
-   already erased.
+**Tier 3 may only ever conclude 1.8 V.** It is never allowed to infer 3.3 V from an id, because that is the direction that kills chips.
 
-EZP2023+ cannot execute a differential Smart Write. Use ordinary whole-chip
-Write; the application performs native erase, independent blank checks,
-programming, and independent full comparisons.
+If none of the three resolves, Chipwright asks:
 
-## Command line
+```
+The catalog does not state the supply voltage for W25Q64.
 
-Any switch starts the Windows executable without showing the window. It uses
-the same core planners and engines as the GUI and returns `0` on success, `1`
-on an operation failure, and `2` for invalid usage.
+Open the chip datasheet and pick its supply voltage. Nothing is
+guessed for you here on purpose: sending 3.3 V to a 1.8 V part
+destroys it permanently, while too low a rail only means the chip
+does not answer and you can try again.
 
-```powershell
-AsProgrammer.exe --detect --hw ch341
-AsProgrammer.exe --read original.bin --chip W25Q64BV --read-passes 2
-AsProgrammer.exe --write patch.bin --chip W25Q64BV --smart --plan-only
-AsProgrammer.exe --write patch.bin --chip W25Q64BV --smart
-AsProgrammer.exe --verify approved.bin --chip W25Q64BV --json
-AsProgrammer.exe --scan original.bin
-AsProgrammer.exe --help
+          [ 1.8 V ]    [ 3.3 V ]    [ Decide later ]
 ```
 
-Useful switches:
+Your answer is pinned into the voltage menu, so the level in use stays visible instead of hiding in a variable.
 
-| Switch | Meaning |
-|---|---|
-| `--hw NAME` | Force `ch341`, `ch347`, `ft232h`, `usbasp`, `avrisp`, `arduino`, `buzzpirat`, `serprog`, or `ezp`. |
-| `--sfdp` | Take supported SPI NOR geometry from the live chip. |
-| `--read-passes N` | Require 1–16 matching reads; use at least two for recovery. |
-| `--smart --plan-only` | Build and print the differential plan without changing status registers or array data. |
-| `--region bios` | Limit read/write/verify to an Intel descriptor region (`fd`, `bios`, `me`, `gbe`, `pd`, `ec`). |
-| `--json` | Emit a machine-readable final result. |
-| `--scan FILE` | Inspect a dump offline for blank data, wrapping, entropy, and known image structures. |
+## Getting started
 
-SPI NAND uses separate `--nand-info` and `--nand-read FILE` commands. Its
-Phase 3 `--nand-write FILE` and `--nand-erase` paths additionally require an
-unused `--nand-backup FILE`, `--force`, an explicit bad-block policy when
-skipping is intended, and the live-validation station gate described in
-[the NAND design document](docs/design-spi-nand.md). Raw NAND mutation is
-always refused.
+1. Install the CH347 driver from **[`drivers/CH347T-Driver/`](drivers/CH347T-Driver)** — the CH341PAR package behind `wch.cn 2.6.2025.4`, confirmed working with this board.
+2. Plug in the programmer. Windows should show *USB HighSpeed-SPI/I2C… CH347T* with no warning icon.
+3. Run Chipwright, press **Detect**, and check the reported chip and voltage before doing anything that writes.
 
-Strict production adds authenticated manifest, key-ID, environment-key, and
-evidence-directory switches. Those are security controls, not convenience
-flags; read [the production security model](docs/production-job-security.md)
-before deploying them.
-
-## Headless CLI: Windows and Linux
-
-`software/AsProgrammerCLI.lpr` is LCL-free and uses the CH347 libusb backend.
-The Windows release ships `AsProgrammerCLI.exe`; Linux users build the same
-entrypoint from source. It supports stable read-only detection/read, offline
-scan/SFDP decoding, Smart Write preview, and a separately gated
-sacrificial-chip write path while live validation is still being completed.
-
-From the extracted Windows release:
-
-```powershell
-.\AsProgrammerCLI.exe --help
-.\AsProgrammerCLI.exe --detect
-```
-
-Build and run the same entrypoint on Linux:
-
-```bash
-fpc -Mobjfpc -Sh -Fusoftware software/AsProgrammerCLI.lpr
-./software/AsProgrammerCLI --detect
-./software/AsProgrammerCLI --read dump.bin --size 8388608 --passes 2
-./software/AsProgrammerCLI --smart-preview patch.bin --size 8388608 \
-  --address 0 --page-size 256 --erase-size 4096 --erase-opcode 20
-```
-
-Run `./software/AsProgrammerCLI --help` before use. The cross-platform status
-and live-validation boundary are tracked in
-[docs/design-cross-platform.md](docs/design-cross-platform.md). Linux requires
-the system libusb 1.0 runtime (normally the `libusb-1.0-0` package). The Windows
-release ZIP includes the exact hash-verified x86 libusb 1.0 runtime beside
-`AsProgrammerCLI.exe`.
-
-## Runtime bundle
-
-Keep the release directory together. Hardware libraries are loaded at run
-time, so a missing DLL disables only its programmer rather than preventing the
-application from starting.
-
-| File | Programmer |
-|---|---|
-| `CH341DLL.DLL` | CH341A |
-| `CH347DLL.DLL` | CH347 on Windows |
-| `ftd2xx.dll` | FT232H |
-| `libusb0.dll` | UsbAsp, AVRISP, and EZP2023+ |
-| `libusb-1.0.dll` | Headless CH347 CLI on Windows |
-| `buzzpirathlp.dll`, `libiconv2.dll`, `libintl3.dll` | Buzzpirat / Bus Pirate |
-
-Release packaging admits runtime files only from the checked-in `libusb0.dll`,
-one pinned upstream archive for the six legacy/vendor DLLs, and the official
-libusb archive for `libusb-1.0.dll`. It verifies every archive and exact DLL
-with SHA-256, fails if anything is missing, and never reuses an unverified
-temporary cache. The release also includes chip lists, translations, scripts,
-icons, the signed EZP driver bundle, its checksums, this README, the changelog,
-licenses, and
-[third-party notices](THIRD_PARTY_NOTICES.md).
-
-## Chip database
-
-Chip definitions are plain XML. The master `chiplist.xml` is supplemented at
-run time by separately licensed/imported lists and the update-safe local
-`chiplist-user.xml`. The four shipped catalogs currently contain 1,751 entries
-that pass the structural validator.
-
-```xml
-<W25Q64BV id="EF4017" page="256" size="8388608" vcc="3.3"/>
-```
-
-Never infer voltage, address width, page size, or erase geometry when a
-datasheet or SFDP table can establish it. To contribute a detected part, use
-`--export-chip NAME`; it produces a proposed XML entry and SFDP fixture. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for the required evidence.
+> [!WARNING]
+> Set the target voltage to match your chip **before** erase, write or verify. The board defaults to 1.8 V, so a 3.3 V part simply won't answer until you raise it — that's the safe failure, and it's deliberate.
 
 ## Building
 
-The Windows GUI targets Win32 and requires 32-bit Lazarus 4.8/FPC 3.2.2:
+Needs [Lazarus](https://www.lazarus-ide.org/) with FPC 3.2.2 (32-bit).
 
-```powershell
-powershell -ExecutionPolicy Bypass -File tools\build.ps1
-powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Release
+```sh
+powershell -ExecutionPolicy Bypass -File tools\build.ps1     # Windows
+./tools/build.sh                                             # Linux
 ```
 
-The second command builds one runnable ZIP. Runtime inputs and the compiler
-installer used by CI are hash-pinned; see [the release process](docs/releasing.md).
+Add `-Release` to zip a runnable release folder with the DLLs in place. Tests:
 
-For hardware-free POSIX tests and a compile check of the headless CLI:
-
-```bash
-./tools/build.sh
+```sh
+fpc -Mobjfpc -Sh -Fusoftware -FUtests/lib -otests/unittests.exe tests/unittests.lpr && ./tests/unittests.exe
 ```
 
-The current Windows and POSIX builds agree on 17 hardware-free suites. The
-authoritative catalog and test responsibilities are in
-[docs/testing.md](docs/testing.md).
+## Known issues
 
-## Project documentation
+- **The activity LED polarity is inferred, not measured.** It's implemented active-low from observing GPIO4 idle high with the lamp off. If the light sits on constantly and goes *dark* during operations, it's inverted — swap the two `LedBits` assignments in `software/ch347hw.pas`.
+- `software/ezpspy.log` (96 MB) is still in git history from an earlier commit and exceeds GitHub's recommended file size.
 
-| Topic | Document |
-|---|---|
-| Test suites and metadata drift | [docs/testing.md](docs/testing.md) |
-| Live CH341/CH347/EZP validation | [docs/hardware-in-loop.md](docs/hardware-in-loop.md) |
-| Release inputs and publication | [docs/releasing.md](docs/releasing.md) |
-| Production trust boundary | [docs/production-job-security.md](docs/production-job-security.md) |
-| Cross-platform architecture | [docs/design-cross-platform.md](docs/design-cross-platform.md) |
-| EEPROM Smart Write | [docs/design-eeprom-smart-write.md](docs/design-eeprom-smart-write.md) |
-| SPI NAND status | [docs/design-spi-nand.md](docs/design-spi-nand.md) |
+## Credits
 
-## Credits and license
+Chipwright builds on **[AsProgrammer](https://github.com/nofeletru/UsbAsp-flash)** by nofeletru, via AsProgrammer ProX. The chip catalogue, protocol engines and most backends are their work; this fork adds CH347 voltage control, the activity LED and the voltage-resolution fixes described above.
 
-AsProgrammer ProX builds on
-[nofeletru/UsbAsp-flash](https://github.com/nofeletru/UsbAsp-flash) and
-[therealdreg/asprogrammer-dregmod](https://github.com/therealdreg/asprogrammer-dregmod),
-with Bus Pirate work from Ian Lesnet and the community. Floyd77 documented the
-unknown-chip identification method. See the repository history for all
-contributors.
+See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for the full list. Released under the [MIT licence](LICENSE).
 
-MIT — see [LICENSE](LICENSE). Copyright © 2015 nofeletru and contributors.
+<div align="center">
+<sub>Built for people who would rather read a datasheet than replace a chip.</sub>
+</div>
