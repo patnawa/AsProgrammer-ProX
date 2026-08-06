@@ -3,6 +3,41 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.26.6.0 — the target-voltage selector actually changes the rail
+
+- Selecting 1.8 V or 3.3 V did nothing at all. Two faults stacked on top of
+  each other.
+
+  The program opens the CH347 only for the duration of an operation and
+  closes it immediately afterwards, so when the user clicks the selector the
+  device is not open. `SupportsTargetVoltage` returned False and
+  `ApplyCH347Vcc` returned without setting anything and without saying so.
+
+  `DevClose` then wound the rail back to 1.8 V on every close, so even a
+  level applied during an operation was undone the moment that operation
+  finished. Between the two, the selector could never have had a visible
+  effect.
+
+  `ApplyCH347Vcc` now opens the device when it is not already open, applies
+  the level, and closes only what it opened — the setting persists in the
+  CH347 after close, so it still governs the next operation. `DevClose` no
+  longer changes the rail at all.
+
+  The safety default did not disappear, it moved to where the vendor keeps
+  it: the hardware powers up at 1.8 V, and the program applies 1.8 V when it
+  starts. A level left standing is now one the user chose, rather than one
+  that leaked out of a previous job unnoticed.
+
+- The "no chip answered, continue anyway?" dialog is gone. It fired whenever
+  nothing replied to the id commands, which includes the ordinary case of an
+  empty socket before a chip is seated, and it had to be dismissed every
+  time while telling the user nothing the log had not already said.
+
+  A chip id *mismatch* still asks, because erasing or writing a part that is
+  not the one selected destroys data. Nothing answering cannot damage
+  anything: the operation reads FF or fails on its own. The explanation and
+  the too-fast-clock hint stay in the log.
+
 ## 4.26.5.0 — the activity LED lights for EEPROM too
 
 - The activity LED works again, and now lights for I2C work as well as SPI.

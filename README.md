@@ -17,6 +17,12 @@ SPI NOR · SPI NAND · I²C EEPROM · Microwire — across nine programmers.
 
 ---
 
+<div align="center">
+<img src="assets/chipwright-main.png" alt="Chipwright main window" width="820">
+</div>
+
+---
+
 ## Why this exists
 
 Sending **3.3 V to a 1.8 V flash chip destroys it permanently**. Sending too little only means the chip doesn't answer, and you try again.
@@ -51,7 +57,7 @@ GPIO6 is also the *only* pin Chipwright drives. The board's green activity LED b
 
 The same switch sits directly on the main window whenever a CH347 is selected: a **Target voltage** box with the three radio buttons and a `Chip:` line showing the selected part's supply voltage — the same front-screen control the board vendor's own software has. The box and the menu mirror each other, and either applies immediately while the device is open.
 
-The board powers up at 1.8 V and Chipwright restores 1.8 V when it closes, so a rail left high by a previous job can never greet the next chip you seat.
+The board powers up at 1.8 V and Chipwright applies 1.8 V when it starts, so a rail left high by a previous session can never greet the next chip you seat. Within a session the level you pick stays put — it is not wound back between operations, or picking 3.3 V would never survive the read you picked it for.
 
 ### How a chip's voltage is worked out
 
@@ -86,11 +92,47 @@ Your answer is pinned into the voltage menu, so the level in use stays visible i
 ## Getting started
 
 1. Install the CH347 driver from **[`drivers/CH347T-Driver/`](drivers/CH347T-Driver)** — the CH341PAR package behind `wch.cn 2.6.2025.4`, confirmed working with this board.
-2. Plug in the programmer. Windows should show *USB HighSpeed-SPI/I2C… CH347T* with no warning icon.
-3. Run Chipwright, press **Detect**, and check the reported chip and voltage before doing anything that writes.
+2. Plug the programmer in. Windows should show *USB HighSpeed-SPI/I2C… CH347T* with no warning icon.
+3. Download [`Chipwright-<version>.zip`](https://github.com/patnawa/Chipwright/releases) and unpack it. `Chipwright.exe` runs from the folder — no installer.
+
+## Usage
+
+The toolbar across the top is the safe order to work in, left to right.
+
+### Reading a chip
+
+| | Step | What to check |
+|:--:|---|---|
+| 1 | **Set the target voltage** | `Target voltage` on the left. `Auto` matches the chip once one is selected; otherwise pin it yourself |
+| 2 | **Detect chip** | *Chip profile* fills in and the **Chip** lamp turns green |
+| 3 | **Read chip** | Bytes appear in the hex view; *Last operation* shows the timing |
+| 4 | Save with **Ctrl+S** | |
+
+If detection finds nothing, the log says why — a wrong rail and a loose clip look identical to the chip, and both read back as all `FF`.
+
+### Writing a chip
+
+**Smart write** is the one to use. It reads the chip first, works out the minimum erase and program needed, shows you that plan, and only proceeds once you accept it. Nothing is written before you have seen what it intends to do.
 
 > [!WARNING]
-> Set the target voltage to match your chip **before** erase, write or verify. The board defaults to 1.8 V, so a 3.3 V part simply won't answer until you raise it — that's the safe failure, and it's deliberate.
+> Set the target voltage to match your chip **before** erase, write or verify. The board defaults to 1.8 V, so a 3.3 V part simply will not answer until you raise it — that is the safe failure, and it is deliberate.
+
+### Reading the status strip
+
+The four panels under the toolbar answer "why is this not working" without digging in the log:
+
+- **Connection** — which programmer is actually attached
+- **Interface / clock** — bus and SPI clock. A clip lead or long cable often cannot hold 60 MHz; a bus that cannot keep up reads back all `FF`, exactly like an empty socket. Drop to 15 MHz or slower if reads look blank
+- **Chip profile** — the selected part and whether its ID has been confirmed
+- **Last operation** — result and elapsed time
+
+### Keyboard
+
+`F5` detect · `Ctrl+O` open · `Esc` cancel · `F1` console
+
+### Command line
+
+`ChipwrightCLI.exe` drives the same engine headlessly for scripting and CI. Run it with `--help` for the current options.
 
 ## Building
 

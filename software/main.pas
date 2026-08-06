@@ -10619,16 +10619,16 @@ begin
       //เพราะชิป 1.8V ที่แค่หนีบไม่แน่นจะพังคาที่ถ้าเดาผิด
       if ProbeMv = CH347_VCC_1V8_MV then
       begin
+        //บอกในล็อก ไม่เด้งกล่องถาม
+        //
+        //ซ็อกเก็ตว่างคือสถานะปกติก่อนเสียบชิป กล่องนี้จึงเด้งตั้งแต่ยังไม่มี
+        //ใครทำอะไร แล้วบังหน้าต่างหลักไว้ ต้องกดปิดทิ้งทุกครั้ง
+        //
+        //ปุ่ม "ใช่" ของมันคือปักแรงดันขึ้น 3.3V ให้เลย ซึ่งเป็นการเดาแทนผู้ใช้
+        //ในทิศที่ทำชิปพังพอดี ถ้าของจริงเป็นชิป 1.8V ที่แค่หนีบไม่แน่น
+        //คำแนะนำอยู่ในล็อกครบแล้ว ให้เขาไปเลือกเองที่ตัวเลือกแรงดันดีกว่า
         LogPrint(STR_CH347_DEAD_1V8);
-        if CLIMode then
-          LogPrint(STR_CH347_VCC_GUIDE)
-        else if MessageDlg('AsProgrammer',
-                  STR_CH347_DEAD_1V8 + '.' + LineEnding + LineEnding +
-                  STR_CH347_DEAD_1V8_Q,
-                  mtConfirmation, [mbYes, mbNo], 0) = mrYes then
-          PinCH347VccMenu(CH347_VCC_3V3_MV)
-        else
-          LogPrint(STR_CH347_VCC_GUIDE);
+        LogPrint(STR_CH347_VCC_GUIDE);
       end
       else if ProbeMv = CH347_VCC_3V3_MV then
       begin
