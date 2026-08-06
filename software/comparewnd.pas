@@ -405,7 +405,7 @@ begin
     Dlg.Options := Dlg.Options + [ofOverwritePrompt];
     if not Dlg.Execute then Exit;
 
-    L.Add('AsProgrammer ProX, compare report');
+    L.Add('Chipwright, compare report');
     L.Add('A: ' + NameA);
     L.Add('B: ' + NameB);
     L.Add(Trim(LblSummary.Caption));

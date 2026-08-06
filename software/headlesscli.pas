@@ -41,7 +41,7 @@ end;
 
 procedure Usage;
 begin
-  Say('AsProgrammer ProX headless CLI (no LCL)');
+  Say('Chipwright headless CLI (no LCL)');
   Say;
   Say('Read-only hardware commands (CH347 over libusb):');
   Say('  AsProgrammerCLI --detect [--speed 2]');

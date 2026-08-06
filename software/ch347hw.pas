@@ -19,9 +19,8 @@ private
   FDevSPIConfig: _SPI_CONFIG;
   FTargetVoltageMv: cardinal;
   FVoltageSupported: boolean;
-  FLedOn: boolean;
-  //เขียนทั้งสองขาในการเรียกเดียว จะได้ไม่ต้องอ่านสถานะกลับมาก่อนทุกครั้ง
-  function ApplyGPIO(VccBits, LedBits: byte): boolean;
+  //ตั้งเฉพาะขาแรงดัน ห้ามแตะขาไฟแสดงการทำงาน (ดูหมายเหตุที่ตัวฟังก์ชัน)
+  function ApplyVccGPIO(VccBits: byte): boolean;
 public
   constructor Create;
   destructor Destroy; override;
@@ -33,7 +32,7 @@ public
   function SupportsTargetVoltage: boolean; override;
   function GetTargetVoltageMv: cardinal; override;
   function SetTargetVoltageMv(Millivolts: cardinal): boolean; override;
-  procedure SetActivityLED(Active: boolean); override;
+  //ไม่ override SetActivityLED โดยตั้งใจ ไฟบนบอร์ดมีวงจรขับของตัวเองอยู่แล้ว
 
   //spi
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; override;
@@ -72,7 +71,6 @@ begin
   //ยังไม่เปิดอุปกรณ์ก็ยังไม่รู้ว่าจ่ายอยู่เท่าไร 0 แปลว่าไม่รู้ ไม่ใช่ไม่มีไฟ
   FTargetVoltageMv := 0;
   FVoltageSupported := False;
-  FLedOn := False;
 end;
 
 destructor TCH347Hardware.Destroy;
@@ -136,8 +134,7 @@ begin
     //ตั้ง 1.8V ทุกครั้งที่เปิด ตรงกับที่ฮาร์ดแวร์และโปรแกรมของผู้ผลิตทำ
     //เหตุผลเดียวกัน: ถ้าเผลอค้าง 3.3V ไว้จากงานก่อน แล้วงานนี้เป็นชิป 1.8V
     //ชิปพังตั้งแต่ยังไม่ทันสั่งอะไร ค่าต่ำสุดจึงเป็นค่าเริ่มต้นที่ถูกต้อง
-    FLedOn := False;
-    if ApplyGPIO(CH347_GPIO_VCC, CH347_GPIO_ACT_LED) then
+    if ApplyVccGPIO(CH347_GPIO_VCC) then
       FTargetVoltageMv := CH347_VCC_1V8_MV
     else
     begin
@@ -153,18 +150,23 @@ begin
   Result := true;
 end;
 
-//ตั้งทั้งขาแรงดันและขาไฟแสดงการทำงานพร้อมกัน
+//ตั้งเฉพาะขาเลือกแรงดัน (GPIO6) เท่านั้น
 //
-//iEnable คลุมทั้งสองบิต ขาที่ไม่ได้อยู่ใน mask จะไม่ถูกแตะ จึงไม่ต้องอ่าน
-//สถานะเดิมกลับมาก่อน ประหยัดการคุย USB ไปหนึ่งรอบต่อการสลับหนึ่งครั้ง
-function TCH347Hardware.ApplyGPIO(VccBits, LedBits: byte): boolean;
-const
-  Mask = CH347_GPIO_VCC or CH347_GPIO_ACT_LED;
+//ห้ามแตะ GPIO4 เด็ดขาด แม้จะรู้ว่าเป็นขาไฟแสดงการทำงานก็ตาม
+//
+//บอร์ดมีวงจรขับไฟดวงนั้นจากทราฟฟิกบนบัสอยู่แล้ว ตราบใดที่ขายังเป็นอินพุต
+//(ปล่อยลอย) ไฟจะกะพริบตามงานเองโดยไม่ต้องมีใครสั่ง พอเราจับมันเป็นเอาต์พุต
+//เมื่อไร วงจรนั้นก็ถูกกดทับทันที ไฟเลยดับสนิททั้งงาน ซึ่งแย่กว่าเดิม
+//
+//เคยพลาดมาแล้วจริง ๆ: รุ่นก่อนหน้าตั้ง GPIO4 เป็นเอาต์พุตแล้วดันขึ้นสูงตอน
+//เปิดอุปกรณ์ ไฟเขียวที่เคยกะพริบตอนอ่าน EEPROM เลยหายไปทั้งดวง
+//
+//iEnable คลุมบิตเดียว ขาที่เหลือไม่ถูกแตะ จึงไม่ต้องอ่านสถานะเดิมกลับมาก่อน
+function TCH347Hardware.ApplyVccGPIO(VccBits: byte): boolean;
 begin
   if not FDevOpened then Exit(False);
-  //ทั้งสองขาเป็นขาออก ทิศทางจึงเท่ากับ mask เสมอ
-  Result := CH347GPIO_Set(FDevHandle, Mask, Mask,
-                          (VccBits or LedBits) and Mask);
+  Result := CH347GPIO_Set(FDevHandle, CH347_GPIO_VCC, CH347_GPIO_VCC,
+                          VccBits and CH347_GPIO_VCC);
 end;
 
 function TCH347Hardware.SupportsTargetVoltage: boolean;
@@ -180,38 +182,14 @@ end;
 function TCH347Hardware.SetTargetVoltageMv(Millivolts: cardinal): boolean;
 var
   VccBits: byte;
-  LedBits: byte;
 begin
   if not SupportsTargetVoltage then Exit(False);
   //ระดับที่บอร์ดจ่ายไม่ได้ต้องปฏิเสธ ไม่ใช่ปัดเป็นค่าใกล้เคียง การปัดขึ้น
   //ทำชิปพัง ส่วนการปัดลงทำให้ผู้ใช้เชื่อว่าตั้งได้แล้วทั้งที่ไม่ได้ตั้ง
   if not CH347VccDataBits(Millivolts, VccBits) then Exit(False);
 
-  if FLedOn then LedBits := 0 else LedBits := CH347_GPIO_ACT_LED;
-
-  Result := ApplyGPIO(VccBits, LedBits);
+  Result := ApplyVccGPIO(VccBits);
   if Result then FTargetVoltageMv := Millivolts;
-end;
-
-procedure TCH347Hardware.SetActivityLED(Active: boolean);
-var
-  VccBits: byte;
-  LedBits: byte;
-begin
-  if not FDevOpened then Exit;
-  if not FVoltageSupported then Exit;
-  if FLedOn = Active then Exit;
-
-  //ไฟดวงนี้ต่อแบบ active low ระดับต่ำคือติด ค่าที่อ่านได้จากเครื่องตอนไม่มี
-  //งานคือ $FF ทั้งไบต์ ซึ่งรวมขานี้ด้วย แปลว่าสูง = ดับ
-  if Active then LedBits := 0 else LedBits := CH347_GPIO_ACT_LED;
-
-  //แรงดันต้องคงเดิมระหว่างสลับไฟ อ่านจากค่าที่จำไว้ ไม่ใช่เดาเป็นศูนย์
-  if not CH347VccDataBits(FTargetVoltageMv, VccBits) then
-    VccBits := CH347_GPIO_VCC;
-
-  //ไฟไม่ติดไม่ใช่เหตุให้ล้มงาน จำสถานะไว้เท่าที่สั่งผ่านจริง
-  if ApplyGPIO(VccBits, LedBits) then FLedOn := Active;
 end;
 
 procedure TCH347Hardware.DevClose;
@@ -222,14 +200,13 @@ begin
     //ระดับที่ค้างไว้ยังอยู่จนกว่าจะถอดสาย โปรแกรมตัวถัดไปที่เปิดต่อจะเจอ
     //ค่านี้ ถ้าปล่อยค้าง 3.3V ไว้แล้วคนถัดไปเสียบชิป 1.8V คือชิปพัง
     if FVoltageSupported then
-      ApplyGPIO(CH347_GPIO_VCC, CH347_GPIO_ACT_LED);
+      ApplyVccGPIO(CH347_GPIO_VCC);
 
     CH347CloseDevice(FDevHandle);
     FDevHandle := -1;
     FDevOpened := false;
     FVoltageSupported := False;
     FTargetVoltageMv := 0;
-    FLedOn := False;
   end;
 end;
 
@@ -256,16 +233,13 @@ begin
 
   Result := CH347SPI_Init(FDevHandle, @FDevSPIConfig);
 
-  //ติดไฟตอนเริ่มงานแล้วดับตอนจบ ไม่กะพริบรายทรานสเฟอร์ เพราะการสลับ GPIO
-  //หนึ่งครั้งคือการคุย USB หนึ่งรอบ ถ้าทำทุกบล็อกที่อ่าน ความเร็วอ่านทั้งชิป
-  //จะตกลงอย่างเห็นได้ชัดเพื่อแลกกับไฟกะพริบ ซึ่งไม่คุ้ม
-  if Result then SetActivityLED(True);
+  //ไม่ยุ่งกับไฟแสดงการทำงาน วงจรบนบอร์ดกะพริบตามทราฟฟิกเองอยู่แล้ว
+  //และครอบคลุมทั้ง SPI และ I2C ซึ่งดีกว่าที่โค้ดนี้เคยทำได้
 end;
 
 procedure TCH347Hardware.SPIDeinit;
 begin
   if not FDevOpened then Exit;
-  SetActivityLED(False);
 end;
 
 function TCH347Hardware.SPIMaxTransfer: integer;

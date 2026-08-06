@@ -12019,7 +12019,7 @@ begin
 
     if ShowCredits then
     begin
-      s.Add('AsProgrammer ProX is built on the work of:');
+      s.Add('Chipwright is built on the work of:');
       s.Add('');
       s.Add('  nofeletru');
       s.Add('    AsProgrammer / UsbAsp-flash, the original program');
@@ -12051,7 +12051,7 @@ begin
     end
     else
     begin
-      s.Add('AsProgrammer ProX');
+      s.Add('Chipwright');
       s.Add('Version ' + PROX_VERSION);
       s.Add('');
       s.Add('Serial flash and EEPROM programmer for SPI, I2C and MicroWire.');
@@ -12188,7 +12188,7 @@ var
 begin
   //เครดิตย้ายมาอยู่ที่นี่ที่เดียว แถบ log ตอนเปิดโปรแกรมไม่ต้องแสดงแล้ว
   credits :=
-    'AsProgrammer ProX ' + PROX_VERSION + LineEnding +
+    'Chipwright ' + PROX_VERSION + LineEnding +
     'https://github.com/patnawa/AsProgrammer-ProX' + LineEnding + LineEnding +
     'Built on:' + LineEnding +
     '  nofeletru - AsProgrammer / UsbAsp-flash' + LineEnding +
@@ -12342,9 +12342,9 @@ begin
   LoadLangList();
 
   //เลขเวอร์ชันมาจาก appver ที่เดียว แถบชื่อหน้าต่างกับ log จึงไม่มีวันค้างเลขเก่า
-  Caption := 'AsProgrammer ProX ' + PROX_VERSION;
+  Caption := 'Chipwright ' + PROX_VERSION;
   if Log.Lines.Count > 0 then
-    Log.Lines[0] := 'AsProgrammer ProX ' + PROX_VERSION;
+    Log.Lines[0] := 'Chipwright ' + PROX_VERSION;
 
   LoadModernIcons;
   CreateWorkflowBar;

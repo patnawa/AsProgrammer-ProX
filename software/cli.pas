@@ -183,7 +183,7 @@ end;
 
 procedure Usage;
 begin
-  Say('AsProgrammer ProX ' + PROX_VERSION + ', command line mode');
+  Say('Chipwright ' + PROX_VERSION + ', command line mode');
   Say('');
   Say('  AsProgrammer.exe --read out.bin  --chip W25Q64BV');
   Say('  AsProgrammer.exe --write in.bin  --chip W25Q64BV --erase --verify');
