@@ -91,6 +91,21 @@ Your answer is pinned into the voltage menu, so the level in use stays visible i
 
 ## Getting started
 
+<table>
+<tr>
+<td width="42%"><img src="assets/programmer-hardware.jpg" alt="WCH programmer with a ZIF socket, held in a work jig"></td>
+<td>
+
+Any of the nine supported programmers will do. The one above is a WCH board with a ZIF socket — `PWR` and `RUN` on the silkscreen are the power and activity lamps.
+
+Chipwright drives the **CH347** and **CH341A** through WCH's own DLLs, so the same driver package covers both.
+
+Seat the chip with **pin 1 at the lever end** of the socket and close the lever before plugging in.
+
+</td>
+</tr>
+</table>
+
 1. Install the CH347 driver from **[`drivers/CH347T-Driver/`](drivers/CH347T-Driver)** — the CH341PAR package behind `wch.cn 2.6.2025.4`, confirmed working with this board.
 2. Plug the programmer in. Windows should show *USB HighSpeed-SPI/I2C… CH347T* with no warning icon.
 3. Download [`Chipwright-<version>.zip`](https://github.com/patnawa/Chipwright/releases) and unpack it. `Chipwright.exe` runs from the folder — no installer.
