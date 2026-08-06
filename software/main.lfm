@@ -503,10 +503,11 @@ object MainForm: TMainForm
       end
     end
     object GroupCH347Vcc: TGroupBox
-      Left = 6
+      Left = 8
       Height = 68
-      Top = 330
-      Width = 188
+      Top = 575
+      Width = 184
+      Anchors = [akTop, akLeft]
       Caption = 'Target voltage'
       TabOrder = 8
       Visible = False
@@ -543,7 +544,7 @@ object MainForm: TMainForm
         Left = 8
         Height = 15
         Top = 27
-        Width = 172
+        Width = 168
         AutoSize = False
         Caption = 'Chip: ?'
         ParentColor = False
