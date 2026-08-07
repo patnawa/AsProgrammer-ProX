@@ -298,6 +298,50 @@ begin
   end;
 end;
 
+procedure TestArmingIsSeparateFromStarting;
+var
+  S: TProgrammingSession;
+  R: string;
+begin
+  //The confirmation point asks MayArm, arms, then proceeds. Asking MayStart
+  //after arming would be asking a question it had just made true.
+  S := TProgrammingSession.Create;
+  try
+    S.Apply(seProgrammerOpened, R);
+    S.Apply(seRailConfigured, R);
+    Check('a write cannot be armed without a chip', not S.MayArm(soWrite));
+    Check('and the refusal names the chip',
+      Pos('no chip', S.ArmRefusal(soWrite)) > 0);
+
+    S.Apply(seChipDetected, R);
+    Check('still not armable without an image', not S.MayArm(soWrite));
+    //An erase carries no image, so it is armable one step earlier -- but
+    //only once the preflight has passed.
+    Check('an erase is not armable without a preflight',
+      not S.MayArm(soErase));
+
+    S.Apply(seImageLoaded, R);
+    S.Apply(sePreflightPassed, R);
+    Check('now a write is armable', S.MayArm(soWrite));
+    Check('and an erase is armable', S.MayArm(soErase));
+    Check('an armable operation has no arm refusal',
+      S.ArmRefusal(soWrite) = '');
+
+    //MayArm must not imply MayStart: the whole point of the separation.
+    Check('armable does not mean startable', not S.MayStart(soWrite));
+    S.Apply(seArmed, R);
+    Check('only arming makes it startable', S.MayStart(soWrite));
+
+    //A rail change after arming takes both away again.
+    S.Apply(seRailChanged, R);
+    Check('a rail change un-arms', not S.MayStart(soWrite));
+    Check('and makes it un-armable too, because the chip is gone',
+      not S.MayArm(soWrite));
+  finally
+    S.Free;
+  end;
+end;
+
 procedure TestStandaloneVerify;
 var
   S: TProgrammingSession;
@@ -326,6 +370,7 @@ begin
   TestNewImageRevokesArming;
   TestDisconnectClearsEverything;
   TestArmingIsSpentByARun;
+  TestArmingIsSeparateFromStarting;
   TestOperationAdmission;
   TestRefusalsNameTheEarliestGap;
   TestStandaloneVerify;

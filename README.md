@@ -206,14 +206,18 @@ Every write runs through the same chain, in this order:
 
 | | Step | If it fails |
 |:--:|---|---|
-| 1 | **Safe mode check** | Refused at the protocol layer — no menu or script can reach past it |
-| 2 | **Electrical preflight** | Refused before the first clock edge |
-| 3 | **Connection stability** — three regions read twice and compared | Refused, naming the first differing address |
-| 4 | **Protection bits** | Refused, or asks, depending on what is locked |
-| 5 | **Trusted backup** + `.json` manifest with SHA-256 | Write does not start |
-| 6 | **Erase and program** to the previewed plan | |
-| 7 | **Byte-by-byte verify** | Reported with the failing address |
-| 8 | **Second verify in a fresh USB session** | Write is reported as failed, not warned about |
+| 1 | **Chip identity, read now** — not trusted from two minutes ago | An all-`FF` or all-`00` reply is a floating bus, not a chip |
+| 2 | **Electrical preflight** against the chip that actually answered | Refused before the first clock edge |
+| 3 | **Step order** — rail, chip and preflight all still valid | Refused, naming the first missing step |
+| 4 | **Safe mode check** | Refused at the protocol layer — no menu or script can reach past it |
+| 5 | **Connection stability** — three regions read twice and compared | Refused, naming the first differing address |
+| 6 | **Protection bits** | Refused, or asks, depending on what is locked |
+| 7 | **Trusted backup** + `.json` manifest with SHA-256 | Write does not start |
+| 8 | **Erase and program** to the previewed plan | |
+| 9 | **Byte-by-byte verify** | Reported with the failing address |
+| 10 | **Second verify in a fresh USB session** | Write is reported as failed, not warned about |
+
+Step 3 is the one that catches mistakes rather than faults. Change the target rail and chip detection is revoked — a chip that answered at 3.3 V is not evidence of a chip at 1.8 V. Load a different image and the preflight that judged the previous one is revoked. Each destructive run consumes its arming, so the next part in the socket goes through the ladder again.
 
 Step 8 closes and reopens the device before re-reading, which catches driver-cached reads and contact that is marginal until something re-initialises. It is *not* a power-cycle test — no supported programmer can remove target power — and the log says so rather than implying more than it did.
 

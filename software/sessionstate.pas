@@ -126,6 +126,21 @@ type
     function MayStart(Op: TSessionOperation): boolean;
     function StartRefusal(Op: TSessionOperation): string;
 
+    // Whether everything Op needs *except* the arming is established.
+    //
+    // This program has no separate Arm button, and adding one would be a
+    // new manual step rather than a safety improvement: the operator
+    // already confirms destructive work at the Smart Write plan, the erase
+    // dialog, or --force. So the confirmation point asks MayArm, arms, and
+    // proceeds -- which enforces the *order* of everything upstream without
+    // inventing a ceremony.
+    //
+    // Keeping it separate from MayStart matters: a caller that armed and
+    // then asked MayStart would be asking a question it had just made
+    // true, which proves nothing.
+    function MayArm(Op: TSessionOperation): boolean;
+    function ArmRefusal(Op: TSessionOperation): string;
+
     property Facts: TSessionFacts read FFacts;
   end;
 
@@ -435,6 +450,24 @@ begin
   for F := Low(TSessionFact) to High(TSessionFact) do
     if (F in Needed) and not (F in FFacts) then
       Exit(SessionOperationName(Op) + ' refused: ' + MissingFactReason(F));
+end;
+
+function TProgrammingSession.MayArm(Op: TSessionOperation): boolean;
+begin
+  Result := (RequiredFacts(Op) - [sfArmed]) <= FFacts;
+end;
+
+function TProgrammingSession.ArmRefusal(Op: TSessionOperation): string;
+var
+  Needed: TSessionFacts;
+  F: TSessionFact;
+begin
+  Result := '';
+  Needed := RequiredFacts(Op) - [sfArmed];
+  for F := Low(TSessionFact) to High(TSessionFact) do
+    if (F in Needed) and not (F in FFacts) then
+      Exit(SessionOperationName(Op) + ' cannot be armed: ' +
+           MissingFactReason(F));
 end;
 
 end.

@@ -3,6 +3,47 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.32.0.0 — the admission ladder now actually gates something
+
+The `sessionstate` unit shipped in 4.27.0.0 with its rules complete and no
+button feeding it. It is wired now, and it refuses.
+
+- Events are fed at **funnels, not call sites**. `OpenDevice` for the
+  programmer, `ApplyCH347Vcc` for the rail, `MPHexEditorExChange` for the
+  buffer, and the JEDEC identity read for the chip. There are eight places
+  that load the buffer and eight that read an ID; hooking each would have
+  missed the ninth somebody adds later. The funnels are where the fact
+  actually changes.
+
+- `ProtectionGuardOK` is the single choke point all seven destructive paths
+  pass through, and it now **establishes what it needs rather than assuming
+  an earlier step did it**. That distinction was the whole difficulty: only
+  one of the seven paths ran the identity check, so a gate that trusted an
+  earlier step would have refused legitimate work on the other five —
+  capacity test, surface scan, plain write, erase range, and block erase.
+
+  So the guard reads the JEDEC identity itself, immediately before the
+  destructive step. That is strictly better than trusting an earlier check:
+  it is evidence the chip is answering *now*, not evidence it answered when
+  a button was pressed two minutes ago. An all-FF or all-00 reply is a
+  floating or held-down bus, not a chip, and stops the operation.
+
+- The guard then re-runs the electrical preflight **against the chip that
+  actually answered**, rather than the one that was selected in the UI.
+
+- Arming is asked as `MayArm`, not `MayStart`. A caller that armed and then
+  asked whether it could start would be asking a question it had just made
+  true, which proves nothing. There is deliberately no new Arm button: the
+  operator already confirms destructive work at the Smart Write plan, the
+  erase dialog, or `--force`, and the ladder enforces the *order* of
+  everything upstream of that confirmation without adding a ceremony.
+
+- What this stops, that nothing stopped before: erasing after changing the
+  target rail (chip detection is revoked, because a chip that answered at
+  3.3 V is not evidence of a chip at 1.8 V); writing an image loaded after
+  the preflight that judged the previous one; and any destructive step
+  reached while the chip has stopped answering.
+
 ## 4.31.0.0 — a backup that can answer questions, and a second opinion
 
 - Every automatic backup now writes a `.json` manifest beside the `.bin`,

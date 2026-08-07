@@ -423,11 +423,19 @@ type
   //สถานะของ session ที่ใช้ร่วมกันทั้งหน้าจอและบรรทัดคำสั่ง กติกาว่างานไหน
   //เริ่มได้เมื่อไรอยู่ใน sessionstate ที่เดียว ไม่ได้กระจายอยู่ตามปุ่ม
   //
-  //ตอนนี้ยังไม่มีปุ่มไหนป้อนเหตุการณ์เข้ามา และตั้งใจให้เป็นอย่างนั้นก่อน:
-  //การเดินสายเข้าไปทีละปุ่มในไฟล์ขนาดนี้จะได้เครื่องกันพลาดที่ถูกครึ่งเดียว
-  //ซึ่งแย่กว่าไม่มีเลย เพราะผู้ใช้จะเชื่อว่ามันคุมอยู่ ตัวหน่วยกับกติกาพร้อม
-  //และผ่านการทดสอบแล้ว รอเดินสายพร้อมกับตอนแยก main.pas ออกเป็น core/ui
+  //เหตุการณ์ถูกป้อนที่ "ทางรวม" ไม่ใช่ที่ปุ่มทีละปุ่ม: OpenDevice สำหรับ
+  //เครื่อง, ApplyCH347Vcc สำหรับราง, MPHexEditorExChange สำหรับบัฟเฟอร์,
+  //ด่านตรวจ ID ก่อนงานสำหรับชิป และ BenchPreflightOK สำหรับด่านไฟฟ้า
+  //ทางรวมพวกนี้คือที่ที่ข้อเท็จจริงเปลี่ยนจริง ๆ การไปดักที่ปุ่มจะพลาดทาง
+  //ที่ไม่มีใครนึกถึงเสมอ
   function Session: TProgrammingSession;
+
+  //ป้อนเหตุการณ์เข้าเครื่องสถานะ ล้มเหลวไม่ทำให้งานล้ม แต่เขียนลง log ไว้
+  //เพราะเหตุการณ์ที่ถูกปฏิเสธแปลว่าที่ใดที่หนึ่งเดินผิดลำดับ
+  procedure NoteSession(Event: TSessionEvent);
+
+  //ด่านลำดับขั้น: งานนี้เริ่มได้หรือยัง คืน False พร้อมเขียนเหตุผลลง log
+  function SessionAllows(Op: TSessionOperation): boolean;
 
   //สี่บรรทัดที่บอกสภาพรางไฟจริง ๆ ตอนนี้ (ขอไปเท่าไร วัดได้เท่าไร กระแส
   //เท่าไร มีไฟย้อนมาไหม) เขียนลง log ให้ผู้ใช้เห็นก่อนงานเริ่ม
@@ -1219,6 +1227,23 @@ begin
   //สภาพรางไฟตอนนี้ ทันทีที่เปิดอุปกรณ์ได้ ก่อนงานใด ๆ จะเริ่ม
   //ที่สำคัญกว่าตัวเลขคือบรรทัดที่บอกว่าอะไรที่เครื่องนี้ "วัดไม่ได้"
   LogRailReport;
+
+  //โปรแกรมนี้เปิดและปิดอุปกรณ์ทุกงาน การนับ "เปิดอุปกรณ์" เป็นการเริ่ม
+  //เซสชันใหม่ทุกครั้งจะล้างข้อเท็จจริงทิ้งทุกงาน ซึ่งไม่ใช่สิ่งที่ต้องการ
+  //เซสชันเริ่มเมื่อยังไม่เคยเริ่ม ที่เหลือคือการเปิดซ้ำของเซสชันเดิม
+  if Session.State = ssDisconnected then
+  begin
+    NoteSession(seProgrammerOpened);
+    //"ตั้งรางแล้ว" ที่นี่แปลว่า "โปรแกรมรู้ว่ากำลังจ่ายระดับไหนอยู่" ไม่ใช่
+    //"ผู้ใช้เพิ่งเลือกมา" ซึ่งเป็นความจริงตั้งแต่เปิดอุปกรณ์: บอร์ดที่ตั้ง
+    //ไม่ได้จ่ายระดับตายตัว ส่วน CH347 ตั้งต้นที่ 1.8V ตอนจ่ายไฟ
+    //
+    //คุณค่าของขั้นนี้อยู่ที่ seRailChanged ที่ล้างการตรวจเจอชิปทิ้งเมื่อราง
+    //ขยับ ไม่ใช่ที่การบังคับให้ผู้ใช้กดเลือกแรงดันก่อนถึงจะอ่านชิปได้ ซึ่ง
+    //จะทำให้ชิปที่ยังไม่รู้ว่าคืออะไรอ่านไม่ได้เลย ทั้งที่การอ่านคือวิธีเดียว
+    //ที่จะรู้ว่ามันคืออะไร
+    NoteSession(seRailConfigured);
+  end;
   result := true
 end;
 
@@ -3935,6 +3960,7 @@ begin
     end;
   end;
 
+  //ระดับตรงตามที่ขออยู่แล้ว ไม่มีอะไรขยับ
   if AsProgrammer.Programmer.GetTargetVoltageMv = Want then Exit;
 
   if not AsProgrammer.Programmer.SetTargetVoltageMv(Want) then
@@ -3944,6 +3970,9 @@ begin
   end;
 
   LogPrint(Format(STR_CH347_VCC_SET, [Want]));
+  //รางเพิ่งขยับจริง ทุกอย่างที่สรุปไว้ตอนรางเดิมใช้ไม่ได้แล้ว รวมถึงการที่
+  //ชิปเคยตอบ: ชิปที่ตอบตอน 3.3V ไม่ใช่หลักฐานว่ามีชิปอยู่ตอน 1.8V
+  NoteSession(seRailChanged);
   finally
     //ปิดคืนเฉพาะตัวที่เราเปิดเอง ห้ามไปปิดของงานที่กำลังเดินอยู่
     if OpenedHere then AsProgrammer.Programmer.DevClose;
@@ -4159,6 +4188,25 @@ begin
   Result := ProgSession;
 end;
 
+procedure NoteSession(Event: TSessionEvent);
+var
+  Refusal: string;
+begin
+  if Session.Apply(Event, Refusal) then Exit;
+  //เหตุการณ์ที่ถูกปฏิเสธไม่ใช่เหตุให้ล้มงาน แต่แปลว่ามีเส้นทางไหนสักเส้นที่
+  //เดินผิดลำดับ หรือมีทางรวมที่ยังไม่ได้ป้อนเข้ามา ทั้งสองอย่างต้องเห็น
+  LogPrint('session: ' + Refusal);
+end;
+
+function SessionAllows(Op: TSessionOperation): boolean;
+begin
+  Result := Session.MayStart(Op);
+  if Result then Exit;
+  //ข้อความบอกช่องว่างแรกที่ยังขาด ไม่ใช่รายการทั้งหมด เพราะช่องแรกคือช่องที่
+  //ผู้ใช้ต้องไปปิด ส่วนที่เหลือมักตามมาเอง
+  LogPrint('session: ' + Session.StartRefusal(Op));
+end;
+
 //ความเร็วบัสที่กำลังจะใช้จริง หน่วยเป็นเฮิรตซ์
 //
 //เมนูเก็บเป็นดัชนีของตัวหาร ไม่ใช่ตัวเลขความถี่ ด่านไฟฟ้าเทียบกับเพดานของ
@@ -4298,7 +4346,12 @@ begin
     //ผู้เรียกที่เป็นเครื่องต้องแยกได้ว่า "แรงดันผิด" ไม่ใช่ "ล้มเหลวเฉย ๆ"
     //เพราะสิ่งที่ต้องทำต่อไม่เหมือนกัน
     NoteCLIOutcome(coVoltageRefused);
-  end;
+    NoteSession(sePreflightFailed);
+  end
+  else if Session.Holds(sfChipDetected) then
+    //ด่านไฟฟ้าผ่านได้ตั้งแต่ก่อนรู้จักชิป (เส้นทางปลุกบัสเพื่อไปอ่าน ID)
+    //แต่ "ผ่านแล้ว" ในความหมายของลำดับขั้นต้องมีชิปให้ตัดสินก่อน
+    NoteSession(sePreflightPassed);
 end;
 
 //------------------------------------------------ หาความเร็วที่สายรับไหวจริง
@@ -6014,6 +6067,8 @@ end;
 //ทั้งที่คำตอบอยู่ใน status register มาตั้งแต่ต้น
 function ProtectionGuardOK(StartAddr, Len: cardinal): boolean;
 var
+  GuardID: array[0..2] of byte;
+  GuardIDText: string;
   SR1, SR2, CR: byte;
   HaveCR: boolean;
   P: TProtInfo;
@@ -6035,6 +6090,60 @@ begin
     OpFail('the protection-check range is outside the selected chip');
     Exit(False);
   end;
+
+  //ด่านลำดับขั้น: มาถึงตรงนี้ด้วยลำดับที่ถูกต้องหรือเปล่า
+  //
+  //ที่นี่คือทางรวมของทุกงานที่ทำลายข้อมูลทั้งเจ็ดเส้นทาง และอยู่หลังการ
+  //ยืนยันของผู้ใช้แล้ว (แผน Smart Write, กล่องยืนยันการลบ, หรือ --force)
+  //จึงเป็นจุดที่ถูกต้องทั้งสำหรับตรวจลำดับและสำหรับ arm
+  //
+  //ด่านนี้ "สร้าง" ข้อเท็จจริงที่ตัวเองต้องใช้ แทนที่จะเชื่อว่าขั้นก่อนหน้า
+  //ทำไว้ให้แล้ว เพราะเส้นทางทั้งเจ็ดไม่ได้ผ่านด่านตรวจ ID ชุดเดียวกัน การ
+  //สมมติว่าผ่านมาแล้วคือการปฏิเสธงานที่ถูกต้องห้าในเจ็ดเส้นทาง
+  //
+  //และการถาม ID ตรงนี้ดีกว่าการเชื่อของเก่าอยู่แล้ว: มันคือหลักฐานว่าชิป
+  //ยังตอบอยู่ ณ วินาทีก่อนจะลบมัน ไม่ใช่ตอนที่กดปุ่มเมื่อสองนาทีที่แล้ว
+  if not Session.Holds(sfChipDetected) then
+  begin
+    FillChar(GuardID, SizeOf(GuardID), $FF);
+    GuardIDText := '';
+    if UsbAsp25_ReadJEDEC9FExact(GuardID) then
+      GuardIDText := IntToHex(GuardID[0], 2) + IntToHex(GuardID[1], 2) +
+                     IntToHex(GuardID[2], 2);
+    if IsMeaninglessIdentity(GuardIDText) then
+    begin
+      //บัสลอยอ่านได้ FF บัสที่ถูกกดอ่านได้ 00 ทั้งสองไม่ใช่ชิป
+      NoteCLIOutcome(coNoChip);
+      OpFail('no chip answered the JEDEC identity read immediately before ' +
+             'this destructive operation');
+      Exit(False);
+    end;
+    LogPrint('session: chip answered ' + GuardIDText + ' before the ' +
+             'destructive step');
+    NoteSession(seChipDetected);
+  end;
+
+  //ตรวจไฟฟ้าอีกครั้งตอนที่รู้แน่แล้วว่าชิปคือตัวไหน ด่านที่วิ่งไปตอนปลุกบัส
+  //ตัดสินจากชิปที่ "เลือกไว้" ส่วนรอบนี้ตัดสินจากชิปที่ตอบจริง
+  if not BenchPreflightOK(True) then
+  begin
+    OpFail('the electrical preflight refused this destructive operation');
+    Exit(False);
+  end;
+
+  //ถามด้วย MayArm ไม่ใช่ MayStart เพราะ MayStart ต้องการ arm ซึ่งยังไม่ได้
+  //ทำ ถ้า arm ก่อนแล้วค่อยถาม MayStart ก็เท่ากับถามคำถามที่เพิ่งทำให้เป็น
+  //จริงด้วยตัวเอง ซึ่งไม่พิสูจน์อะไรเลย
+  //
+  //ถามในนามของ soErase ไม่ใช่ soWrite เพราะทางรวมนี้ใช้ร่วมกับการลบซึ่งไม่มี
+  //ภาพ ส่วนงานเขียนที่ไม่มีภาพนั้นเป็นไปไม่ได้อยู่แล้วโดยตัวเส้นทางเอง
+  if not Session.MayArm(soErase) then
+  begin
+    OpFail('the operation was reached out of order: ' +
+           Session.ArmRefusal(soErase));
+    Exit(False);
+  end;
+  NoteSession(seArmed);
 
   //โหมดอ่านอย่างเดียวมาก่อนทุกด่าน
   //
@@ -9540,6 +9649,16 @@ end;
 
 procedure TMainForm.MPHexEditorExChange(Sender: TObject);
 begin
+  //ทางรวมของบัฟเฟอร์ ทุกทางที่โหลดไฟล์ อ่านจากชิป หรือแก้ด้วยมือ ผ่านที่นี่
+  //หมด การไปดักที่ LoadFromStream ทีละจุด (มีแปดจุด) จะพลาดจุดที่เก้าที่มี
+  //คนเพิ่มทีหลังเสมอ
+  //
+  //ภาพใหม่ล้างด่านไฟฟ้าที่ผ่านไปแล้วทิ้ง เพราะด่านนั้นตัดสินภาพก่อนหน้า
+  if MPHexEditorEx.DataSize > 0 then
+    NoteSession(seImageLoaded)
+  else
+    NoteSession(seImageCleared);
+
   StatusBar.Panels.Items[0].Text := STR_SIZE+IntToStr(MPHexEditorEx.DataSize);
   if MPHexEditorEx.Modified then
   begin
@@ -14350,9 +14469,14 @@ begin
     UsbAsp25_ReadID(PreflightID);
     if not PreflightID.Got9F then
     begin
+      //ไม่ตอบ 9Fh แบบครบถ้วน = ไม่มีหลักฐานว่ามีชิปอยู่ตรงหน้า
+      NoteSession(seChipLost);
       OpFail('the chip did not return an exact JEDEC 9Fh identity');
       Exit;
     end;
+    //ชิปตอบด้วยตัวตนที่ครบถ้วนบนรางที่ตั้งอยู่ตอนนี้ นี่คือหลักฐานเดียวที่
+    //นับว่า "มีชิปอยู่" ไม่ใช่การที่ผู้ใช้เลือกชื่อรุ่นจากเมนู
+    NoteSession(seChipDetected);
 
     LastChipUID := ReadChipUID;
     if LastChipUID <> '' then LogPrint(STR_UNIQUE_ID + LastChipUID);
