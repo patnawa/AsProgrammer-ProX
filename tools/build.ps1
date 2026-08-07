@@ -167,6 +167,19 @@ Run-Suite "hardwarecapability_tests" $capabilityDir @(
   "$root\tests\hardwarecapability_tests.lpr",
   "$root\software\basehw.pas", "$root\software\electricalpreflight.pas")
 
+# The admission ladder between a button press and the bus: which facts have
+# been established, and which of them a rail change or a fresh image revokes.
+$sessionDir = Join-Path $env:TEMP "aspx-tests-session-state"
+Run-Suite "sessionstate_tests" $sessionDir @(
+  "$root\tests\sessionstate_tests.lpr", "$root\software\sessionstate.pas")
+
+# What the operator is told about the target rail, and which electrical facts
+# stop bench work rather than merely warning it.
+$railDir = Join-Path $env:TEMP "aspx-tests-rail-report"
+Run-Suite "railreport_tests" $railDir @(
+  "$root\tests\railreport_tests.lpr", "$root\software\railreport.pas",
+  "$root\software\electricalpreflight.pas")
+
 # preservation-aware whole-operation service, including deterministic
 # fail-at-every-call and randomized invariant checks
 $norDir = Join-Path $env:TEMP "aspx-tests-nor"

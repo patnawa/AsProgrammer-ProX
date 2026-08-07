@@ -5,7 +5,8 @@ unit ch347hw;
 interface
 
 uses
-  Classes, SysUtils, basehw, msgstr, ch347dll, ch341dll, utilfunc;
+  Classes, SysUtils, basehw, msgstr, ch347dll, ch341dll, utilfunc,
+  electricalpreflight;
 
 type
 
@@ -35,6 +36,11 @@ public
   function GetTargetVoltageMv: cardinal; override;
   function SetTargetVoltageMv(Millivolts: cardinal): boolean; override;
   procedure SetActivityLED(Active: boolean); override;
+
+  function GetElectricalCapabilities(
+    out Capabilities: TProgrammerElectricalCapabilities): boolean; override;
+  function GetElectricalObservation(
+    out Observation: TElectricalObservation): boolean; override;
 
   //spi
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; override;
@@ -214,6 +220,105 @@ begin
 
   Result := ApplyVccGPIO(VccBits);
   if Result then FTargetVoltageMv := Millivolts;
+end;
+
+//What this board can and cannot tell the program about its own target rail.
+//
+//The short version is that it can switch the rail and cannot observe it.
+//There is no ADC on VCC, no sense resistor in series with it, no load switch,
+//and no comparator watching for voltage arriving from the target side.  So
+//CanMeasureTargetVoltage, CanMeasureTargetCurrent, HasCurrentLimit and
+//CanDetectExternalPower are all False, and they must stay False until a
+//board exists that can actually answer.  A backend that reported True here
+//to make a preflight pass would be manufacturing the exact reassurance the
+//preflight exists to withhold.
+//
+//SignalVoltageVerified is False for a separate reason: nobody has put a scope
+//on CS/CLK/MOSI at both rail settings on this board.  The wiring implies one
+//switched supply feeds both the chip and the level the CH347 drives, and the
+//manufacturer's own UI presents it as one control, but implication is not
+//measurement.  hardware/test-procedure.md is the procedure that would settle
+//it; until someone runs it, the program says "assumed" rather than "1.8 V".
+function TCH347Hardware.GetElectricalCapabilities(
+  out Capabilities: TProgrammerElectricalCapabilities): boolean;
+var
+  P: TSerialProtocol;
+begin
+  FillChar(Capabilities, SizeOf(Capabilities), 0);
+  Capabilities.Known := True;
+  Capabilities.ProgrammerID := 'CH347';
+  //Neither the WCH DLL nor the device descriptor exposes a firmware
+  //revision.  The field must be non-empty for validation, so it carries the
+  //fact that it is unavailable rather than an invented number.
+  Capabilities.FirmwareVersion := 'unavailable';
+  Capabilities.SupportedProtocols := [spSPI, spI2C];
+
+  //DevOpen deliberately does not touch GPIO, and the DLL gives no way to
+  //park the SPI pins high impedance, so pins are not guaranteed safe at open.
+  Capabilities.PinsSafeAtOpen := False;
+  Capabilities.SupportsOpenDrain := False;
+
+  if FVoltageSupported then
+  begin
+    Capabilities.PowerCapability := pcSelectableTargetPower;
+    Capabilities.TargetMinMv := CH347_VCC_1V8_MV;
+    Capabilities.TargetMaxMv := CH347_VCC_3V3_MV;
+  end
+  else
+  begin
+    //An older DLL exports no GPIO at all.  The board still powers the target,
+    //at the level it comes up at, which the hardware documents as 1.8 V.
+    //Fixed and known beats "no target power", which would refuse every
+    //operation on a board that is in fact supplying the chip.
+    Capabilities.PowerCapability := pcFixedTargetPower;
+    Capabilities.FixedTargetMv := CH347_VCC_1V8_MV;
+  end;
+
+  //One switch moves the rail; the signal level is not separately settable.
+  Capabilities.CanSetVio := False;
+  if FTargetVoltageMv > 0 then
+    Capabilities.FixedVioMv := FTargetVoltageMv
+  else
+    Capabilities.FixedVioMv := CH347_VCC_1V8_MV;
+  Capabilities.SignalVoltageVerified := False;
+
+  Capabilities.CanDetectExternalPower := False;
+  Capabilities.CanMeasureTargetVoltage := False;
+  Capabilities.CanMeasureTargetCurrent := False;
+  Capabilities.HasCurrentLimit := False;
+
+  for P := Low(TSerialProtocol) to High(TSerialProtocol) do
+    Capabilities.MaxBusHz[P] := 0;
+  //The top of the divider table SetSPISpeed drives, and the I2C rate the
+  //DLL's fastest setting produces.
+  Capabilities.MaxBusHz[spSPI] := 60000000;
+  Capabilities.MaxBusHz[spI2C] := 750000;
+
+  Result := True;
+end;
+
+function TCH347Hardware.GetElectricalObservation(
+  out Observation: TElectricalObservation): boolean;
+begin
+  FillChar(Observation, SizeOf(Observation), 0);
+  if not FDevOpened then Exit(False);
+
+  //The board has no way to switch its target supply off, so an open device
+  //is a powered target.
+  Observation.TargetPowerEnabled := True;
+  Observation.SelectedTargetMv := FTargetVoltageMv;
+  Observation.SelectedProgrammerVioMv := FTargetVoltageMv;
+  Observation.EffectiveTargetVioMv := FTargetVoltageMv;
+
+  //Everything below is what this board cannot see.  Leaving the flags False
+  //is the whole message: "not observed" must never arrive as a zero that
+  //reads like a reading of zero.
+  Observation.ExternalPowerKnown := False;
+  Observation.TargetVoltageMeasured := False;
+  Observation.TargetCurrentMeasured := False;
+  Observation.CurrentLimitEnabled := False;
+
+  Result := True;
 end;
 
 procedure TCH347Hardware.DevClose;

@@ -53,7 +53,7 @@ That sounds obvious. It wasn't happening: the chip catalogue carries a voltage f
 
 The **CH347 II V2.13** board is the only one of the nine with a switchable target rail. It's driven from **GPIO6** — low = 3.3 V, high = 1.8 V. That pin assignment is not documented by WCH; it was recovered from the vendor binary's `CH347GPIO_Set` call sites and then confirmed against real hardware.
 
-GPIO6 is also the *only* pin Chipwright drives. The board's green activity LED blinks from bus traffic through its own circuit — SPI and I²C alike — so the software deliberately leaves GPIO4 untouched rather than replacing a lamp that already works with one that wouldn't.
+**GPIO4** is the board's green activity LED, and Chipwright has to drive it: the board does not. That was established the hard way — the code was once removed on the assumption that bus traffic lit the lamp by itself, and the lamp simply went dark. Sampling GPIO4 across 400 SPI transfers showed it never moving, so there is no drive circuit to defer to. The two pins are written with separate one-bit masks, so switching the rail can never disturb the LED or the reverse.
 
 > **Options → SPI → CH347 target voltage** — `1.8 V` · `3.3 V` · `Auto`
 
@@ -90,6 +90,25 @@ does not answer and you can try again.
 ```
 
 Your answer is pinned into the voltage menu, so the level in use stays visible instead of hiding in a variable.
+
+### Requested is not measured
+
+Opening a programmer prints what was commanded and what was observed as separate facts:
+
+```
+Requested voltage:         1.8 V
+Measured voltage:          not measurable on this programmer
+Target current:            not measurable on this programmer
+Current limit enabled:     not measurable on this programmer
+External voltage detected: not measurable on this programmer
+Signal (CS/CLK/MOSI):      1.8 V (assumed to follow the rail, not measured)
+```
+
+"not measurable" is the answer, not a gap. Showing only the requested level reads as confirmation — a CH347 with a stuck GPIO, a clip on the wrong pad, and a rail loaded down by a motherboard all display an identical "1.8 V". No CH341, CH347 or FT232H has an ADC on the target rail, a sense resistor, a load switch or backfeed detection, so today that is the honest reply for all three. A board with sensing fills the same fields and these lines start carrying real numbers with no other change.
+
+The last line is the one to take seriously. A board that switches VCC to 1.8 V while its logic keeps swinging to 3.3 V passes every other electrical check and destroys 1.8 V parts. Nobody has put a scope on this board's signal pins at both rails, so Chipwright says *assumed* rather than claiming a figure.
+
+Before CS or CLK moves, the same electrical preflight that authenticated production has always used runs under a bench policy. A rail outside the chip's range, or a signal level above what the part tolerates, stops the operation before the first clock edge. Things nobody has characterised produce a note and continue; requiring proof no supported programmer can give would just teach people to switch the gate off.
 
 ## Getting started
 

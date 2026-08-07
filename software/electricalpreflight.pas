@@ -47,6 +47,16 @@ type
     FixedVioMv: cardinal;
     VioMinMv: cardinal;
     VioMaxMv: cardinal;
+    // True only when the signal level reported above was measured on the
+    // board, at both rails, on CS, CLK and MOSI.  False means it is an
+    // inference from how the board is wired or documented.
+    //
+    // The distinction is not pedantry.  A board that switches VCC to 1.8 V
+    // while its logic keeps swinging to 3.3 V looks completely correct in
+    // every field of this record except this one, and destroys 1.8 V parts.
+    // Production refuses to run on an inference; bench work is allowed to,
+    // and is told that it is.
+    SignalVoltageVerified: boolean;
 
     CanDetectExternalPower: boolean;
     CanMeasureTargetVoltage: boolean;
@@ -99,7 +109,16 @@ type
     ExternalPowerCurrentLimited: boolean;
     TargetVoltageMeasured: boolean;
     MeasuredTargetMv: cardinal;
+    // Draw on the target rail, in microamps.  Only meaningful when
+    // TargetCurrentMeasured is set; no backend may derive it from a model
+    // name or a datasheet figure, because the whole value of the number is
+    // that it contradicts the datasheet when a board is shorted.
+    TargetCurrentMeasured: boolean;
+    MeasuredTargetUa: cardinal;
     CurrentLimitEnabled: boolean;
+    // The limit the hardware is set to, in microamps, when one is enabled.
+    // Zero means the limit exists but its value is not readable.
+    CurrentLimitUa: cardinal;
   end;
 
   TPreflightPolicy = record
@@ -110,6 +129,7 @@ type
     RequireCurrentLimitForDestructive: boolean;
     RequireExternalPowerDetection: boolean;
     RequireValidAdapterCalibration: boolean;
+    RequireVerifiedSignalVoltage: boolean;
   end;
 
   TPreflightIssueCode = (
@@ -133,6 +153,7 @@ type
     piTargetVoltageOutOfRange,
     piTargetVoltageNotMeasured,
     piSignalVoltageUnknown,
+    piSignalVoltageUnverified,
     piSignalVoltageTooHigh,
     piAdapterInputVoltageTooHigh,
     piOpenDrainUnavailable,
@@ -158,6 +179,23 @@ type
 
 procedure DefaultProductionPreflightPolicy(out Policy: TPreflightPolicy);
 
+// The policy for ordinary bench work, where the operator is the fixture.
+//
+// It differs from the production policy only in what it requires the hardware
+// to be able to *prove*.  No CH341, CH347 or FT232H has an ADC on the target
+// rail, a sense resistor, or a load switch, so a policy that demands a
+// measured voltage and an enabled current limit refuses every operation on
+// every programmer this program supports -- which teaches the operator to
+// bypass the gate rather than to trust it.
+//
+// What survives is every rule that can actually be decided today: the rail
+// against the chip's range, the signal level against the chip's maximum, the
+// clock against the slowest link in the chain, and power-source contention
+// whenever external power *is* known.  When a board with sensing arrives,
+// these flags flip and nothing else in the program changes.
+procedure DefaultInteractivePreflightPolicy(out Policy: TPreflightPolicy;
+  Destructive: boolean);
+
 function ValidateProgrammerCapabilities(
   const Capabilities: TProgrammerElectricalCapabilities;
   out ErrMsg: string): boolean;
@@ -178,6 +216,22 @@ function EvaluateElectricalPreflight(
 function PreflightIssueCodeName(Code: TPreflightIssueCode): string;
 function ProtocolName(Protocol_: TSerialProtocol): string;
 
+// Splits the issues into the ones that must stop bench work and the ones that
+// may only warn it.
+//
+// The dividing line is whether the issue is a decided fact about this chip on
+// this board, or an admission that something was never characterised.  "The
+// rail is 3.3 V and this part takes 1.8 V" is decided, and no amount of
+// operator confidence changes it, so it stops.  "This backend has never had
+// its signal level measured" is an admission; stopping on it would refuse
+// every operation on every programmer nobody has put a scope on yet, which
+// trains operators to disable the gate and takes the decided failures down
+// with it.
+//
+// Production admission does not use this function.  There, an admission is a
+// refusal, which is the whole difference between the two policies.
+function IsAdvisoryForInteractiveUse(Code: TPreflightIssueCode): boolean;
+
 implementation
 
 procedure DefaultProductionPreflightPolicy(out Policy: TPreflightPolicy);
@@ -189,6 +243,23 @@ begin
   Policy.RequireCurrentLimitForDestructive := True;
   Policy.RequireExternalPowerDetection := True;
   Policy.RequireValidAdapterCalibration := True;
+  Policy.RequireVerifiedSignalVoltage := True;
+end;
+
+procedure DefaultInteractivePreflightPolicy(out Policy: TPreflightPolicy;
+  Destructive: boolean);
+begin
+  Policy.DestructiveOperation := Destructive;
+  Policy.RequireSafePinsAtOpen := False;
+  Policy.RequireVerifiedAdapterIdentity := False;
+  Policy.RequireVoltageMeasurementForDestructive := False;
+  Policy.RequireCurrentLimitForDestructive := False;
+  Policy.RequireExternalPowerDetection := False;
+  Policy.RequireValidAdapterCalibration := False;
+  //Bench work proceeds on an unmeasured signal level, but never silently:
+  //railreport prints the level as assumed, and hardware/test-procedure.md
+  //says how to turn the assumption into a measurement.
+  Policy.RequireVerifiedSignalVoltage := False;
 end;
 
 function ValidIdentity(const Value: string; AllowSpecial: boolean): boolean;
@@ -583,6 +654,12 @@ begin
   else
     ProgrammerVio := Programmer.FixedVioMv;
 
+  if Policy.RequireVerifiedSignalVoltage and
+     (not Programmer.SignalVoltageVerified) then
+    AddIssue(Result, piSignalVoltageUnverified,
+      'the level this programmer drives on CS/CLK/MOSI has not been ' +
+      'measured at both rails');
+
   if Observation.EffectiveTargetVioMv = 0 then
     AddIssue(Result, piSignalVoltageUnknown,
       'effective target-side signal voltage is unknown')
@@ -639,6 +716,29 @@ begin
              [Observation.RequestedBusHz, Result.MaxSafeBusHz]));
 end;
 
+function IsAdvisoryForInteractiveUse(Code: TPreflightIssueCode): boolean;
+begin
+  case Code of
+    //Nobody has characterised this backend, this fixture, or this pin.
+    piProgrammerCapabilitiesUnknown,
+    piPinsNotSafeAtOpen,
+    piSignalVoltageUnknown,
+    piSignalVoltageUnverified,
+    piExternalPowerStateUnknown,
+    piTargetVoltageNotMeasured,
+    piCurrentLimitUnavailable,
+    piCurrentLimitNotEnabled,
+    piExternalPowerCurrentLimitUnavailable,
+    piAdapterIdentityUnverified,
+    piAdapterCalibrationInvalid,
+    piBusFrequencyUnknown:
+      Result := True;
+  else
+    //Everything else is a decided fact about this chip on this board.
+    Result := False;
+  end;
+end;
+
 function ProtocolName(Protocol_: TSerialProtocol): string;
 begin
   case Protocol_ of
@@ -671,6 +771,7 @@ begin
     piTargetVoltageOutOfRange: Result := 'target_voltage_out_of_range';
     piTargetVoltageNotMeasured: Result := 'target_voltage_not_measured';
     piSignalVoltageUnknown: Result := 'signal_voltage_unknown';
+    piSignalVoltageUnverified: Result := 'signal_voltage_unverified';
     piSignalVoltageTooHigh: Result := 'signal_voltage_too_high';
     piAdapterInputVoltageTooHigh: Result := 'adapter_input_voltage_too_high';
     piOpenDrainUnavailable: Result := 'open_drain_unavailable';

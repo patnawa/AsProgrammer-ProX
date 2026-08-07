@@ -16,6 +16,7 @@ uses
   operationmodel, norplanner, norengine, spi25noradapter, prodcrypto,
   prodevidence, eepromengine, eepromadapters,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
+  electricalpreflight, railreport, sessionstate,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw,
   serproghw, ezphw;
 
@@ -412,6 +413,24 @@ type
   //เข้าโหมดโปรแกรม SPI ด้วยความเร็วที่ตั้งไว้บนหน้าจอ
   //โหมดบรรทัดคำสั่งต้องเรียกเองสำหรับงานที่ไม่ได้ผ่านปุ่มบนหน้าจอ
   function EnterProgModeSPI25: boolean;
+
+  //สถานะของ session ที่ใช้ร่วมกันทั้งหน้าจอและบรรทัดคำสั่ง กติกาว่างานไหน
+  //เริ่มได้เมื่อไรอยู่ใน sessionstate ที่เดียว ไม่ได้กระจายอยู่ตามปุ่ม
+  //
+  //ตอนนี้ยังไม่มีปุ่มไหนป้อนเหตุการณ์เข้ามา และตั้งใจให้เป็นอย่างนั้นก่อน:
+  //การเดินสายเข้าไปทีละปุ่มในไฟล์ขนาดนี้จะได้เครื่องกันพลาดที่ถูกครึ่งเดียว
+  //ซึ่งแย่กว่าไม่มีเลย เพราะผู้ใช้จะเชื่อว่ามันคุมอยู่ ตัวหน่วยกับกติกาพร้อม
+  //และผ่านการทดสอบแล้ว รอเดินสายพร้อมกับตอนแยก main.pas ออกเป็น core/ui
+  function Session: TProgrammingSession;
+
+  //สี่บรรทัดที่บอกสภาพรางไฟจริง ๆ ตอนนี้ (ขอไปเท่าไร วัดได้เท่าไร กระแส
+  //เท่าไร มีไฟย้อนมาไหม) เขียนลง log ให้ผู้ใช้เห็นก่อนงานเริ่ม
+  procedure LogRailReport;
+
+  //ด่านไฟฟ้าก่อนปลุกบัส คืน False เมื่อมีเหตุที่ตัดสินได้แล้วว่าห้ามเดินต่อ
+  //เช่นรางไฟอยู่นอกช่วงที่ชิปรับได้ หรือระดับสัญญาณสูงเกินกว่าที่ชิปทน
+  //เรื่องที่ "ยังไม่มีใครวัด" จะเตือนแล้วปล่อยผ่าน ไม่ใช่ปฏิเสธ
+  function BenchPreflightOK(Destructive: boolean): boolean;
 
   //ดัมป์ตาราง SFDP ดิบ ๆ ลงไฟล์ ต้องอยู่ในโหมดโปรแกรมแล้ว
   function DumpSFDPToFile(const FileName: string; out ErrMsg: string): boolean;
@@ -1168,6 +1187,9 @@ begin
     CH347VoltageControlSeen := AsProgrammer.Programmer.SupportsTargetVoltage;
 
   LogPrint(STR_CURR_HW+AsProgrammer.Programmer.HardwareName);
+  //สภาพรางไฟตอนนี้ ทันทีที่เปิดอุปกรณ์ได้ ก่อนงานใด ๆ จะเริ่ม
+  //ที่สำคัญกว่าตัวเลขคือบรรทัดที่บอกว่าอะไรที่เครื่องนี้ "วัดไม่ได้"
+  LogRailReport;
   result := true
 end;
 
@@ -4092,11 +4114,167 @@ begin
   end;
 end;
 
+//---------------------------------------------------- ด่านไฟฟ้าก่อนปลุกบัส
+//
+//จุดนี้คือที่เดียวที่ทั้งหน้าจอ บรรทัดคำสั่ง และสคริปต์ต้องผ่านก่อน CS/CLK
+//ขยับ กติกา "ห้ามเขียนเมื่อแรงดันไม่ตรง" จึงอยู่ในหน่วยแกน (railreport กับ
+//electricalpreflight) ไม่ได้อยู่ในตัวจัดการปุ่ม ที่นี่ทำแค่รวบรวมข้อเท็จจริง
+//ส่งไปให้แกนตัดสิน แล้วรายงานผล
+
+var
+  ProgSession: TProgrammingSession = nil;
+
+function Session: TProgrammingSession;
+begin
+  if ProgSession = nil then ProgSession := TProgrammingSession.Create;
+  Result := ProgSession;
+end;
+
+//ความเร็วบัสที่กำลังจะใช้จริง หน่วยเป็นเฮิรตซ์
+//
+//เมนูเก็บเป็นดัชนีของตัวหาร ไม่ใช่ตัวเลขความถี่ ด่านไฟฟ้าเทียบกับเพดานของ
+//ชิปและของบอร์ดเป็นเฮิรตซ์ จึงต้องแปลงที่นี่ คืน 0 เมื่อไม่รู้ ซึ่งด่านจะ
+//ถือว่าเป็นเรื่องที่ยังไม่มีใครวัด ไม่ใช่เหตุให้ปฏิเสธ
+function CurrentBusHz: cardinal;
+var
+  Index: integer;
+begin
+  Result := 0;
+  case AsProgrammer.Current_HW of
+    CHW_CH347:
+      begin
+        //ตารางตัวหารของ CH347: ดัชนี 0 คือ 60MHz แล้วหารสองไปเรื่อย ๆ
+        //ตรงกับลำดับรายการในเมนู MenuCH347SPIClock*
+        Index := SetSPISpeed(0);
+        if (Index >= 0) and (Index <= 7) then
+          Result := cardinal(60000000) shr Index;
+      end;
+    CHW_FT232H:
+      begin
+        Index := SetSPISpeed(0);
+        if Index = MainForm.MenuFT232SPI30Mhz.Tag then Result := 30000000
+        else if Index = MainForm.MenuFT232SPI6Mhz.Tag then Result := 6000000;
+      end;
+  end;
+end;
+
+//ข้อกำหนดทางไฟฟ้าของชิปที่เลือกอยู่
+//
+//คืน False เมื่อไม่รู้แรงดันของชิป ซึ่งเกิดบ่อยมาก: chiplist.xml กรอกช่อง
+//vcc ไว้ไม่กี่รายการ ตัวหาสามชั้นใน utilfunc ช่วยได้เยอะแต่ไม่ครบ เมื่อไม่รู้
+//ก็ตัดสินไม่ได้ ผู้เรียกต้องเตือนแล้วปล่อยผ่าน ไม่ใช่แกล้งรู้
+function CurrentChipRequirements(
+  const Caps: TProgrammerElectricalCapabilities;
+  out Target: TTargetElectricalRequirements): boolean;
+var
+  MinMv, MaxMv: cardinal;
+begin
+  FillChar(Target, SizeOf(Target), 0);
+  Result := False;
+  if not VccRangeMv(CurrentChipVccText, MinMv, MaxMv) then Exit;
+
+  Target.Protocol := spSPI;
+  Target.VccMinMv := MinMv;
+  Target.VccMaxMv := MaxMv;
+  //ขา I/O ของแฟลชอนุกรมทนได้ถึงระดับ Vcc ของมันเอง (ดาต้าชีตเขียน
+  //Vcc + 0.4V ตอนสูงสุดสัมบูรณ์) เพดานที่ปลอดภัยจึงคือปลายบนของช่วง Vcc
+  //ห้ามใส่ค่าที่กว้างกว่านี้ เพราะนี่คือด่านเดียวที่จับกรณี "ไฟเลี้ยงสลับ
+  //แล้วแต่สัญญาณยังเป็นระดับเดิม"
+  Target.VioMaxMv := MaxMv;
+  //แค็ตตาล็อกไม่มีช่องความเร็วสูงสุดของชิป ใช้เพดานของเครื่องแทน แปลว่า
+  //ด่านนี้จะจับได้เฉพาะกรณีที่ขอเกินกว่าที่ "เครื่อง" ทำได้ ส่วนเพดานของ
+  //ชิปจริง ๆ เป็นงานของ Auto Tune Clock ไม่ใช่ของด่านนี้
+  Target.MaxBusHz := Caps.MaxBusHz[spSPI];
+  if Target.MaxBusHz = 0 then Target.MaxBusHz := 60000000;
+  Target.RequiredProgrammerID := 'any';
+  Target.RequiredAdapterID := 'none';
+  Target.RequiresOpenDrain := False;
+  //หนีบบนเมนบอร์ดคือเรื่องปกติของโปรแกรมนี้ ไฟจากภายนอกจึงไม่ใช่ความผิด
+  //ในตัวมันเอง สิ่งที่ผิดคือจ่ายไฟชนกัน ซึ่ง piPowerSourceContention จับอยู่
+  Target.AllowsExternalPower := True;
+  Result := True;
+end;
+
+//รวบรวมสิ่งที่เครื่องบอกได้ ณ ตอนนี้ ผู้เรียกทุกคนใช้ชุดเดียวกัน
+function CollectElectricalFacts(
+  out Caps: TProgrammerElectricalCapabilities;
+  out Obs: TElectricalObservation;
+  out CapsValid, ObsValid: boolean): boolean;
+begin
+  FillChar(Caps, SizeOf(Caps), 0);
+  FillChar(Obs, SizeOf(Obs), 0);
+  CapsValid := False;
+  ObsValid := False;
+  Result := AsProgrammer.Programmer <> nil;
+  if not Result then Exit;
+
+  CapsValid := AsProgrammer.Programmer.GetElectricalCapabilities(Caps);
+  ObsValid := AsProgrammer.Programmer.GetElectricalObservation(Obs);
+  //ความเร็วบัสไม่ใช่ของที่ backend รู้ มันมาจากเมนูบนหน้าจอหรือจากสวิตช์
+  //ของบรรทัดคำสั่ง เติมตรงนี้ที่เดียว ผู้เรียกจะได้ไม่ลืมทีละที่
+  if ObsValid then Obs.RequestedBusHz := CurrentBusHz;
+end;
+
+procedure LogRailReport;
+var
+  Caps: TProgrammerElectricalCapabilities;
+  Obs: TElectricalObservation;
+  CapsValid, ObsValid: boolean;
+  Lines: TRailLines;
+  i: integer;
+begin
+  if not CollectElectricalFacts(Caps, Obs, CapsValid, ObsValid) then Exit;
+  Lines := RailReportLines(BuildRailReport(Caps, Obs, CapsValid, ObsValid));
+  for i := 0 to High(Lines) do LogPrint(Lines[i]);
+end;
+
+function BenchPreflightOK(Destructive: boolean): boolean;
+var
+  Caps: TProgrammerElectricalCapabilities;
+  Adapter: TAdapterElectricalCapabilities;
+  Obs: TElectricalObservation;
+  Target: TTargetElectricalRequirements;
+  Verdict: TBenchVerdict;
+  CapsValid, ObsValid: boolean;
+  Lines: TRailLines;
+  i: integer;
+begin
+  Result := True;
+  if not CollectElectricalFacts(Caps, Obs, CapsValid, ObsValid) then Exit;
+
+  //ไม่มีอะแดปเตอร์ที่ประกาศตัวได้ในโปรแกรมนี้ ปล่อยว่างไว้ตรง ๆ ดีกว่า
+  //กรอกค่าเดาแล้วให้ด่านเชื่อว่ามีของที่ไม่มีจริง
+  FillChar(Adapter, SizeOf(Adapter), 0);
+  Adapter.Present := False;
+
+  if not CurrentChipRequirements(Caps, Target) then
+  begin
+    //ไม่รู้แรงดันของชิป ก็ไม่มีอะไรให้เทียบ ทางที่ถูกคือบอกตรง ๆ แล้วให้
+    //ด่านเดิม (CH347ChipVccGuidance กับ AskChipVccFromDatasheet) ทำงานต่อ
+    //การปฏิเสธตรงนี้จะทำให้ชิปส่วนใหญ่ในแค็ตตาล็อกใช้งานไม่ได้เลย
+    LogPrint('preflight note: the chip supply voltage is unknown, so the ' +
+             'rail could not be checked against it');
+    Exit;
+  end;
+
+  Verdict := EvaluateBenchPreflight(Caps, Adapter, Target, Obs, Destructive);
+  Lines := BenchVerdictLines(Verdict);
+  for i := 0 to High(Lines) do LogPrint(Lines[i]);
+
+  Result := Verdict.Allowed;
+  //ล้มก่อนที่ CS หรือ CLK จะขยับ ไม่ใช่ล้มระหว่างทาง
+  if not Result then
+    LogPrint('preflight refused the operation; the bus was not started');
+end;
+
 function EnterProgModeSPI25: boolean;
 begin
   //ตั้งแรงดันก่อนปลุกบัสเสมอ ถ้าตั้งไม่ได้ตามที่ขอต้องไม่เดินงานต่อ
   //การเขียนชิป 1.8V ด้วยไฟ 3.3V ทำให้ชิปพังถาวร ยอมล้มงานดีกว่า
   if not ApplyCH347Vcc then Exit(False);
+  //แล้วค่อยถามด่านไฟฟ้าว่าระดับที่จ่ายอยู่ใช้กับชิปตัวนี้ได้จริงไหม
+  //ApplyCH347Vcc บอกได้แค่ว่า "ตั้งได้ตามที่ขอ" ไม่ได้บอกว่าที่ขอนั้นถูก
+  if not BenchPreflightOK(False) then Exit(False);
   Result := EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
 end;
 

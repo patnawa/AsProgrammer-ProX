@@ -110,6 +110,19 @@ run_suite hardwarecapability_tests "$capability" \
   tests/hardwarecapability_tests.lpr \
   software/basehw.pas software/electricalpreflight.pas
 
+# The admission ladder between a button press and the bus: which facts have
+# been established, and which of them a rail change or a fresh image revokes.
+session="$tmp/session-state"
+run_suite sessionstate_tests "$session" \
+  tests/sessionstate_tests.lpr software/sessionstate.pas
+
+# What the operator is told about the target rail, and which electrical facts
+# stop bench work rather than merely warning it.
+rail="$tmp/rail-report"
+run_suite railreport_tests "$rail" \
+  tests/railreport_tests.lpr software/railreport.pas \
+  software/electricalpreflight.pas
+
 nor="$tmp/nor"
 run_suite norengine_tests "$nor" \
   tests/norengine_tests.lpr tests/virtualspi25.pas \

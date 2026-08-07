@@ -735,6 +735,9 @@ begin
   Result.FixedVioMv := 0;
   Result.VioMinMv := 1200;
   Result.VioMaxMv := 5000;
+  //A fixture that measures everything else has had a scope on its signal
+  //pins too.  The unverified case is exercised on its own below.
+  Result.SignalVoltageVerified := True;
   Result.CanDetectExternalPower := True;
   Result.CanMeasureTargetVoltage := True;
   Result.CanMeasureTargetCurrent := True;
@@ -880,6 +883,16 @@ begin
                                         Observation, Policy);
   CheckBlockedBy(Report, piPinsNotSafeAtOpen,
                  'unsafe initial pin state is blocked');
+
+  //A supply that switches while the logic keeps swinging at the old level
+  //passes every other field in this record.  Production will not run on a
+  //programmer whose signal level is an inference rather than a measurement.
+  ChangedProgrammer := Programmer;
+  ChangedProgrammer.SignalVoltageVerified := False;
+  Report := EvaluateElectricalPreflight(ChangedProgrammer, Adapter, Target,
+                                        Observation, Policy);
+  CheckBlockedBy(Report, piSignalVoltageUnverified,
+                 'an unmeasured signal level is blocked in production');
 
   ChangedTarget := Target;
   ChangedTarget.RequiredAdapterID := 'any';

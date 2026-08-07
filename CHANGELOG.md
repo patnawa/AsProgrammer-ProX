@@ -3,6 +3,67 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.27.0.0 — what was asked for and what was measured are no longer the same line
+
+- The program used to show the rail it had *asked* for and nothing else, which
+  reads as confirmation. An operator sees "1.8 V", and there is no way to tell
+  that from a board that actually measured 1.79 V and agreed. A CH347 with a
+  stuck GPIO, a clip on the wrong pad, and a rail loaded down by a motherboard
+  all displayed exactly the same "1.8 V".
+
+  Opening a programmer now prints what is commanded and what is observed as
+  separate facts:
+
+      Requested voltage:         1.8 V
+      Measured voltage:          not measurable on this programmer
+      Target current:            not measurable on this programmer
+      Current limit enabled:     not measurable on this programmer
+      External voltage detected: not measurable on this programmer
+      Signal (CS/CLK/MOSI):      1.8 V (assumed to follow the rail, not measured)
+
+  "not measurable" is the answer, not a gap in the report. No CH341, CH347 or
+  FT232H has an ADC on the target rail, a sense resistor, a load switch, or
+  backfeed detection, so today that is the honest reply for all three. When a
+  board with sensing arrives it fills the observation and these lines start
+  carrying real numbers with no other change.
+
+- `EnterProgModeSPI25` — the one place CS and CLK start moving for the whole
+  program, GUI, CLI and scripts alike — now runs the same electrical preflight
+  that authenticated production has always used, under a bench policy. A rail
+  outside the chip's range, or a signal level above what the chip tolerates,
+  stops the operation before the first clock edge rather than after it.
+
+  The bench policy differs from the production policy only in what it demands
+  the hardware be able to *prove*. A policy that required a measured voltage
+  and an enabled current limit would refuse every operation on every programmer
+  this program supports, which teaches operators to bypass the gate and takes
+  the decided failures down with it. So an uncharacterised backend produces a
+  note and continues; a wrong rail produces a refusal. Production admission is
+  unchanged and still refuses both.
+
+- The signal level a programmer drives on CS/CLK/MOSI is now tracked separately
+  from the supply, and separately again from whether anyone has measured it. A
+  board that switches VCC to 1.8 V while its logic keeps swinging to 3.3 V
+  passes every other electrical check and destroys 1.8 V parts; this is the
+  only field that catches it. Nobody has put a scope on the CH347 board's
+  signal pins at both rail settings, so the program says "assumed" rather than
+  claiming a figure, and `hardware/test-procedure.md` records how to settle it.
+  Production now refuses a programmer whose signal level is an inference.
+
+- New `sessionstate` unit: the admission ladder from Disconnected through
+  RailConfigured, ChipDetected, ImageLoaded, PreflightPassed and Armed to
+  Completed, with the revocations that carry the safety. Changing the target
+  rail invalidates chip detection and arming, because a chip that answered at
+  3.3 V is not evidence of a chip at 1.8 V; loading a different image
+  invalidates the preflight that judged the previous one; one arming buys
+  exactly one destructive run.
+
+  The unit and its rules are complete and tested. No button feeds it events
+  yet, deliberately: wiring a safety machine into a 580 KB form one call site
+  at a time produces one that is half correct, which is worse than none at all
+  because operators believe it is watching. It is wired when `main.pas` is
+  split into core and UI.
+
 ## 4.26.6.0 — the target-voltage selector actually changes the rail
 
 - Selecting 1.8 V or 3.3 V did nothing at all. Two faults stacked on top of
