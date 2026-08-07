@@ -37,10 +37,11 @@ cp tools/ch347smoke.lpr software/ch347proto.pas software/ch347usb.pas \
 )
 
 mkdir -p "$work/units"
-fpc -Mobjfpc -Sh -Fusoftware -FU"$work/units" -FE"$work" \
+# -o names the binary for the program, not for the .lpr it was built from.
+fpc -Mobjfpc -Sh -Fusoftware -FU"$work/units" -FE"$work" -oChipwrightCLI \
   software/AsProgrammerCLI.lpr >/dev/null
 
 echo "HIL mode=readonly target=ch347-libusb"
 "$work/ch347smoke" 2>&1 | tee "$artifact_dir/ch347-libusb-readonly.log"
-"$work/AsProgrammerCLI" --detect 2>&1 | tee -a "$artifact_dir/ch347-libusb-readonly.log"
+"$work/ChipwrightCLI" --detect 2>&1 | tee -a "$artifact_dir/ch347-libusb-readonly.log"
 echo "PASS: smoke and headless CLI reads completed; no write opcode was sent"

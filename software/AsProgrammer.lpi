@@ -42,7 +42,7 @@
           <Version Value="11"/>
           <PathDelim Value="\"/>
           <Target>
-            <Filename Value="AsProgrammer"/>
+            <Filename Value="Chipwright"/>
           </Target>
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir);JediInc"/>
@@ -208,7 +208,7 @@
     <Version Value="11"/>
     <PathDelim Value="\"/>
     <Target>
-      <Filename Value="AsProgrammer"/>
+      <Filename Value="Chipwright"/>
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir);JediInc"/>
