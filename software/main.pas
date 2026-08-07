@@ -16,7 +16,7 @@ uses
   operationmodel, norplanner, norengine, spi25noradapter, prodcrypto,
   prodevidence, eepromengine, eepromadapters,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
-  electricalpreflight, railreport, sessionstate,
+  electricalpreflight, railreport, sessionstate, clocktune,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw,
   serproghw, ezphw;
 
@@ -46,6 +46,8 @@ type
     MenuFT232SPI6Mhz: TMenuItem;
     MenuHWCH347: TMenuItem;
     MenuCH347SPIClock: TMenuItem;
+    MenuSPIClockSeparator: TMenuItem;
+    MenuAutoTuneClock: TMenuItem;
     MenuCH347SPIClock468_75KHz: TMenuItem;
     MenuCH347SPIClock60MHz: TMenuItem;
     MenuCH347SPIClock30MHz: TMenuItem;
@@ -329,6 +331,7 @@ type
     procedure DebugconsoleMenuItemClick(Sender: TObject);
     procedure ListcomportsMenuItemClick(Sender: TObject);
     procedure MenuCH347VccClick(Sender: TObject);
+    procedure MenuAutoTuneClockClick(Sender: TObject);
     procedure RadioCH347VccChange(Sender: TObject);
     procedure SpeedButton1Click(Sender: TObject);
     procedure StartAddressEditChange(Sender: TObject);
@@ -431,6 +434,17 @@ type
   //เช่นรางไฟอยู่นอกช่วงที่ชิปรับได้ หรือระดับสัญญาณสูงเกินกว่าที่ชิปทน
   //เรื่องที่ "ยังไม่มีใครวัด" จะเตือนแล้วปล่อยผ่าน ไม่ใช่ปฏิเสธ
   function BenchPreflightOK(Destructive: boolean): boolean;
+
+  //หาความเร็ว SPI ที่สายชุดนี้รับไหวจริง แล้วติ๊กเมนูให้ตามนั้น
+  //ต้องอยู่ในโหมดโปรแกรมแล้ว (เปิดอุปกรณ์ไว้) ก่อนเรียก
+  //คืน False เมื่อหาไม่ได้ ซึ่งรวมถึงกรณีที่ต่อไม่ติดกับกรณีที่ไม่เสถียร
+  //แม้ที่คล็อกช้าที่สุด สองอย่างนี้แยกกันในข้อความที่เขียนลง log
+  function AutoTuneSPIClock: boolean;
+
+  //อ่านพื้นที่ตัวอย่างสองรอบแล้วเทียบ ก่อนจะยอมให้ลบหรือเขียน
+  //ชิปที่ตอบคำถามเดียวกันสองแบบ แปลว่าสำรองที่เพิ่งอ่านมาก็เชื่อไม่ได้
+  //ต้องอยู่ในโหมดโปรแกรมแล้วก่อนเรียก
+  function ConnectionStableForDestructive: boolean;
 
   //ดัมป์ตาราง SFDP ดิบ ๆ ลงไฟล์ ต้องอยู่ในโหมดโปรแกรมแล้ว
   function DumpSFDPToFile(const FileName: string; out ErrMsg: string): boolean;
@@ -4267,6 +4281,250 @@ begin
     LogPrint('preflight refused the operation; the bus was not started');
 end;
 
+//------------------------------------------------ หาความเร็วที่สายรับไหวจริง
+//
+//README บอกอยู่แล้วว่าสายหนีบหรือสายยาวไม่รอดที่ 60MHz แล้วอ่านกลับได้ FF
+//การปล่อยให้ผู้ใช้เลือกเองคือให้เขาเดาระหว่างเมนูตัวเลขที่ไม่มีผลตอบกลับ
+//เร็วไปได้ขยะที่หน้าตาเหมือนชิปว่าง ช้าไปเสียเวลาเป็นนาทีต่อเมกะไบต์
+//และไม่มีอะไรบอกว่าตอนนี้อยู่ฝั่งไหนของเส้น ที่นี่คือตัวหาเส้นนั้นให้
+//
+//กติกาการตัดสินอยู่ใน clocktune ซึ่งทดสอบด้วยชิปปลอมในหน่วยความจำได้ครบ
+//ทุกกรณี ที่นี่ทำแค่ส่วนที่ต้องแตะฮาร์ดแวร์จริง: ติ๊กเมนู ปลุกบัส อ่าน ID
+//และอ่านข้อมูลจริงมาทำลายพิมพ์
+
+//ตัวอ่านของเครื่องทดสอบความจุ ใช้ซ้ำที่นี่เพราะเป็นทางอ่านแบบเดียวกับที่งาน
+//จริงใช้ ตัวจริงอยู่ท้ายไฟล์ ประกาศล่วงหน้าไว้ให้สองฟังก์ชันข้างล่างเรียกได้
+function CapTestRead(Address: QWord; Len: cardinal; out Data: TBytes;
+  out ErrorText: string): boolean; forward;
+
+type
+  TSPIClockRung = record
+    Hz: cardinal;
+    Tag: integer;
+  end;
+
+var
+  //บันไดความเร็วของงานปรับจูนรอบนี้ เรียงช้าไปเร็ว ตรงตามที่ clocktune ต้องการ
+  TuneRungs: array of TSPIClockRung;
+
+//บันไดความเร็วเป็นเฮิรตซ์ พร้อม Tag ของเมนูที่คู่กัน
+//
+//รับเฉพาะเครื่องที่รู้ความถี่จริงของทุกขั้น: CH347 กับ FT232H ส่วนเครื่องที่
+//เมนูบอกแต่ชื่อขั้นโดยไม่มีตัวเลขที่ยืนยันได้ ไม่เอามาปรับจูน เพราะการเดา
+//ความถี่แล้วรายงานว่า "จูนไว้ที่ 3MHz" ทั้งที่ไม่รู้ว่าใช่หรือเปล่า แย่กว่า
+//การบอกตรง ๆ ว่าเครื่องนี้ยังไม่รองรับ
+function BuildSPIClockRungs: integer;
+var
+  Items: array[0..15] of TMenuItem;
+  Count, i, N: integer;
+  Hz: cardinal;
+begin
+  SetLength(TuneRungs, 0);
+  Result := 0;
+  if (AsProgrammer.Current_HW <> CHW_CH347) and
+     (AsProgrammer.Current_HW <> CHW_FT232H) then Exit;
+
+  for i := 0 to High(Items) do Items[i] := nil;
+  Count := SPISpeedMenuLadder(Items);
+  if Count < 2 then Exit;
+
+  N := 0;
+  //เมนูเรียงเร็วไปช้า บันไดต้องเรียงกลับกัน
+  for i := Count - 1 downto 0 do
+  begin
+    Hz := 0;
+    case AsProgrammer.Current_HW of
+      CHW_CH347:
+        //ตารางตัวหารของ CH347: Tag คือจำนวนครั้งที่หาร 60MHz ด้วยสอง
+        if (Items[i].Tag >= 0) and (Items[i].Tag <= 7) then
+          Hz := cardinal(60000000) shr Items[i].Tag;
+      CHW_FT232H:
+        if Items[i] = MainForm.MenuFT232SPI30Mhz then Hz := 30000000
+        else if Items[i] = MainForm.MenuFT232SPI6Mhz then Hz := 6000000;
+    end;
+    if Hz = 0 then Continue;
+    SetLength(TuneRungs, N + 1);
+    TuneRungs[N].Hz := Hz;
+    TuneRungs[N].Tag := Items[i].Tag;
+    Inc(N);
+  end;
+  Result := N;
+end;
+
+function TuneTagForHz(Hz: cardinal): integer;
+var
+  i: integer;
+begin
+  for i := 0 to High(TuneRungs) do
+    if TuneRungs[i].Hz = Hz then Exit(TuneRungs[i].Tag);
+  Result := -1;
+end;
+
+//พิมพ์ของชิปที่คล็อกหนึ่ง ๆ
+//
+//ไม่ใช้แค่ JEDEC ID สามไบต์ เพราะคล็อกที่พังเฉพาะทรานสเฟอร์ยาวจะผ่านการอ่าน
+//สามไบต์ได้สบาย ๆ แล้วไปพังตอนอ่านจริงซึ่งสายเกินไป จึงผนวก CRC ของข้อมูล
+//จริง 4KB เข้าไปด้วย นั่นคือทรานสเฟอร์แบบเดียวกับที่งานอ่านทั้งชิปใช้
+function TuneIdentityReader(ClockHz: cardinal; out Identity: string): boolean;
+var
+  Tag: integer;
+  ID: array[0..2] of byte;
+  Data: TBytes;
+  Err: string;
+  Len: cardinal;
+begin
+  Identity := '';
+  Result := False;
+
+  Tag := TuneTagForHz(ClockHz);
+  if Tag < 0 then Exit;
+  if not EnterProgMode25(Tag, MainForm.MenuSendAB.Checked) then Exit;
+
+  if not UsbAsp25_ReadJEDEC9FExact(ID) then Exit;
+  Identity := IntToHex(ID[0], 2) + IntToHex(ID[1], 2) + IntToHex(ID[2], 2);
+
+  Len := 4096;
+  if (CurrentICParam.Size > 0) and (CurrentICParam.Size < Len) then
+    Len := CurrentICParam.Size;
+  Data := nil;
+  if not CapTestRead(0, Len, Data, Err) then Exit;
+  if cardinal(Length(Data)) <> Len then Exit;
+  //ทรานสเฟอร์สั้นกว่าที่ขอคือสัญญาณของสายที่ชายขอบ ไม่ใช่ข้อมูลที่สั้นลง
+  Identity := Identity + '-' +
+    IntToHex(UpdateCRC32($FFFFFFFF, @Data[0], Len), 8);
+  Result := True;
+end;
+
+function AutoTuneSPIClock: boolean;
+var
+  Ladder: TClockLadder;
+  Tune: TTuneResult;
+  Count, i, Tag: integer;
+  Items: array[0..15] of TMenuItem;
+  MenuCount: integer;
+begin
+  Result := False;
+  Count := BuildSPIClockRungs;
+  if Count < 2 then
+  begin
+    LogPrint('auto tune: this programmer does not expose a clock ladder with ' +
+             'known frequencies; nothing to tune');
+    Exit;
+  end;
+
+  SetLength(Ladder, Count);
+  for i := 0 to Count - 1 do Ladder[i] := TuneRungs[i].Hz;
+
+  LogPrint(Format('auto tune: probing %d clocks from %s to %s, three reads ' +
+    'each', [Count, ClockText(Ladder[0]), ClockText(Ladder[Count - 1])]));
+
+  //สามรอบต่อขั้น เพราะสองรอบที่บังเอิญตรงกันเกิดขึ้นบ่อยบนคล็อกที่ชายขอบ
+  //ถอยหนึ่งขั้นเป็นระยะเผื่อ เส้นที่วัดได้ตอนบอร์ดยังเย็นและโต๊ะยังนิ่ง
+  //ไม่ใช่เส้นที่อยู่ทนไปทั้งบ่าย
+  Tune := AutoTuneClock(Ladder, @TuneIdentityReader, 3, 1);
+  LogPrint('auto tune: ' + Tune.Detail);
+
+  case Tune.Status of
+    tsNoAnswer:
+      begin
+        LogPrint('auto tune: no clock produced an identity. Check the rail, ' +
+                 'the orientation of pin 1, and that the chip is seated');
+        Exit;
+      end;
+    tsUnstableAtSlowest:
+      begin
+        //สำคัญที่สุดคือห้ามบอกว่า "ลองช้ากว่านี้" เพราะช้ากว่านี้ไม่มีแล้ว
+        //และไม่ใช่ทางแก้ ปัญหาอยู่ที่หน้าสัมผัส
+        LogPrint('auto tune: the connection itself is unstable. Reseat the ' +
+                 'clip or the socket; a slower clock will not help');
+        Exit;
+      end;
+  end;
+
+  //ติ๊กเมนูให้ตรงกับที่จูนได้ ผู้ใช้จะได้เห็นค่าที่กำลังใช้อยู่ในที่เดิม
+  //ไม่ใช่เก็บไว้ในตัวแปรลับที่ไม่มีใครเห็น
+  Tag := TuneTagForHz(Tune.ChosenHz);
+  for i := 0 to High(Items) do Items[i] := nil;
+  MenuCount := SPISpeedMenuLadder(Items);
+  for i := 0 to MenuCount - 1 do
+    Items[i].Checked := Items[i].Tag = Tag;
+
+  LogPrint(Format('auto tune: using %s (stable to %s)',
+    [ClockText(Tune.ChosenHz), ClockText(Tune.HighestStableHz)]));
+  //กลับไปอยู่ที่ความเร็วที่เพิ่งเลือก ก่อนคืนการควบคุมให้ผู้เรียก
+  Result := EnterProgModeSPI25;
+end;
+
+function ConnectionStableForDestructive: boolean;
+const
+  SAMPLE_LEN = 4096;
+var
+  Samples: array of TSamplePair;
+  Addresses: array[0..2] of cardinal;
+  Size, Len: cardinal;
+  i: integer;
+  Err: string;
+  V: TStabilityVerdict;
+begin
+  Size := CurrentICParam.Size;
+  if Size = 0 then
+  begin
+    //ไม่รู้ขนาดชิปก็ไม่รู้ว่าจะอ่านตรงไหน และ "ตรวจไม่ได้" ต้องไม่กลายเป็น
+    //"ผ่าน" เด็ดขาด
+    LogPrint('connection check refused the operation: the chip size is ' +
+             'unknown, so no sample region could be chosen');
+    Exit(False);
+  end;
+
+  Len := SAMPLE_LEN;
+  if Size < Len then Len := Size;
+  Addresses[0] := 0;
+  if Size <= Len then
+  begin
+    //ชิปเล็กกว่าหนึ่งตัวอย่าง อ่านทั้งตัวสองรอบไปเลย
+    SetLength(Samples, 1);
+  end
+  else
+  begin
+    //หัว กลาง ท้าย เพราะสายที่ชายขอบมักพังไม่เท่ากันตลอดชิป และการสุ่มอ่าน
+    //แต่หัวชิปคือการตรวจส่วนที่ปกติดีที่สุดอยู่แล้ว
+    Addresses[1] := (Size div 2) and not (Len - 1);
+    Addresses[2] := Size - Len;
+    SetLength(Samples, 3);
+  end;
+
+  for i := 0 to High(Samples) do
+  begin
+    Samples[i].Address := Addresses[i];
+    //สองรอบต้องเป็นการอ่านคนละครั้งจริง ๆ ไม่ใช่ก๊อปบัฟเฟอร์เดิม
+    Samples[i].FirstOk := CapTestRead(Addresses[i], Len,
+                                      Samples[i].First, Err);
+    Samples[i].SecondOk := CapTestRead(Addresses[i], Len,
+                                       Samples[i].Second, Err);
+  end;
+
+  V := EvaluateSampleStability(Samples);
+  if V.Stable then
+  begin
+    LogPrint('connection check: ' + V.Reason);
+    if V.AllBlank then
+      LogPrint('connection check: the chip may be blank, or may not be ' +
+               'connected; this check cannot tell those apart');
+    Exit(True);
+  end;
+
+  LogPrint('connection check refused the operation: ' + V.Reason);
+  LogPrint(Format('connection check: sample at %.8X failed',
+                  [V.FailedAddress]));
+  if V.HasOffset then
+    //ตำแหน่งไบต์แรกที่ไม่ตรง ไม่ใช่แค่ "ไม่ผ่าน"
+    LogPrint(Format('connection check: first difference at address %.8X',
+                    [V.FirstDifferingOffset]));
+  LogPrint('connection check: erase and write are not allowed while the ' +
+           'chip answers the same question two different ways');
+  Result := False;
+end;
+
 function EnterProgModeSPI25: boolean;
 begin
   //ตั้งแรงดันก่อนปลุกบัสเสมอ ถ้าตั้งไม่ได้ตามที่ขอต้องไม่เดินงานต่อ
@@ -5688,6 +5946,22 @@ begin
      (Len > ChipSize - StartAddr) then
   begin
     OpFail('the protection-check range is outside the selected chip');
+    Exit(False);
+  end;
+
+  //ก่อนอย่างอื่นทั้งหมด: ชิปตัวนี้ตอบคำถามเดียวกันเหมือนเดิมทุกครั้งไหม
+  //
+  //คล็อกที่จูนแล้วพิสูจน์ได้แค่ว่าทะเบียนสามไบต์กลับมาครบ ไม่ได้พิสูจน์ว่า
+  //ข้อมูลเป็นเมกะไบต์จะกลับมาครบด้วย ถ้าชิปตอบไม่เหมือนเดิม สิ่งที่พังไม่ใช่
+  //แค่งานนี้ แต่รวมถึงไฟล์สำรองที่เพิ่งอ่านไปด้วย ซึ่งคือสิ่งเดียวที่จะกู้
+  //กลับได้ตอนลบพลาด จึงต้องปฏิเสธ ไม่ใช่ลองใหม่
+  //
+  //ไม่มีทางลัดผ่านด้วย --force โดยตั้งใจ: --force แปลว่า "ฉันรู้ว่ากำลังทำ
+  //อะไรอยู่" ซึ่งใช้กับเรื่องที่ผู้ใช้รู้ได้ ส่วนสายที่หลุด ๆ ติด ๆ ไม่ใช่
+  //เรื่องที่ใครยืนยันแทนได้
+  if not ConnectionStableForDestructive then
+  begin
+    OpFail('the connection is not stable enough to erase or write');
     Exit(False);
   end;
 
@@ -9228,6 +9502,32 @@ begin
   //เมนูไม่ถูกปิดตอนงานเดิน คลิกซ้อนแล้วอุปกรณ์ตัวเดียวกันโดนสองงานพร้อมกัน
   if OperationRunning then Exit;
   RunChipDoctor;
+end;
+
+//หาความเร็วที่สายชุดนี้รับไหว แล้วติ๊กเมนูให้ตามนั้น
+//
+//เปิดและปิดอุปกรณ์เองครบวงจร เหมือนงานอื่นในโปรแกรมนี้ ที่นี่จึงเป็นที่เดียว
+//ที่ผู้ใช้ต้องกด ไม่ต้องเข้าโหมดโปรแกรมเองก่อน
+procedure TMainForm.MenuAutoTuneClockClick(Sender: TObject);
+begin
+  if OperationRunning then Exit;
+  if AsProgrammer.Programmer = nil then Exit;
+
+  LockControl;
+  try
+    if not OpenDevice then Exit;
+    try
+      //ต้องผ่านด่านไฟฟ้าก่อนเหมือนงานอื่นทุกงาน การไล่คล็อกคือการยิง CS/CLK
+      //เข้าไปหลายสิบรอบ ซึ่งอันตรายเท่ากับงานอ่านถ้ารางไฟผิด
+      if not EnterProgModeSPI25 then Exit;
+      AutoTuneSPIClock;
+    finally
+      ExitProgMode25;
+      AsProgrammer.Programmer.DevClose;
+    end;
+  finally
+    UnlockControl;
+  end;
 end;
 
 procedure TMainForm.MenuConnectionDoctorClick(Sender: TObject);

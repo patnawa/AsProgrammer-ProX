@@ -180,6 +180,13 @@ Run-Suite "railreport_tests" $railDir @(
   "$root\tests\railreport_tests.lpr", "$root\software\railreport.pas",
   "$root\software\electricalpreflight.pas")
 
+# Choosing a clock the wiring can carry, against a fake chip with a
+# configurable breaking point, and refusing to erase when the same address
+# range comes back two different ways.
+$clockDir = Join-Path $env:TEMP "aspx-tests-clock-tune"
+Run-Suite "clocktune_tests" $clockDir @(
+  "$root\tests\clocktune_tests.lpr", "$root\software\clocktune.pas")
+
 # preservation-aware whole-operation service, including deterministic
 # fail-at-every-call and randomized invariant checks
 $norDir = Join-Path $env:TEMP "aspx-tests-nor"

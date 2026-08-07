@@ -123,6 +123,13 @@ run_suite railreport_tests "$rail" \
   tests/railreport_tests.lpr software/railreport.pas \
   software/electricalpreflight.pas
 
+# Choosing a clock the wiring can carry, against a fake chip with a
+# configurable breaking point, and refusing to erase when the same address
+# range comes back two different ways.
+clock="$tmp/clock-tune"
+run_suite clocktune_tests "$clock" \
+  tests/clocktune_tests.lpr software/clocktune.pas
+
 nor="$tmp/nor"
 run_suite norengine_tests "$nor" \
   tests/norengine_tests.lpr tests/virtualspi25.pas \

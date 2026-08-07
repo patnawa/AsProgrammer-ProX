@@ -966,6 +966,13 @@ object MainForm: TMainForm
             Caption = '468.75 KHz'
             RadioItem = True
           end
+          object MenuSPIClockSeparator: TMenuItem
+            Caption = '-'
+          end
+          object MenuAutoTuneClock: TMenuItem
+            Caption = 'Auto tune clock'
+            OnClick = MenuAutoTuneClockClick
+          end
         end
         object MenuCH347Vcc: TMenuItem
           Caption = 'CH347 target voltage'

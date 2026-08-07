@@ -32,6 +32,7 @@ adds it to the builds.
 - `hardwarecapability_tests`
 - `sessionstate_tests`
 - `railreport_tests`
+- `clocktune_tests`
 - `norengine_tests`
 - `eepromengine_tests`
 - `operationrunner_tests`
@@ -53,6 +54,7 @@ adds it to the builds.
 | NOR and EEPROM operations | Differential planning, preserved neighbor bytes, read-twice trust, cancellation boundaries, fail-at-every-call matrices, and randomized final-image invariants |
 | SPI NAND | Geometry, bad-block planning, ECC verdicts, protection, status failures, cancellation, and virtual-device execution |
 | Chip health | Capacity/counterfeit tests restore the original data; protocol packet layouts remain byte-exact |
+| Clock tuning and connection trust | The boundary between a clock the wiring carries and one it does not is found by repetition, an all-FF reply is never mistaken for agreement, a connection fault is reported as one rather than as a speed problem, and two disagreeing reads of the same range refuse the erase |
 | Target rail | Requested and measured voltage stay separate fields, unmeasurable facts never render as numbers, and a decided electrical failure blocks the bus while an uncharacterised backend only warns |
 | Session admission | The ladder from Disconnected to Armed, and the revocations that matter: a rail change invalidates chip detection and arming, a fresh image invalidates the preflight, and one arming buys one destructive run |
 | Production | Canonical chip profiles, HMAC-authenticated jobs, electrical admission, durable signed evidence, and anti-replay state |

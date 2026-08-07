@@ -110,6 +110,20 @@ The last line is the one to take seriously. A board that switches VCC to 1.8 V w
 
 Before CS or CLK moves, the same electrical preflight that authenticated production has always used runs under a bench policy. A rail outside the chip's range, or a signal level above what the part tolerates, stops the operation before the first clock edge. Things nobody has characterised produce a note and continue; requiring proof no supported programmer can give would just teach people to switch the gate off.
 
+## Auto tune clock
+
+> **Options → SPI → Частота → Auto tune clock**
+
+Clip leads and long cables do not survive 60 MHz, and the failure reads back as FF — which looks exactly like a blank chip. Picking a number from a menu with no feedback means guessing which side of that line you are on.
+
+So Chipwright finds the line. It starts at the slowest clock, where the wiring cannot be the reason an answer is wrong, and establishes what the chip says about itself. Then it climbs, asking three times per rung. The first rung whose answer changes ends the climb, and it steps down one more for margin.
+
+Three reads, not one, because above the boundary the failures are intermittent — a single read accepts a marginal clock most of the time, which is the worst outcome: fast, plausible, and wrong during the write. The fingerprint is the JEDEC ID **and** a CRC of a real 4 KB read, because a clock that corrupts long transfers but not three-byte ones sails through an ID-only check.
+
+Three outcomes, told apart, because your next move differs: a clock was found; the connection is unstable at the slowest clock (reseat the clip — a slower clock will not help); or nothing answered at any speed (check the rail, pin 1 and seating).
+
+Separately, erase and write read three sample regions — start, middle, end — twice each and compare, before touching a status register. A chip that answers the same question two different ways invalidates the backup that recovery depends on, so this refuses rather than retries, and `--force` deliberately does not bypass it. The refusal names the first differing address.
+
 ## Getting started
 
 <table>
@@ -158,7 +172,7 @@ If detection finds nothing, the log says why — a wrong rail and a loose clip l
 The four panels under the toolbar answer "why is this not working" without digging in the log:
 
 - **Connection** — which programmer is actually attached
-- **Interface / clock** — bus and SPI clock. A clip lead or long cable often cannot hold 60 MHz; a bus that cannot keep up reads back all `FF`, exactly like an empty socket. Drop to 15 MHz or slower if reads look blank
+- **Interface / clock** — bus and SPI clock. A clip lead or long cable often cannot hold 60 MHz; a bus that cannot keep up reads back all `FF`, exactly like an empty socket. Rather than guessing, run **Auto tune clock** and let it find the boundary
 - **Chip profile** — the selected part and whether its ID has been confirmed
 - **Last operation** — result and elapsed time
 

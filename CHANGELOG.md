@@ -3,6 +3,51 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.28.0.0 — the program finds the clock the wiring can carry
+
+- Options → SPI → Частота → **Auto tune clock**. It starts at the slowest
+  clock on the ladder, where the wiring cannot be the reason an answer is
+  wrong, and establishes what the chip says about itself. Then it climbs,
+  asking the same question three times per rung. The first rung whose answer
+  changes ends the climb, and the program steps down one further rung for
+  margin before ticking the menu entry it chose.
+
+  Three reads per rung, not one: above the boundary the failures are
+  intermittent, so a single read accepts a marginal clock most of the time —
+  fast, plausible, and wrong during the write. The climb also stops at the
+  first disagreement rather than looking for a faster rung that happens to
+  agree, for the same reason.
+
+  The fingerprint compared at each rung is the JEDEC ID *and* a CRC of a real
+  4 KB data read. A clock that corrupts long transfers but not three-byte ones
+  sails through an ID-only comparison and then fails during the actual read,
+  which is far too late.
+
+- Three outcomes, told apart, because the operator's next move differs:
+
+  - **tuned** — a clock was found, and the log says where it broke and what
+    the safety margin cost.
+  - **unstable at the slowest clock** — the chip gave different answers at the
+    slowest speed available. This is a contact fault, and the program says so
+    instead of suggesting a slower clock, which is the ten-minute dead end an
+    operator otherwise walks down.
+  - **no answer** — nothing replied at any speed, so the log points at the
+    rail, pin 1 orientation and seating rather than at the clock.
+
+- Erase and write now read three sample regions — start, middle and end —
+  twice each, and compare, before touching a status register. A chip that
+  answers the same question two different ways invalidates more than the
+  current operation: it invalidates the backup that recovery depends on. So
+  this refuses rather than retries, and `--force` deliberately does not
+  bypass it. `--force` means "I know what I am doing", which applies to things
+  an operator can know; an intermittent clip is not one of them.
+
+  The refusal names the first differing address, not just "verify failed".
+
+  Samples that are entirely FF are reported rather than refused: a blank chip
+  really does read FF everywhere, and so does a disconnected bus. The log says
+  the check cannot tell those apart, which is the honest position.
+
 ## 4.27.0.0 — what was asked for and what was measured are no longer the same line
 
 - The program used to show the rail it had *asked* for and nothing else, which
