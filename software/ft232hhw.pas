@@ -5,7 +5,7 @@ unit ft232hhw;
 interface
 
 uses
-  Classes, SysUtils, basehw, msgstr, D2XXUnit, utilfunc;
+  Classes, SysUtils, basehw, msgstr, D2XXUnit, utilfunc, electricalpreflight;
 
 type
 
@@ -23,6 +23,11 @@ public
   function GetLastError: string; override;
   function DevOpen: boolean; override;
   procedure DevClose; override;
+
+  function GetElectricalCapabilities(
+    out Capabilities: TProgrammerElectricalCapabilities): boolean; override;
+  function GetElectricalObservation(
+    out Observation: TElectricalObservation): boolean; override;
 
   //spi
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; override;
@@ -137,6 +142,94 @@ begin
 
   FDevOpened := true;
   Result := true;
+end;
+
+//What an FT232H can and cannot tell the program about the target rail.
+//
+//Unlike the CH341A below it, this one can be characterised without a scope,
+//because the facts come from the part rather than from the board it is on:
+//
+//  - MPSSE I/O swings to VCCIO, and every FT232H breakout this program is
+//    used with ties VCCIO to the same 3.3 V that feeds the target. That is a
+//    property of the FTDI silicon and the standard breakout wiring, not a
+//    guess about one board.
+//  - The clock comes from a divisor this program sets, and the menu offers
+//    30 MHz and 6 MHz.  30 MHz is the ceiling.
+//  - There is no ADC, no sense resistor, no load switch and no comparator
+//    watching for voltage arriving from the target side.  None of those
+//    exist on an FT232H, so all four flags stay False and the rail report
+//    reads "not measurable on this programmer".
+//
+//SignalVoltageVerified stays False even so.  The reasoning above is sound
+//and it is still an inference: nobody has put a probe on CS/CLK/MOSI of the
+//specific breakout in front of the user, and a board with VCCIO strapped to
+//5 V would look identical from here.  Production refuses to run on that
+//basis; bench work proceeds and is told.
+//
+//The practical effect of FixedVioMv = 3300 is the useful one: a 1.8 V part
+//is refused outright, because 3.3 V logic into a 1.8 V flash is roughly
+//1.5 V over its absolute maximum on three pins at once.
+function TFT232HHardware.GetElectricalCapabilities(
+  out Capabilities: TProgrammerElectricalCapabilities): boolean;
+var
+  P: TSerialProtocol;
+begin
+  FillChar(Capabilities, SizeOf(Capabilities), 0);
+  Capabilities.Known := True;
+  Capabilities.ProgrammerID := 'FT232H';
+  //The D2XX driver exposes no firmware revision for the part itself.
+  Capabilities.FirmwareVersion := 'unavailable';
+  Capabilities.SupportedProtocols := [spSPI, spI2C, spMicrowire];
+
+  //MPSSE pins are driven as soon as the mode is set; nothing parks them
+  //high impedance on open.
+  Capabilities.PinsSafeAtOpen := False;
+  //I2C on MPSSE is bit-banged push-pull here, not true open drain.
+  Capabilities.SupportsOpenDrain := False;
+
+  //A breakout feeds the target from its own 3.3 V rail and this program has
+  //no way to switch or interrupt it.
+  Capabilities.PowerCapability := pcFixedTargetPower;
+  Capabilities.FixedTargetMv := 3300;
+
+  Capabilities.CanSetVio := False;
+  Capabilities.FixedVioMv := 3300;
+  Capabilities.SignalVoltageVerified := False;
+
+  Capabilities.CanDetectExternalPower := False;
+  Capabilities.CanMeasureTargetVoltage := False;
+  Capabilities.CanMeasureTargetCurrent := False;
+  Capabilities.HasCurrentLimit := False;
+
+  for P := Low(TSerialProtocol) to High(TSerialProtocol) do
+    Capabilities.MaxBusHz[P] := 0;
+  Capabilities.MaxBusHz[spSPI] := 30000000;
+  Capabilities.MaxBusHz[spI2C] := 400000;
+  Capabilities.MaxBusHz[spMicrowire] := 1000000;
+
+  Result := True;
+end;
+
+function TFT232HHardware.GetElectricalObservation(
+  out Observation: TElectricalObservation): boolean;
+begin
+  FillChar(Observation, SizeOf(Observation), 0);
+  if not FDevOpened then Exit(False);
+
+  //The breakout's rail is on whenever it is plugged in; there is no switch.
+  Observation.TargetPowerEnabled := True;
+  Observation.SelectedTargetMv := 3300;
+  Observation.SelectedProgrammerVioMv := 3300;
+  Observation.EffectiveTargetVioMv := 3300;
+
+  //Everything below is what this part cannot see.  Leaving the flags False
+  //is the message.
+  Observation.ExternalPowerKnown := False;
+  Observation.TargetVoltageMeasured := False;
+  Observation.TargetCurrentMeasured := False;
+  Observation.CurrentLimitEnabled := False;
+
+  Result := True;
 end;
 
 procedure TFT232HHardware.DevClose;

@@ -59,7 +59,7 @@ Nothing here is inferred upward. A chip whose voltage cannot be established is a
 <tr><td><b>🔬 Diagnostics</b></td><td>Chip doctor, true-capacity/counterfeit test, surface scan, SFDP decode, and a connection doctor</td></tr>
 </table>
 
-Every rule above lives in a hardware-free core unit and is covered by the test suite — **22 suites, no hardware required**. See [`docs/testing.md`](docs/testing.md).
+Every rule above lives in a hardware-free core unit and is covered by the test suite — **23 suites, no hardware required**. See [`docs/testing.md`](docs/testing.md).
 
 ---
 

@@ -55,6 +55,53 @@ other CH347 functions, and claiming them as outputs before anyone has asked
 for a voltage change broke I²C EEPROM detection. Safety does not depend on
 that write: the hardware powers up at 1.8 V.
 
+## The other two backends
+
+### FT232H — characterised
+
+Unlike the CH341A below, this one is characterisable without a scope, because
+the facts come from the part rather than from the board it happens to be on.
+
+| Claim | How established | Confidence |
+|---|---|---|
+| MPSSE I/O swings to VCCIO | FTDI silicon behaviour | Confirmed |
+| VCCIO is tied to the 3.3 V that feeds the target | Standard breakout wiring | Inferred, standard |
+| Max SPI clock 30 MHz | The divisor this program sets; the menu offers 30 and 6 MHz | Confirmed |
+| Target power is the breakout's fixed 3.3 V, not switchable | No power-control path exists | Confirmed |
+| No ADC, no sense resistor, no load switch, no backfeed detection | None exist on an FT232H | Confirmed absent |
+
+`SignalVoltageVerified` is still `False`: the reasoning is sound but nobody has
+probed the specific breakout in front of the user, and one with VCCIO strapped
+to 5 V would look identical from software. The useful practical effect of
+declaring 3.3 V is that **1.8 V parts are refused outright** — 3.3 V logic into
+a 1.8 V flash is roughly 1.5 V over its absolute maximum on three pins at once.
+
+### CH341A — deliberately not characterised
+
+This is the one case where "unknown" is not laziness. The answer depends on
+whether the board in front of you has been modified, and software cannot see
+that.
+
+CH341A boards of this family are widely reported to **drive 5 V on CS, CLK and
+MOSI while VCC reads 3.3 V**. The common fix is a wire soldered across the
+board. A modified board and an unmodified one are identical from the driver's
+point of view.
+
+So no values are filled in, because either choice is wrong for half the boards
+in the world:
+
+- Declaring 3.3 V would understate the hazard on every unmodified board.
+- Declaring 5 V would refuse all work on every modified one.
+
+`GetElectricalCapabilities` therefore reports `Known := False`, the preflight
+can only warn, and the program prints a specific caution when a CH341A is
+opened rather than a generic "capabilities unknown". **Do not put a 1.8 V part
+on a CH341A.**
+
+Settling this for *your* board is the same fifteen minutes as
+[`test-procedure.md`](test-procedure.md), measuring CS/CLK/MOSI against GND
+with the board idle and during a read.
+
 ## ZIF socket mapping
 
 Not yet documented. The board carries a 300-mil ZIF and the usual jumper block

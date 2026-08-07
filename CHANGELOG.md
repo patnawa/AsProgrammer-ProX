@@ -3,6 +3,55 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.33.0.0 — the erase geometry becomes testable, and FT232H gets characterised
+
+- **`BuildCurrentNORGeometry` moved out of `main.pas`** into a new
+  `norgeometrybuild` core unit. It is the most consequential arithmetic in the
+  program: the block list it produces is what the erase actually erases, and a
+  block of the wrong size, at the wrong address, or carrying the wrong opcode
+  does not fail loudly — it destroys data that was never part of the job and
+  reports success.
+
+  It was already pure logic. It just read four `main.pas` globals, which meant
+  it could not be exercised without a GUI and a chip. It now takes them as
+  arguments, and 34 assertions cover what nothing covered before: boot-block
+  regions tiling the chip exactly, the smallest *aligned* erase type winning
+  (a type that is merely offered is unusable if it would straddle a region
+  boundary), a map that under- or over-covers the part being refused, a
+  declared-but-ambiguous sector map never being replaced with a guessed
+  uniform one, and a missing dedicated 4-byte opcode failing the build instead
+  of silently erasing at a wrapped address above 16 MiB.
+
+  Writing those tests found a real thing worth knowing: my first fixture gave
+  a boot-block part's upper region *both* erase sizes, and the code correctly
+  chose 4 KB over 64 KB. Erasing 64 KB where 4 KB would do destroys 60 KB of
+  neighbours on a partial write, so "smallest aligned type wins" is load
+  bearing, and it is now pinned.
+
+- **FT232H is characterised.** Its facts come from the FTDI part rather than
+  from whichever board it is on: MPSSE I/O swings to VCCIO, breakouts tie
+  VCCIO to the same 3.3 V that feeds the target, the clock ceiling is the
+  30 MHz this program's own divisor sets, and there is no ADC, sense resistor,
+  load switch or backfeed detection anywhere on the part.
+
+  `SignalVoltageVerified` stays `False` — the reasoning is sound and still an
+  inference, since a breakout strapped to 5 V VCCIO looks identical from
+  software. The useful effect is that **1.8 V parts are now refused on an
+  FT232H**: 3.3 V logic into a 1.8 V flash is about 1.5 V over its absolute
+  maximum, on three pins at once.
+
+- **CH341A is deliberately left uncharacterised, and now says why.** This is
+  the one case where "unknown" is not laziness. Boards of that family are
+  widely reported to drive 5 V on CS/CLK/MOSI while VCC reads 3.3 V; the usual
+  fix is a wire soldered across the board; and a modified board is identical
+  to an unmodified one from the driver's point of view.
+
+  Filling in a number would be wrong for half the boards in the world in one
+  direction or the other — 3.3 V understates the hazard on unmodified boards,
+  5 V refuses all work on modified ones. So opening a CH341A now prints a
+  specific caution naming the 5 V issue and saying not to put a 1.8 V part on
+  it, instead of the generic "capabilities unknown" it printed before.
+
 ## 4.32.0.0 — the admission ladder now actually gates something
 
 The `sessionstate` unit shipped in 4.27.0.0 with its rules complete and no

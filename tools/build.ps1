@@ -187,6 +187,16 @@ $clockDir = Join-Path $env:TEMP "aspx-tests-clock-tune"
 Run-Suite "clocktune_tests" $clockDir @(
   "$root\tests\clocktune_tests.lpr", "$root\software\clocktune.pas")
 
+# The arithmetic that decides which blocks an erase may touch. Lifted out of
+# main.pas so it can be exercised at all; a wrong block list erases data that
+# was never part of the job and reports success.
+$geomDir = Join-Path $env:TEMP "aspx-tests-nor-geometry"
+Run-Suite "norgeometrybuild_tests" $geomDir @(
+  "$root\tests\norgeometrybuild_tests.lpr",
+  "$root\software\norgeometrybuild.pas", "$root\software\norplanner.pas",
+  "$root\software\operationmodel.pas", "$root\tests\spi25.pas",
+  "$root\software\sfdp.pas")
+
 # The latch that makes the program incapable of changing a chip: what it
 # stops, what it must never stop, and that nothing quietly falls off the list.
 $safeDir = Join-Path $env:TEMP "aspx-tests-safe-mode"

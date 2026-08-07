@@ -130,6 +130,15 @@ clock="$tmp/clock-tune"
 run_suite clocktune_tests "$clock" \
   tests/clocktune_tests.lpr software/clocktune.pas
 
+# The arithmetic that decides which blocks an erase may touch. Lifted out of
+# main.pas so it can be exercised at all; a wrong block list erases data that
+# was never part of the job and reports success.
+geom="$tmp/nor-geometry"
+run_suite norgeometrybuild_tests "$geom" \
+  tests/norgeometrybuild_tests.lpr software/norgeometrybuild.pas \
+  software/norplanner.pas software/operationmodel.pas \
+  tests/spi25.pas software/sfdp.pas
+
 # The latch that makes the program incapable of changing a chip: what it
 # stops, what it must never stop, and that nothing quietly falls off the list.
 safe="$tmp/safe-mode"

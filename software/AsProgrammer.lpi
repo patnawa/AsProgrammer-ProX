@@ -25,11 +25,11 @@
     <VersionInfo>
       <UseVersionInfo Value="True"/>
       <MajorVersionNr Value="4"/>
-      <MinorVersionNr Value="32"/>
+      <MinorVersionNr Value="33"/>
       <RevisionNr Value="0"/>
       <BuildNr Value="0"/>
       <Language Value="0409"/>
-      <StringTable CompanyName="Patnawa" FileDescription="Serial flash and EEPROM programmer" InternalName="Chipwright" LegalCopyright="MIT. Based on AsProgrammer by nofeletru and dregmod by therealdreg" OriginalFilename="AsProgrammer.exe" ProductName="Chipwright" ProductVersion="4.32.0.0"/>
+      <StringTable CompanyName="Patnawa" FileDescription="Serial flash and EEPROM programmer" InternalName="Chipwright" LegalCopyright="MIT. Based on AsProgrammer by nofeletru and dregmod by therealdreg" OriginalFilename="AsProgrammer.exe" ProductName="Chipwright" ProductVersion="4.33.0.0"/>
     </VersionInfo>
     <MacroValues Count="2">
       <Macro1 Name="LCLWidgetType" Value="win32"/>

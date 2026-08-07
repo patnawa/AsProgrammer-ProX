@@ -18,6 +18,7 @@ uses
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
   electricalpreflight, railreport, sessionstate, clocktune, clicontract,
   safemode,
+  norgeometrybuild,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw,
   serproghw, ezphw;
 
@@ -1207,6 +1208,28 @@ begin
              'of each driver package');
 end;
 
+//คำเตือนเฉพาะรุ่นที่ระเบียนไฟฟ้าบอกไม่ได้
+//
+//CH341A เป็นกรณีเดียวที่ "ไม่รู้" ไม่ใช่เพราะไม่มีใครขยัน แต่เพราะคำตอบ
+//ขึ้นกับว่าบอร์ดตรงหน้าถูกโมดิฟายหรือยัง ซึ่งซอฟต์แวร์มองไม่เห็น บอร์ด
+//ตระกูลนี้มีรายงานกันทั่วไปว่าขับสัญญาณ SPI ที่ 5V ขณะที่ VCC เป็น 3.3V
+//และวิธีแก้ที่ใช้กันคือบัดกรีสายข้ามบนบอร์ด บอร์ดที่โมดแล้วกับยังไม่โมด
+//หน้าตาเหมือนกันทุกประการจากฝั่งโปรแกรม
+//
+//จึงไม่กรอกค่าให้ ไม่ว่าจะกรอก 3.3V หรือ 5V ก็ผิดกับบอร์ดครึ่งหนึ่งของโลก
+//สิ่งที่ทำได้และมีประโยชน์จริงคือบอกให้ผู้ใช้รู้ว่าต้องไปดูอะไร
+procedure LogBackendCaution;
+begin
+  if AsProgrammer.Current_HW <> CHW_CH341 then Exit;
+  LogPrint('CH341A caution: this board family is widely reported to drive ' +
+           '5 V on CS/CLK/MOSI while VCC reads 3.3 V. Whether yours does ' +
+           'depends on a hardware modification, and software cannot see ' +
+           'which board it is talking to');
+  LogPrint('CH341A caution: nothing here is characterised for that reason, ' +
+           'so the electrical preflight can only warn. Do not put a 1.8 V ' +
+           'part on this programmer. See hardware/pinout.md');
+end;
+
 function OpenDevice: boolean;
 begin
   if not AsProgrammer.Programmer.DevOpen then
@@ -1227,6 +1250,7 @@ begin
   //สภาพรางไฟตอนนี้ ทันทีที่เปิดอุปกรณ์ได้ ก่อนงานใด ๆ จะเริ่ม
   //ที่สำคัญกว่าตัวเลขคือบรรทัดที่บอกว่าอะไรที่เครื่องนี้ "วัดไม่ได้"
   LogRailReport;
+  LogBackendCaution;
 
   //โปรแกรมนี้เปิดและปิดอุปกรณ์ทุกงาน การนับ "เปิดอุปกรณ์" เป็นการเริ่ม
   //เซสชันใหม่ทุกครั้งจะล้างข้อเท็จจริงทิ้งทุกงาน ซึ่งไม่ใช่สิ่งที่ต้องการ
@@ -2976,166 +3000,17 @@ end;
 //Build the exact erase geometry consumed by the transactional NOR planner.
 //An unresolved SFDP sector map is never replaced with a guessed uniform map:
 //doing so can erase across a hybrid-region boundary and destroy neighbours.
+//
+//กติกาทั้งหมดย้ายไปอยู่ใน norgeometrybuild แล้ว ที่นี่เหลือแค่การหยิบสถานะ
+//ของโปรแกรมส่งเข้าไป เลขบล็อกที่ได้คือสิ่งที่ตัวลบจะไปลบจริง จึงเป็นเลขที่
+//ต้องทดสอบได้โดยไม่ต้องมีหน้าจอและไม่ต้องมีชิป ซึ่งตอนอยู่ในไฟล์นี้ทำไม่ได้
 function BuildCurrentNORGeometry(ChipSize, PageSize: cardinal;
   Native4BOpcodes: boolean; out Geometry: TNORGeometry;
   out ErrorText: string): boolean;
-var
-  RegionIndex, EraseType, BestType, BlockIndex: integer;
-  RegionBase, BlockCount, TotalBlocks, j: QWord;
-  BlockSize: cardinal;
-  BlockOpcode, StandardOpcode, NativeOpcode: byte;
-
-  function NativeOpcodeFor(Size: cardinal; Standard: byte;
-    out Opcode: byte): boolean;
-  var
-    t: integer;
-  begin
-    Opcode := Standard;
-    if not Native4BOpcodes then Exit(True);
-
-    Result := False;
-    if not CurrentSFDPValid then
-    begin
-      ErrorText := 'dedicated 4-byte erase opcodes require valid SFDP data';
-      Exit;
-    end;
-    for t := 1 to 4 do
-      if (CurrentSFDP.EraseTypes[t].Size = Size) and
-         (CurrentSFDP.EraseTypes[t].Opcode = Standard) and
-         (CurrentSFDP.EraseTypes[t].Opcode4B <> 0) then
-      begin
-        Opcode := CurrentSFDP.EraseTypes[t].Opcode4B;
-        Exit(True);
-      end;
-    ErrorText := Format(
-      'SFDP has no dedicated 4-byte erase opcode for %d-byte opcode %.2x',
-      [Size, Standard]);
-  end;
-
 begin
-  FillChar(Geometry, SizeOf(Geometry), 0);
-  Geometry.ErasedValue := $FF;
-  ErrorText := '';
-  Result := False;
-
-  if (ChipSize = 0) or (PageSize = 0) then
-  begin
-    ErrorText := 'chip size and page size must be non-zero';
-    Exit;
-  end;
-  if CurrentSFDPValid and (CurrentSFDP.Density <> 0) and
-     (CurrentSFDP.Density <> ChipSize) then
-  begin
-    ErrorText := Format(
-      'selected chip size %d disagrees with the live SFDP density %d',
-      [ChipSize, CurrentSFDP.Density]);
-    Exit;
-  end;
-  if CurrentSFDPValid and CurrentSFDP.SectorMapDeclared and
-     (not CurrentSFDP.HasSectorMap) then
-  begin
-    ErrorText :=
-      'the chip declares an SFDP sector map, but its active map is ambiguous or invalid';
-    Exit;
-  end;
-
-  if CurrentSFDPValid and CurrentSFDP.HasSectorMap then
-  begin
-    Geometry.ChipSize := ChipSize;
-    Geometry.PageSize := PageSize;
-    TotalBlocks := 0;
-    RegionBase := 0;
-
-    //First pass selects an erase type that is valid and aligned throughout
-    //each region and obtains an exact allocation size.
-    for RegionIndex := 0 to CurrentSFDP.RegionCount - 1 do
-    begin
-      BestType := 0;
-      for EraseType := 1 to 4 do
-        if ((CurrentSFDP.Regions[RegionIndex].EraseTypeMask and
-             (1 shl (EraseType - 1))) <> 0) and
-           (CurrentSFDP.EraseTypes[EraseType].Size > 0) and
-           ((BestType = 0) or
-            (CurrentSFDP.EraseTypes[EraseType].Size <
-             CurrentSFDP.EraseTypes[BestType].Size)) and
-           ((RegionBase mod CurrentSFDP.EraseTypes[EraseType].Size) = 0) and
-           ((CurrentSFDP.Regions[RegionIndex].Size mod
-             CurrentSFDP.EraseTypes[EraseType].Size) = 0) then
-          BestType := EraseType;
-
-      if BestType = 0 then
-      begin
-        ErrorText := Format(
-          'SFDP region %d has no erase type aligned to the whole region',
-          [RegionIndex]);
-        Exit;
-      end;
-      BlockCount := CurrentSFDP.Regions[RegionIndex].Size div
-                    CurrentSFDP.EraseTypes[BestType].Size;
-      if BlockCount > QWord(High(SizeInt)) - TotalBlocks then
-      begin
-        ErrorText := 'SFDP erase-block count does not fit this build';
-        Exit;
-      end;
-      Inc(TotalBlocks, BlockCount);
-      Inc(RegionBase, CurrentSFDP.Regions[RegionIndex].Size);
-    end;
-
-    if RegionBase <> ChipSize then
-    begin
-      ErrorText := 'SFDP sector-map regions do not cover the selected chip';
-      Exit;
-    end;
-
-    SetLength(Geometry.Blocks, SizeInt(TotalBlocks));
-    RegionBase := 0;
-    BlockIndex := 0;
-    for RegionIndex := 0 to CurrentSFDP.RegionCount - 1 do
-    begin
-      BestType := 0;
-      for EraseType := 1 to 4 do
-        if ((CurrentSFDP.Regions[RegionIndex].EraseTypeMask and
-             (1 shl (EraseType - 1))) <> 0) and
-           (CurrentSFDP.EraseTypes[EraseType].Size > 0) and
-           ((BestType = 0) or
-            (CurrentSFDP.EraseTypes[EraseType].Size <
-             CurrentSFDP.EraseTypes[BestType].Size)) and
-           ((RegionBase mod CurrentSFDP.EraseTypes[EraseType].Size) = 0) and
-           ((CurrentSFDP.Regions[RegionIndex].Size mod
-             CurrentSFDP.EraseTypes[EraseType].Size) = 0) then
-          BestType := EraseType;
-
-      BlockSize := CurrentSFDP.EraseTypes[BestType].Size;
-      StandardOpcode := CurrentSFDP.EraseTypes[BestType].Opcode;
-      if not NativeOpcodeFor(BlockSize, StandardOpcode, NativeOpcode) then Exit;
-      BlockCount := CurrentSFDP.Regions[RegionIndex].Size div BlockSize;
-      j := 0;
-      while j < BlockCount do
-      begin
-        Geometry.Blocks[BlockIndex].Address :=
-          RegionBase + j * QWord(BlockSize);
-        Geometry.Blocks[BlockIndex].Size := BlockSize;
-        Geometry.Blocks[BlockIndex].Opcode := NativeOpcode;
-        Inc(BlockIndex);
-        Inc(j);
-      end;
-      Inc(RegionBase, CurrentSFDP.Regions[RegionIndex].Size);
-    end;
-    Exit(ValidateNORGeometry(Geometry, ErrorText));
-  end;
-
-  BlockSize := 0;
-  StandardOpcode := 0;
-  if CurrentSFDPValid then
-    SFDPSmallestErase(CurrentSFDP, BlockSize, StandardOpcode);
-  if BlockSize = 0 then
-  begin
-    BlockSize := CurrentSectorSize;
-    StandardOpcode := CurrentSectorOpcode;
-  end;
-  if not NativeOpcodeFor(BlockSize, StandardOpcode, BlockOpcode) then Exit;
-  Result := BuildUniformNORGeometry(ChipSize, PageSize, BlockSize,
-                                    BlockOpcode, Geometry, ErrorText);
+  Result := BuildNORGeometryFrom(ChipSize, PageSize, Native4BOpcodes,
+    CurrentSFDPValid, CurrentSFDP, CurrentSectorSize, CurrentSectorOpcode,
+    Geometry, ErrorText);
 end;
 
 //--- ชิปแจ้งความล้มเหลวเอง ---
