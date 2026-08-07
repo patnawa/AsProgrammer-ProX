@@ -130,6 +130,13 @@ clock="$tmp/clock-tune"
 run_suite clocktune_tests "$clock" \
   tests/clocktune_tests.lpr software/clocktune.pas
 
+# The published machine-facing interface: exit codes and JSON key names that
+# other people's scripts depend on, pinned so renaming one is deliberate.
+contract="$tmp/cli-contract"
+run_suite clicontract_tests "$contract" \
+  tests/clicontract_tests.lpr software/clicontract.pas \
+  software/operationmodel.pas
+
 nor="$tmp/nor"
 run_suite norengine_tests "$nor" \
   tests/norengine_tests.lpr tests/virtualspi25.pas \

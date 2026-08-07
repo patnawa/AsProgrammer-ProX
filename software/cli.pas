@@ -32,6 +32,7 @@ uses
   Windows, Forms, main, basehw, fileformats, findchip, sfdp, jedec, appver,
   opresult, prodlog, serialnum, spi25, utilfunc, imgcheck, ifd, DateUtils,
   prodcrypto, prodjob, prodstate, productiongate, electricalpreflight,
+  railreport, clicontract,
   chipprofile, chipsave,
   nandmodel, nandplanner, nandengine, spi25nandadapter, nandcatalog;
 
@@ -50,10 +51,11 @@ const
   );
 
   //สวิตช์ที่เป็นธงเปล่า ๆ
-  FlagSwitches: array[0..15] of string = (
+  FlagSwitches: array[0..16] of string = (
     'erase', 'detect', 'sfdp', 'help', 'force', 'json', 'verify',
     'no-fast-read', 'smart', 'plan-only', 'nand-info', 'nand-raw',
-    'chip-test', 'capacity-test', 'surface-scan', 'nand-erase'
+    'chip-test', 'capacity-test', 'surface-scan', 'nand-erase',
+    'preflight'
   );
 
   //The secret source is station policy, not an arbitrary caller-selected
@@ -267,6 +269,18 @@ begin
   Say('                  ' + NAND_LIVE_GATE_ENV + '=1, and every destructive');
   Say('                  invocation must also include --force');
   Say('');
+  Say('  Machine-facing:');
+  Say('  --preflight     report the target rail and whether a destructive');
+  Say('                  operation would be allowed, without touching the bus');
+  Say('  --json          print one line of JSON carrying schema_version, the');
+  Say('                  rail state, and a stable "result" name. Unmeasurable');
+  Say('                  values are null, never zero.');
+  Say('                  Exit codes: 0 ok, 1 failed, 2 usage, 3 no programmer,');
+  Say('                  4 programmer lost, 5 no chip, 6 chip mismatch,');
+  Say('                  7 voltage refused, 8 connection unstable,');
+  Say('                  9 chip locked, 10 file size mismatch,');
+  Say('                  11 verify failed, 12 file error, 13 cancelled');
+  Say('');
   Say('  Production:');
   Say('  --job FILE      refuse to write unless the buffer matches the job file');
   Say('                  (keys: chip=, size=, crc32=)');
@@ -325,50 +339,123 @@ begin
 end;
 
 function JsonEscape(const S: string): string;
-var
-  i: integer;
 begin
-  Result := '';
-  for i := 1 to Length(S) do
-    case S[i] of
-      '"':  Result := Result + '\"';
-      '\':  Result := Result + '\\';
-      #13:  Result := Result + '\r';
-      #10:  Result := Result + '\n';
-      #9:   Result := Result + '\t';
-    else
-      Result := Result + S[i];
-    end;
+  //The escaper lives in clicontract now, so both front ends and the tests
+  //share one copy.  This wrapper keeps the existing call sites readable.
+  Result := JsonEscapeText(S);
+end;
+
+//The electrical state of the rail right now, as JSON.
+//
+//Every measured field is null rather than zero when the hardware cannot
+//observe it.  A consumer reading 0 for measured_mv would take it as a
+//measurement of zero volts, which is the machine-facing version of exactly
+//the mistake the rail report exists to prevent for people.
+procedure AddRailFields(var J: TJsonObject);
+var
+  Caps: TProgrammerElectricalCapabilities;
+  Obs: TElectricalObservation;
+  CapsValid, ObsValid: boolean;
+  Report: TRailReport;
+begin
+  FillChar(Caps, SizeOf(Caps), 0);
+  FillChar(Obs, SizeOf(Obs), 0);
+  CapsValid := False;
+  ObsValid := False;
+  if AsProgrammer.Programmer <> nil then
+  begin
+    CapsValid := AsProgrammer.Programmer.GetElectricalCapabilities(Caps);
+    ObsValid := AsProgrammer.Programmer.GetElectricalObservation(Obs);
+  end;
+  Report := BuildRailReport(Caps, Obs, CapsValid, ObsValid);
+
+  if Report.RequestedKnown then
+    J.AddInt('requested_mv', Report.RequestedMv)
+  else
+    J.AddNull('requested_mv');
+
+  if Report.MeasuredKnown then
+    J.AddInt('measured_mv', Report.MeasuredMv)
+  else
+    J.AddNull('measured_mv');
+
+  if Report.CurrentKnown then
+    J.AddInt('target_current_ua', Report.CurrentUa)
+  else
+    J.AddNull('target_current_ua');
+
+  //Three-valued, and it must stay that way: "no external voltage" and "this
+  //programmer cannot see external voltage" are different answers, and
+  //collapsing them is how a chip gets written while a motherboard backfeeds
+  //its rail.
+  case Report.ExternalPower of
+    rfYes: J.AddBool('external_power_detected', True);
+    rfNo:  J.AddBool('external_power_detected', False);
+  else
+    J.AddNull('external_power_detected');
+  end;
+
+  if Report.SignalKnown then
+    J.AddInt('signal_mv', Report.SignalMv)
+  else
+    J.AddNull('signal_mv');
+  J.AddBool('signal_measured', Report.SignalVerified);
 end;
 
 //บรรทัดเดียวที่สคริปต์เอาไปอ่านต่อได้ โดยไม่ต้องแกะข้อความ log
 procedure SayJson(const Action: string);
 var
-  s: string;
+  J: TJsonObject;
 begin
-  s := '{"action":"' + JsonEscape(Action) + '"' +
-       ',"ok":' + BoolToStr(OpOK, 'true', 'false') +
-       ',"chip":"' + JsonEscape(CurrentICParam.Name) + '"' +
-       ',"size":' + IntToStr(CurrentICParam.Size) +
-       ',"bytes":' + IntToStr(LastOp.BytesDone);
+  J.Init;
+  //schema_version first so a consumer that does not recognise the version
+  //can stop reading before it misinterprets anything below it.
+  J.AddInt('schema_version', CLI_SCHEMA_VERSION);
+  J.AddString('action', Action);
+  J.AddBool('ok', OpOK);
+  //The stable reason, alongside ok.  This is what an automated caller
+  //branches on; the process exit code carries the same value as a number.
+  if OpOK then
+    J.AddString('result', CLIOutcomeName(coOK))
+  else
+    J.AddString('result', CLIOutcomeName(CurrentCLIOutcome));
 
-  if LastChipUID <> '' then
-    s := s + ',"uid":"' + JsonEscape(LastChipUID) + '"';
+  //ต้อง "เจอจริง" ไม่ใช่แค่ "ถูกเลือกไว้" เพราะ AsProgrammer.Programmer
+  //ชี้ไปที่ backend ที่ติ๊กไว้ในเมนูเสมอ แม้ไม่มีอะไรเสียบอยู่เลย การรายงาน
+  //ชื่อรุ่นคู่กับ "no_programmer" อ่านแล้วขัดกันเอง และทำให้ผู้เรียกที่เป็น
+  //เครื่องเชื่อว่ามีของอยู่
+  if ProgrammerPresent and (AsProgrammer.Programmer <> nil) then
+    J.AddString('programmer', AsProgrammer.Programmer.HardwareName)
+  else
+    J.AddNull('programmer');
+  J.AddString('chip', CurrentICParam.Name);
+  J.AddString('jedec_id', UpperCase(CurrentICParam.ID));
+  J.AddInt('size', CurrentICParam.Size);
+  J.AddInt('bytes', LastOp.BytesDone);
+
+  AddRailFields(J);
+
+  if LastChipUID <> '' then J.AddString('uid', LastChipUID);
 
   //ดัมป์ที่หน้าตาน่าสงสัยไม่ได้ทำให้งาน "ล้มเหลว" เพราะชิปเปล่าอ่านได้ FF
   //ทั้งก้อนอย่างถูกต้องเสมอ แต่สคริปต์ที่เรียกเราควรได้เห็นมันโดยไม่ต้อง
   //ไปแกะข้อความจาก log
-  if LastImageWarning <> '' then
-    s := s + ',"warning":"' + JsonEscape(LastImageWarning) + '"';
+  if LastImageWarning <> '' then J.AddString('warning', LastImageWarning);
 
   if not OpOK then
   begin
-    s := s + ',"error":"' + JsonEscape(LastOp.ErrorText) + '"';
+    //งานที่ล้มก่อนจะเริ่ม (ยังไม่มีใครเรียก OpFail) จะไม่มีข้อความของตัวเอง
+    //ส่งค่าว่างออกไปแปลว่าผู้เรียกได้ช่องที่มีอยู่แต่ไม่มีเนื้อ ใช้ประโยคของ
+    //เหตุผลนั้นแทน ดีกว่าปล่อยว่าง
+    if LastOp.ErrorText <> '' then
+      J.AddString('error', LastOp.ErrorText)
+    else
+      J.AddString('error', CLIOutcomeText(CurrentCLIOutcome));
     if LastOp.FailAddress >= 0 then
-      s := s + ',"address":' + IntToStr(LastOp.FailAddress);
+      J.AddInt('address', LastOp.FailAddress);
   end;
 
-  Say(s + '}');
+  Say(J.Text);
 end;
 
 //--- งานที่ไม่ต้องมีฮาร์ดแวร์ ---
@@ -461,7 +548,14 @@ end;
 //รหัสออกที่ตรงกับผลจริง เดิมคืน 0 เสมอไม่ว่าจะเกิดอะไรขึ้น
 function ResultCode: integer;
 begin
-  if OpOK then Result := EXIT_OK else Result := EXIT_FAIL;
+  //A failing operation returns the most specific reason any gate recorded,
+  //not a flat 1.  A caller that must tell "the rail was refused" from "the
+  //chip is locked" from "the clip fell off" can now do it without matching
+  //substrings against log lines that are written for people and translated.
+  if OpOK then
+    Result := EXIT_OK
+  else
+    Result := CLIExitCode(CurrentCLIOutcome);
 end;
 
 function SameBytes(const A, B: TBytes): boolean;
@@ -1314,6 +1408,8 @@ begin
 
   //ไม่มีใครนั่งอยู่หน้าจอ ทุกด่านที่ปกติจะถามต้องตัดสินใจเอง
   CLIMode := True;
+  //เหตุผลของงานก่อนหน้าต้องไม่ไหลมาถึงงานนี้
+  ResetCLIOutcome;
 
   if HasSwitch('help') then
   begin
@@ -1462,7 +1558,11 @@ begin
   if not ProgrammerPresent then
   begin
     Say('no programmer detected');
-    Exit(EXIT_FAIL);
+    //ไม่มีเครื่องเสียบอยู่ กับงานที่ล้มเหลว ต้องแยกกันให้ผู้เรียกที่เป็น
+    //เครื่องรู้ว่าต้องไปเสียบสาย ไม่ใช่ไปไล่ดู log
+    NoteCLIOutcome(coNoProgrammer);
+    if Json then SayJson('connect');
+    Exit(CLIExitCode(coNoProgrammer));
   end;
   Say('programmer: ' + AsProgrammer.Programmer.HardwareName);
 
@@ -1497,11 +1597,35 @@ begin
     end;
   end;
 
+  //ตรวจสภาพทางไฟฟ้าอย่างเดียว ไม่แตะบัสเลย
+  //
+  //มีไว้ให้ผู้เรียกที่เป็นเครื่องถามได้ว่า "ถ้าสั่งเขียนตอนนี้จะโดนปฏิเสธไหม"
+  //ก่อนจะไปหยิบไฟล์เฟิร์มแวร์มา ไม่ใช่รู้ตอนที่งานเดินไปครึ่งทางแล้ว
+  if HasSwitch('preflight') then
+  begin
+    Action := 'preflight';
+    OpBegin(opkDetect);
+    ResetCLIOutcome;
+    LogRailReport;
+    //ถามแบบ destructive เสมอ เพราะคำถามคือ "จะเขียนได้ไหม" การรายงานว่า
+    //ผ่านเพราะถามแบบอ่านอย่างเดียว แล้วไปโดนปฏิเสธตอนเขียนจริง คือคำตอบ
+    //ที่ผิดในทิศที่แย่ที่สุด
+    if not BenchPreflightOK(True) then
+      OpFail('the electrical preflight refused a destructive operation');
+    DumpLog;
+    if Json then SayJson(Action);
+    Exit(ResultCode);
+  end;
+
   if HasSwitch('detect') then
   begin
     Action := 'detect';
     MainForm.ButtonReadIDClick(nil);
     DumpLog;
+    //ไม่มีชิปตอบ กับงานล้มเหลวด้วยเหตุอื่น ไม่เหมือนกันสำหรับผู้เรียกที่
+    //เป็นเครื่อง อย่างแรกให้ไปดูการเสียบ อย่างหลังให้ไปดู log
+    if (not OpOK) and (CurrentICParam.Size = 0) then
+      NoteCLIOutcome(coNoChip);
     //อย่าจบตรงนี้ถ้ามี --save-chip ต่อท้าย: เดิมทางนี้ Exit ก่อนถึงบล็อก
     //บันทึกเสมอ "--detect --save-chip NAME" จึงไม่เคยบันทึกอะไรเลย
     if (SwitchValue('save-chip') = '') or (not OpOK) then

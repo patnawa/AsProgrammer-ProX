@@ -16,7 +16,7 @@ uses
   operationmodel, norplanner, norengine, spi25noradapter, prodcrypto,
   prodevidence, eepromengine, eepromadapters,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
-  electricalpreflight, railreport, sessionstate, clocktune,
+  electricalpreflight, railreport, sessionstate, clocktune, clicontract,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw,
   serproghw, ezphw;
 
@@ -4278,7 +4278,12 @@ begin
   Result := Verdict.Allowed;
   //ล้มก่อนที่ CS หรือ CLK จะขยับ ไม่ใช่ล้มระหว่างทาง
   if not Result then
+  begin
     LogPrint('preflight refused the operation; the bus was not started');
+    //ผู้เรียกที่เป็นเครื่องต้องแยกได้ว่า "แรงดันผิด" ไม่ใช่ "ล้มเหลวเฉย ๆ"
+    //เพราะสิ่งที่ต้องทำต่อไม่เหมือนกัน
+    NoteCLIOutcome(coVoltageRefused);
+  end;
 end;
 
 //------------------------------------------------ หาความเร็วที่สายรับไหวจริง
@@ -4471,6 +4476,7 @@ begin
   begin
     //ไม่รู้ขนาดชิปก็ไม่รู้ว่าจะอ่านตรงไหน และ "ตรวจไม่ได้" ต้องไม่กลายเป็น
     //"ผ่าน" เด็ดขาด
+    NoteCLIOutcome(coUnstable);
     LogPrint('connection check refused the operation: the chip size is ' +
              'unknown, so no sample region could be chosen');
     Exit(False);
@@ -4513,6 +4519,7 @@ begin
     Exit(True);
   end;
 
+  NoteCLIOutcome(coUnstable);
   LogPrint('connection check refused the operation: ' + V.Reason);
   LogPrint(Format('connection check: sample at %.8X failed',
                   [V.FailedAddress]));
@@ -6019,13 +6026,19 @@ begin
       if CLIMode and (not CLIForce) then
       begin
         LogPrint(STR_GUARD_REFUSED);
-        OpFail('target area is write protected by an individual block lock', FromA);
+        NoteCLIOutcome(coChipLocked);
+        OpFail('target area is write protected by an individual block lock',
+               FromA);
         Exit(False);
       end;
 
       Result := AskUser(STR_GUARD_Q, False);
       if not Result then
-        OpFail('target area is write protected by an individual block lock', FromA);
+      begin
+        NoteCLIOutcome(coChipLocked);
+        OpFail('target area is write protected by an individual block lock',
+               FromA);
+      end;
       Exit;
     end;
 
@@ -6066,12 +6079,17 @@ begin
   if CLIMode and (not CLIForce) then
   begin
     LogPrint(STR_GUARD_REFUSED);
+    NoteCLIOutcome(coChipLocked);
     OpFail('target area is write protected', FromA);
     Exit(False);
   end;
 
   Result := AskUser(STR_GUARD_Q, False);
-  if not Result then OpFail('target area is write protected', FromA);
+  if not Result then
+  begin
+    NoteCLIOutcome(coChipLocked);
+    OpFail('target area is write protected', FromA);
+  end;
 end;
 
 //ตรวจภาพในบัฟเฟอร์กับไฟล์งาน

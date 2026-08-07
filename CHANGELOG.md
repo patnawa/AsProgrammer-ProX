@@ -3,6 +3,55 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.29.0.0 — a caller that is not a person gets a real answer
+
+- Both front ends used to answer every question with 0, 1 or 2. A script could
+  tell success from failure and from a typo, and nothing else. Anything that
+  wanted to know *why* had to match substrings against log lines written for
+  people — lines that get reworded whenever someone improves them, and that
+  are translated.
+
+  The reasons where the correct next action differs now have their own exit
+  codes: 3 no programmer, 4 programmer lost mid-operation, 5 no chip answered,
+  6 the wrong chip answered, 7 the rail was refused, 8 the connection is
+  unstable, 9 the chip is locked, 10 the file does not fit the chip, 11 verify
+  failed, 12 a local file could not be read or written, 13 cancelled. 0, 1 and
+  2 keep their old meanings, so existing scripts are unaffected.
+
+  Anything finer would be a taxonomy of internals. A timeout, a short transfer
+  and a bad clip all arrive as 8, because from outside they are one
+  instruction: stop and reseat. Retrying a timeout into a half-erased chip is
+  how a recoverable fault becomes a dead part.
+
+- `--json` now emits `schema_version` first, so a consumer can refuse a
+  payload it does not understand instead of reading a renamed field as absent,
+  and carries the rail state alongside the result:
+
+      {"schema_version":1,"action":"detect","ok":true,"result":"ok",
+       "programmer":"CH347","chip":"W25Q64FW","jedec_id":"EF6017",
+       "size":8388608,"bytes":0,"requested_mv":1800,"measured_mv":null,
+       "target_current_ua":null,"external_power_detected":null,
+       "signal_mv":1800,"signal_measured":false}
+
+  Unmeasurable values serialise as `null`, never `0`. A consumer reading
+  `"measured_mv":0` as a measurement of zero volts is the machine-facing
+  version of exactly the mistake the rail report exists to prevent for people.
+  `external_power_detected` is three-valued for the same reason: `false` means
+  "no external voltage is present", `null` means "this programmer cannot see
+  external voltage", and merging them is how a chip gets written while a
+  motherboard backfeeds its rail.
+
+- New `--preflight`: reports the rail and whether a destructive operation
+  would be allowed, without touching the bus. It asks the destructive
+  question even though it writes nothing — reporting "fine" because it only
+  asked the read-only question, and then being refused during the actual
+  write, would be wrong in the worst direction.
+
+- The JSON escaper moved into the shared contract unit and now escapes
+  control characters properly. Error text carries file paths, and an
+  unescaped backslash turned a valid payload into a parse error at the far
+  end — which a calling script reports as "the programmer crashed".
+
 ## 4.28.0.0 — the program finds the clock the wiring can carry
 
 - Options → SPI → Частота → **Auto tune clock**. It starts at the slowest

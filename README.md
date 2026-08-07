@@ -182,7 +182,29 @@ The four panels under the toolbar answer "why is this not working" without diggi
 
 ### Command line
 
-`ChipwrightCLI.exe` drives the same engine headlessly for scripting and CI. Run it with `--help` for the current options.
+`ChipwrightCLI.exe` drives the same engine headlessly for scripting and CI. `Chipwright.exe` takes the same switches with the full chip catalogue behind them. Run either with `--help`.
+
+For callers that are not people, `--json` emits one versioned line:
+
+```json
+{"schema_version":1,"action":"detect","ok":true,"result":"ok",
+ "programmer":"CH347","chip":"W25Q64FW","jedec_id":"EF6017","size":8388608,
+ "requested_mv":1800,"measured_mv":null,"target_current_ua":null,
+ "external_power_detected":null,"signal_mv":1800,"signal_measured":false}
+```
+
+Values the hardware cannot observe are `null`, never `0` — a consumer reading `"measured_mv":0` as a measurement of zero volts would be making exactly the mistake this whole design exists to prevent. `external_power_detected` is three-valued for the same reason: `false` means no external voltage is present, `null` means this programmer cannot see external voltage, and merging those is how a chip gets written while a motherboard backfeeds its rail.
+
+`--preflight` reports the rail and whether a destructive operation would be allowed, without touching the bus.
+
+Exit codes distinguish the cases where your next action differs:
+
+| | | | |
+|---|---|---|---|
+| `0` ok | `1` failed | `2` usage | `3` no programmer |
+| `4` programmer lost | `5` no chip answered | `6` chip mismatch | `7` voltage refused |
+| `8` connection unstable | `9` chip locked | `10` file size mismatch | `11` verify failed |
+| `12` file error | `13` cancelled | | |
 
 ## Building
 

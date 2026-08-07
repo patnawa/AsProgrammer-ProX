@@ -187,6 +187,13 @@ $clockDir = Join-Path $env:TEMP "aspx-tests-clock-tune"
 Run-Suite "clocktune_tests" $clockDir @(
   "$root\tests\clocktune_tests.lpr", "$root\software\clocktune.pas")
 
+# The published machine-facing interface: exit codes and JSON key names that
+# other people's scripts depend on, pinned so renaming one is deliberate.
+$contractDir = Join-Path $env:TEMP "aspx-tests-cli-contract"
+Run-Suite "clicontract_tests" $contractDir @(
+  "$root\tests\clicontract_tests.lpr", "$root\software\clicontract.pas",
+  "$root\software\operationmodel.pas")
+
 # preservation-aware whole-operation service, including deterministic
 # fail-at-every-call and randomized invariant checks
 $norDir = Join-Path $env:TEMP "aspx-tests-nor"
