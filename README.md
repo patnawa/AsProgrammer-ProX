@@ -23,6 +23,44 @@ SPI NOR · SPI NAND · I²C EEPROM · Microwire — across nine programmers.
 <sub>A Winbond <code>W74M12JWSSIQ</code> identified live as <code>EF6018</code> — 16 MiB, 1.8 V — with the target rail already matched to it.</sub>
 </div>
 
+<br>
+
+<table>
+<tr>
+<td width="46%"><img src="assets/ch341a-in-jig.jpg" alt="A CH341A programmer with a ZIF socket, held in a PCB jig, with a red wire modification"></td>
+<td>
+
+**The hardware is why this program is careful.**
+
+That is a CH341A in a repair jig — and it has a **red wire soldered across it**. That mod exists because these boards are widely reported to drive **5 V logic on the SPI lines while VCC reads 3.3 V**. Two boards that look identical can behave completely differently, and no software can see the difference.
+
+So Chipwright does not claim to know things it cannot measure. It reports the rail it *asked for* and the rail it *measured* as separate facts, and where the hardware has no sensor it says **"not measurable on this programmer"** instead of showing a number that reads like a confirmation.
+
+Nothing here is inferred upward. A chip whose voltage cannot be established is asked about, not guessed at.
+
+</td>
+</tr>
+</table>
+
+---
+
+## What it does
+
+<table>
+<tr><td width="34%"><b>🔌 Nine programmers</b></td><td>CH347 · CH341A · FT232H · EZP2023+ · AVRISP mkII · USBasp · Arduino · Bus Pirate · serprog</td></tr>
+<tr><td><b>💾 Five chip families</b></td><td>25-series SPI NOR · SPI NAND · 24-series I²C EEPROM · 93-series Microwire · 45/95-series</td></tr>
+<tr><td><b>⚡ Voltage safety</b></td><td>Four-tier voltage resolution, fail-low on every unknown, 1.8 V/3.3 V rail switching, and an electrical preflight that stops the bus <i>before</i> the first clock edge</td></tr>
+<tr><td><b>📊 Honest reporting</b></td><td>Requested vs measured voltage as separate fields; "not measurable" and "unknown" are answers, never blanks or zeros</td></tr>
+<tr><td><b>🎚️ Auto tune clock</b></td><td>Finds the fastest clock your wiring actually carries, by repetition rather than guesswork</td></tr>
+<tr><td><b>🔒 Read-only safe mode</b></td><td>A latch on the protocol layer that removes the ability to erase, write, unlock or edit a status register</td></tr>
+<tr><td><b>🛟 Data safety</b></td><td>Trusted backup with a SHA-256 manifest, connection-stability gate, Smart Write plan preview, byte-by-byte verify, and a second verify in a fresh session</td></tr>
+<tr><td><b>🤖 Machine interface</b></td><td>Versioned JSON output and 14 distinct exit codes, so a script never has to parse a log line</td></tr>
+<tr><td><b>🏭 Production mode</b></td><td>HMAC-authenticated jobs, canonical chip profiles, durable signed evidence, and anti-replay state</td></tr>
+<tr><td><b>🔬 Diagnostics</b></td><td>Chip doctor, true-capacity/counterfeit test, surface scan, SFDP decode, and a connection doctor</td></tr>
+</table>
+
+Every rule above lives in a hardware-free core unit and is covered by the test suite — **22 suites, no hardware required**. See [`docs/testing.md`](docs/testing.md).
+
 ---
 
 ## Why this exists
@@ -164,8 +202,28 @@ If detection finds nothing, the log says why — a wrong rail and a loose clip l
 
 **Smart write** is the one to use. It reads the chip first, works out the minimum erase and program needed, shows you that plan, and only proceeds once you accept it. Nothing is written before you have seen what it intends to do.
 
+Every write runs through the same chain, in this order:
+
+| | Step | If it fails |
+|:--:|---|---|
+| 1 | **Safe mode check** | Refused at the protocol layer — no menu or script can reach past it |
+| 2 | **Electrical preflight** | Refused before the first clock edge |
+| 3 | **Connection stability** — three regions read twice and compared | Refused, naming the first differing address |
+| 4 | **Protection bits** | Refused, or asks, depending on what is locked |
+| 5 | **Trusted backup** + `.json` manifest with SHA-256 | Write does not start |
+| 6 | **Erase and program** to the previewed plan | |
+| 7 | **Byte-by-byte verify** | Reported with the failing address |
+| 8 | **Second verify in a fresh USB session** | Write is reported as failed, not warned about |
+
+Step 8 closes and reopens the device before re-reading, which catches driver-cached reads and contact that is marginal until something re-initialises. It is *not* a power-cycle test — no supported programmer can remove target power — and the log says so rather than implying more than it did.
+
+Each backup lands in `backup/` as a `.bin` plus a `.json` recording the chip, JEDEC ID, capacity, programmer, rail, UTC timestamp and SHA-256. A bare `.bin` cannot answer any of those questions at the moment you need them answered.
+
 > [!WARNING]
 > Set the target voltage to match your chip **before** erase, write or verify. The board defaults to 1.8 V, so a 3.3 V part simply will not answer until you raise it — that is the safe failure, and it is deliberate.
+
+> [!TIP]
+> Working on an unknown part, or a customer's board? Turn on **read-only safe mode** (Options, or `--safe`). It removes the ability to change the chip at the protocol layer, so nothing — no button, no script, no mistake in any of the checks above — can erase, write, unlock or touch a status register.
 
 ### Reading the status strip
 

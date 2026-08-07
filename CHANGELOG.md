@@ -3,6 +3,41 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.31.0.0 — a backup that can answer questions, and a second opinion
+
+- Every automatic backup now writes a `.json` manifest beside the `.bin`,
+  recording the chip name, JEDEC ID, capacity, programmer, the rail it was
+  read at, the UTC timestamp, and the SHA-256 of the file as written to disk.
+
+  A bare `.bin` cannot answer any of the questions that get asked at recovery
+  time — which chip is this from, when, at what voltage, and are the bytes
+  still what they were. Those get asked precisely when they are hardest to
+  reconstruct.
+
+  The rail follows the same rule as everywhere else: `requested_mv` and
+  `measured_mv` are separate, and an unmeasurable one is `null` rather than
+  `0`. A backup claiming it was read at 0 V is worse than one admitting it
+  does not know.
+
+  A manifest that fails to write does not fail the backup — the `.bin` is
+  already durable and still restores — but it says so rather than going quiet.
+
+- After a write verifies, the program now closes the USB device, reopens it,
+  restarts the bus, and verifies a second time. This catches reads cached in
+  the driver or the DLL, contact that is marginal only until something is
+  re-initialised, and chip state that does not survive a full bus reconfigure.
+
+  **It is not the power-cycle verify that was asked for, and it does not claim
+  to be.** No supported programmer can remove target power: the CH347's GPIO6
+  *selects* between 1.8 V and 3.3 V and has no off state, and no other backend
+  has a power-control command at all. So this is a fresh USB session, the log
+  says exactly that, and data retention across a real power loss remains
+  untested. Testing it needs the load switch already recorded on the hardware
+  wishlist in `hardware/assembly.md`.
+
+  A chip that verifies once and then disagrees in a fresh session has the
+  write reported as failed, not as a warning.
+
 ## 4.30.0.0 — a switch that removes the ability to change a chip
 
 - **Read-only safe mode**, in Options and as `--safe` on the command line. For

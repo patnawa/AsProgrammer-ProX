@@ -449,6 +449,10 @@ type
   //ต้องอยู่ในโหมดโปรแกรมแล้วก่อนเรียก
   function ConnectionStableForDestructive: boolean;
 
+  //ตรวจซ้ำในเซสชัน USB ใหม่หลังเขียนผ่านรอบแรก ไม่ใช่ power cycle จริง
+  //เพราะไม่มีบอร์ดไหนที่รองรับตัดไฟฝั่งเป้าหมายได้
+  function ReVerifyInFreshSession(StartAddr, Len: cardinal): boolean;
+
   //ดัมป์ตาราง SFDP ดิบ ๆ ลงไฟล์ ต้องอยู่ในโหมดโปรแกรมแล้ว
   function DumpSFDPToFile(const FileName: string; out ErrMsg: string): boolean;
 
@@ -4543,6 +4547,70 @@ begin
   Result := False;
 end;
 
+//-------------------------------------------- ตรวจซ้ำในเซสชันใหม่หลังเขียน
+//
+//สิ่งที่ผู้ใช้ขอคือ "ปิดและเปิด target rail แล้ว verify ซ้ำ" ซึ่งเป็นวิธีจับ
+//ชิปที่ตอบถูกจากบัฟเฟอร์ภายในโดยที่เซลล์จริงยังไม่ติด แต่บอร์ดที่โปรแกรมนี้
+//รองรับทำไม่ได้สักตัว: GPIO6 ของ CH347 "เลือก" ระหว่าง 1.8V กับ 3.3V ไม่มี
+//สถานะปิด และไม่มี backend ไหนมีคำสั่งตัดไฟฝั่งเป้าหมายเลย
+//
+//จึงทำเท่าที่ทำได้จริงและเรียกให้ตรงกับสิ่งที่ทำ: ปิดอุปกรณ์ USB เปิดใหม่
+//ปลุกบัสใหม่ แล้วอ่านเทียบอีกรอบ
+//
+//สิ่งที่รอบนี้จับได้: การอ่านที่ถูกแคชไว้ในไดรเวอร์หรือใน DLL, หน้าสัมผัส
+//ที่ชายขอบซึ่งโผล่เฉพาะตอน init ใหม่, และสถานะค้างในชิปที่หายไปเมื่อ CS
+//ถูกยกและบัสถูกตั้งค่าใหม่ทั้งชุด
+//
+//สิ่งที่รอบนี้จับไม่ได้: การเก็บข้อมูลของเซลล์เมื่อไฟดับจริง ต้องมี load
+//switch บนบอร์ดถึงจะตรวจได้ ซึ่งอยู่ในรายการฮาร์ดแวร์ที่ hardware/ บันทึกไว้
+//แล้ว ห้ามรายงานว่าผ่าน "power-cycle verify" เด็ดขาด เพราะไม่ได้ทำ
+//ตัวตรวจของเส้นทางเขียนปกติ ตัวจริงอยู่ท้ายไฟล์
+procedure VerifyFlash25(var RomStream: TMemoryStream;
+  StartAddress, DataSize: cardinal); forward;
+
+function ReVerifyInFreshSession(StartAddr, Len: cardinal): boolean;
+begin
+  Result := True;
+  if AsProgrammer.Programmer = nil then Exit;
+  if RomF = nil then Exit;
+
+  LogPrint('re-verifying in a fresh device session');
+
+  ExitProgMode25;
+  AsProgrammer.Programmer.DevClose;
+  //ให้ไดรเวอร์ปล่อยหมายเลขอุปกรณ์คืนก่อน เปิดซ้ำเร็วเกินไปบางครั้งได้
+  //แฮนเดิลเดิมกลับมาโดยที่สถานะยังไม่ถูกล้าง ซึ่งทำให้รอบนี้ไม่มีความหมาย
+  Sleep(250);
+
+  if not AsProgrammer.Programmer.DevOpen then
+  begin
+    //เปิดไม่ได้แปลว่าตรวจไม่ได้ ไม่ใช่ตรวจแล้วผ่าน
+    OpFail('the device could not be reopened for the second verify pass');
+    NoteCLIOutcome(coProgrammerLost);
+    Exit(False);
+  end;
+
+  if not EnterProgModeSPI25 then
+  begin
+    OpFail('the bus could not be restarted for the second verify pass');
+    Exit(False);
+  end;
+
+  RomF.Position := 0;
+  MainForm.MPHexEditorEx.SaveToStream(RomF);
+  RomF.Position := 0;
+  VerifyFlash25(RomF, StartAddr, Len);
+  Result := OpOK;
+  if Result then
+    LogPrint('the second verify pass agreed, in a session that shares no ' +
+             'state with the first. Note this is a fresh USB session, not a ' +
+             'power cycle: no supported programmer can remove target power, ' +
+             'so data retention across a real power loss is untested')
+  else
+    LogPrint('the chip verified once and then disagreed in a fresh session; ' +
+             'treat the write as failed');
+end;
+
 function EnterProgModeSPI25: boolean;
 begin
   //ตั้งแรงดันก่อนปลุกบัสเสมอ ถ้าตั้งไม่ได้ตามที่ขอต้องไม่เดินงานต่อ
@@ -4971,6 +5039,7 @@ end;
 //live earlier in this unit and use the same atomic publication contract.
 function PersistTrustedBackup(Backup: TMemoryStream;
   ExpectedSize: cardinal): boolean; forward;
+procedure WriteBackupManifest(const BinFileName: string; Size: cardinal); forward;
 
 //เขียนหรือลบทั้งชิปผ่าน EZP2023+ แล้วอ่านกลับมาเทียบทุกไบต์
 //
@@ -6521,6 +6590,86 @@ end;
 
 //Publish only an already trusted, complete snapshot.  The final name is never
 //visible until the complete temporary file has been size-checked and renamed.
+//ใบกำกับของไฟล์สำรอง เขียนคู่กับ .bin เสมอ
+//
+//ไฟล์ .bin ล้วน ๆ ตอบคำถามที่สำคัญที่สุดไม่ได้สักข้อ: มันมาจากชิปตัวไหน
+//อ่านมาเมื่อไร ตอนนั้นจ่ายไฟกี่โวลต์ และไบต์ในไฟล์ยังเหมือนตอนที่อ่านมาไหม
+//คำถามพวกนี้จะถูกถามตอนที่ต้องกู้คืน ซึ่งเป็นตอนที่หาคำตอบยากที่สุดพอดี
+//
+//ล้มเหลวที่นี่ไม่ทำให้งานสำรองล้มเหลว ไฟล์ .bin ที่เขียนสำเร็จแล้วยังกู้ได้
+//อยู่ ใบกำกับที่หายไปแค่ทำให้ต้องเดามากขึ้น แต่ต้องบอกให้รู้ ไม่ใช่เงียบ
+procedure WriteBackupManifest(const BinFileName: string; Size: cardinal);
+var
+  J: TJsonObject;
+  Digest: TSHA256Digest;
+  ErrMsg: string;
+  Caps: TProgrammerElectricalCapabilities;
+  Obs: TElectricalObservation;
+  CapsValid, ObsValid: boolean;
+  Report: TRailReport;
+  ManifestName: string;
+  Text: TBytes;
+  i: integer;
+begin
+  //ชื่อไฟล์เดียวกับ .bin เพื่อให้จับคู่กันได้แม้ถูกย้ายหรือเปลี่ยนชื่อโฟลเดอร์
+  ManifestName := ChangeFileExt(BinFileName, '.json');
+
+  J.Init;
+  J.AddInt('schema_version', CLI_SCHEMA_VERSION);
+  J.AddString('image', ExtractFileName(BinFileName));
+  J.AddInt('size', Size);
+  //UTC ไม่ใช่เวลาท้องถิ่น ไฟล์สำรองเดินทางข้ามเครื่องและข้ามโซนเวลา
+  J.AddString('read_utc',
+    FormatDateTime('yyyy-mm-dd"T"hh:nn:ss"Z"', LocalTimeToUniversal(Now)));
+  J.AddString('chip', CurrentICParam.Name);
+  J.AddString('jedec_id', UpperCase(CurrentICParam.ID));
+
+  if AsProgrammer.Programmer <> nil then
+    J.AddString('programmer', AsProgrammer.Programmer.HardwareName)
+  else
+    J.AddNull('programmer');
+
+  //แรงดันตอนที่อ่านมา ใช้กติกาเดียวกับรายงานรางไฟ: วัดไม่ได้คือ null
+  //ไม่ใช่ศูนย์ ไฟล์สำรองที่อ้างว่า "อ่านมาที่ 0 V" แย่กว่าไฟล์ที่บอกว่าไม่รู้
+  FillChar(Caps, SizeOf(Caps), 0);
+  FillChar(Obs, SizeOf(Obs), 0);
+  CapsValid := False;
+  ObsValid := False;
+  if AsProgrammer.Programmer <> nil then
+  begin
+    CapsValid := AsProgrammer.Programmer.GetElectricalCapabilities(Caps);
+    ObsValid := AsProgrammer.Programmer.GetElectricalObservation(Obs);
+  end;
+  Report := BuildRailReport(Caps, Obs, CapsValid, ObsValid);
+  if Report.RequestedKnown then
+    J.AddInt('requested_mv', Report.RequestedMv)
+  else
+    J.AddNull('requested_mv');
+  if Report.MeasuredKnown then
+    J.AddInt('measured_mv', Report.MeasuredMv)
+  else
+    J.AddNull('measured_mv');
+
+  //SHA-256 ของไฟล์ที่เพิ่งเขียนลงดิสก์จริง ๆ ไม่ใช่ของบัฟเฟอร์ในหน่วยความจำ
+  //เพราะสิ่งที่ต้องพิสูจน์คือไฟล์บนดิสก์ยังเหมือนเดิม
+  if SHA256File(BinFileName, Digest, ErrMsg) then
+    J.AddString('sha256', LowerCase(DigestToHex(Digest)))
+  else
+  begin
+    J.AddNull('sha256');
+    LogPrint('the backup was written but could not be hashed: ' + ErrMsg);
+  end;
+
+  SetLength(Text, Length(J.Text));
+  for i := 1 to Length(J.Text) do Text[i - 1] := byte(J.Text[i]);
+  if AtomicWriteDurable(ManifestName, Text, False, ErrMsg) then
+    LogPrint('backup manifest: ' + ManifestName)
+  else
+    //ไม่ล้มงาน แต่ต้องไม่เงียบ
+    LogPrint('the backup manifest could not be written: ' + ErrMsg);
+  Text := nil;
+end;
+
 function PersistTrustedBackup(Backup: TMemoryStream;
   ExpectedSize: cardinal): boolean;
 var
@@ -6590,6 +6739,9 @@ begin
   end;
   LastBackupFileName := FileName;
   LogPrint(STR_BACKUP_DONE + FileName);
+  //บันทึกว่าไฟล์นี้คือชิปตัวไหน อ่านมาเมื่อไร ที่แรงดันเท่าไร และไบต์ตรงกับ
+  //ตอนอ่านหรือเปล่า ไฟล์ .bin เปล่า ๆ ตอบไม่ได้สักข้อ
+  WriteBackupManifest(FileName, ExpectedSize);
   Result := True;
 end;
 
@@ -10414,6 +10566,11 @@ try
         VerifyFlash25(RomF, Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize)
       else
         VerifyFlashKB(RomF, 0, MPHexEditorEx.DataSize);
+
+      //แล้วตรวจซ้ำอีกรอบในเซสชันใหม่ ถ้าผ่านรอบแรก
+      if OpOK and (ComboSPICMD.ItemIndex <> SPI_CMD_KB) then
+        ReVerifyInFreshSession(Hex2Dec('$'+StartAddressEdit.Text),
+                               MPHexEditorEx.DataSize);
     end;
 
   end;
