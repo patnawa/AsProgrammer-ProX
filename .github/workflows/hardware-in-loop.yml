@@ -160,6 +160,47 @@ jobs:
             -ExpectedImageSha256 $env:HIL_IMAGE_SHA256 `
             -ArtifactDir hil-results
 
+      # A run that proves something has to leave behind the thing somebody
+      # transcribes. Without this, releasing a gated capability means digging
+      # the programmer, firmware, chip lot, rail and clock back out of a log by
+      # hand -- which is how a release record ends up with a field guessed.
+      #
+      # The checklist coverage is deliberately left at 0x00. This job does not
+      # know which of the numbered items in the design document its operator
+      # actually exercised, and a workflow that filled that in for itself would
+      # be attesting to work it cannot see. The operator sets the bits.
+      - name: Draft the validation record for transcription
+        if: always()
+        shell: pwsh
+        env:
+          HIL_TARGET: ${{ inputs.target }}
+          HIL_CHIP: ${{ inputs.chip }}
+        run: |
+          New-Item -ItemType Directory -Force hil-results | Out-Null
+          $bundle = Join-Path 'hil-results' 'validation-record.txt'
+          $hashes = Get-ChildItem -Recurse -File hil-results |
+            Where-Object { $_.Name -ne 'validation-record.txt' } |
+            Sort-Object FullName |
+            ForEach-Object { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+          $joined = ($hashes -join '')
+          $stream = [IO.MemoryStream]::new([Text.Encoding]::ASCII.GetBytes($joined))
+          $artefact = (Get-FileHash -InputStream $stream -Algorithm SHA256).Hash.ToLowerInvariant()
+          @"
+          Transcribe into BuildTable in software/validationgate.pas, after
+          setting ChecklistCovered to the items this run actually exercised
+          (bit 0 = item 1). See docs/design-spi-nand.md and
+          docs/design-cross-platform.md for the numbered lists.
+
+          Append(Result, <gcCH347LibusbWrite | gcSPINANDMutation>,
+                 '$($env:GITHUB_RUN_ID)', '$($env:GITHUB_SHA.Substring(0,7))',
+                 '$([DateTime]::UtcNow.ToString('yyyy-MM-dd'))',
+                 '$($env:HIL_TARGET)', '<firmware>',
+                 '$($env:HIL_CHIP)', '<chip lot>',
+                 <measured rail mV>, <clock Hz>, `$00,
+                 '$artefact');
+          "@ | Set-Content -LiteralPath $bundle -Encoding ascii
+          Get-Content -LiteralPath $bundle
+
       # The backup is intentionally retained: if fixture restore fails, it is
       # the exact recovery image. Use synthetic data on sacrificial chips only.
       - name: Upload bench evidence and restore image

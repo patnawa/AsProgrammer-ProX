@@ -5,7 +5,8 @@ unit ft232hhw;
 interface
 
 uses
-  Classes, SysUtils, basehw, msgstr, D2XXUnit, utilfunc, electricalpreflight;
+  Classes, SysUtils, basehw, msgstr, D2XXUnit, utilfunc, electricalpreflight,
+  signalchar;
 
 type
 
@@ -160,11 +161,17 @@ end;
 //    exist on an FT232H, so all four flags stay False and the rail report
 //    reads "not measurable on this programmer".
 //
-//SignalVoltageVerified stays False even so.  The reasoning above is sound
-//and it is still an inference: nobody has put a probe on CS/CLK/MOSI of the
-//specific breakout in front of the user, and a board with VCCIO strapped to
-//5 V would look identical from here.  Production refuses to run on that
-//basis; bench work proceeds and is told.
+//SignalVoltageVerified is asked of signalchar rather than asserted here, and
+//with no measurement recorded the answer is still False.  The reasoning above
+//is sound and it is still an inference: nobody has put a probe on CS/CLK/MOSI
+//of the specific breakout in front of the user, and a board with VCCIO
+//strapped to 5 V would look identical from here.  Production refuses to run
+//on that basis; bench work proceeds and is told.
+//
+//That 5 V breakout is worth naming, because it is the case a recorded
+//measurement would catch: signalchar would report 5000 mV against a 3300 mV
+//rail, and the preflight would refuse every 3.3 V part on absolute maximum
+//rather than clocking them.
 //
 //The practical effect of FixedVioMv = 3300 is the useful one: a 1.8 V part
 //is refused outright, because 3.3 V logic into a 1.8 V flash is roughly
@@ -194,7 +201,8 @@ begin
 
   Capabilities.CanSetVio := False;
   Capabilities.FixedVioMv := 3300;
-  Capabilities.SignalVoltageVerified := False;
+  ApplyMeasuredSignalLevel(Capabilities.ProgrammerID, Capabilities.FixedVioMv,
+                           Capabilities);
 
   Capabilities.CanDetectExternalPower := False;
   Capabilities.CanMeasureTargetVoltage := False;
@@ -220,7 +228,9 @@ begin
   Observation.TargetPowerEnabled := True;
   Observation.SelectedTargetMv := 3300;
   Observation.SelectedProgrammerVioMv := 3300;
-  Observation.EffectiveTargetVioMv := 3300;
+  //A 5 V-strapped breakout is indistinguishable from here, so this is the
+  //measured level if anyone has taken one, and the rail otherwise.
+  ApplyObservedSignalLevel('FT232H', 3300, Observation);
 
   //Everything below is what this part cannot see.  Leaving the flags False
   //is the message.

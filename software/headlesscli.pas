@@ -15,7 +15,7 @@ implementation
 uses
   Classes, SysUtils, StrUtils, basehw, ch347proto, ch347usb, spi25noradapter,
   operationmodel, norplanner, norengine, operationrunner, prodevidence,
-  prodcrypto, imgcheck, sfdp;
+  prodcrypto, imgcheck, sfdp, validationgate;
 
 const
   EXIT_OK = 0;
@@ -40,6 +40,8 @@ begin
 end;
 
 procedure Usage;
+var
+  I: integer;
 begin
   Say('Chipwright headless CLI (no LCL)');
   Say;
@@ -49,9 +51,10 @@ begin
   Say('  ChipwrightCLI --smart-preview patch.bin --size BYTES');
   Say('      --address N --page-size N --erase-size N --erase-opcode 20');
   Say;
-  Say('Destructive hardware command (gated until live validation):');
+  Say('Destructive hardware command:');
   Say('  ChipwrightCLI --smart-write patch.bin ... --backup original.bin --yes');
-  Say('  Also set ' + WRITE_GATE_ENV + '=' + WRITE_GATE_VALUE);
+  Say('  While the capability is gated, also set ' +
+      WRITE_GATE_ENV + '=' + WRITE_GATE_VALUE);
   Say;
   Say('Offline commands:');
   Say('  ChipwrightCLI --scan image.bin');
@@ -59,6 +62,15 @@ begin
   Say;
   Say('Options: --hw ch347 --speed 0..7 --native-4byte | --enter-4byte');
   Say('         --replace (allow replacing read output; never backup output)');
+  Say;
+  //Printed rather than described. "Gated until live validation" in prose
+  //ages badly and cannot say which item is outstanding; this is generated
+  //from the same records the gate itself reads, so it cannot disagree with
+  //what the program will actually do.
+  Say('Hardware validation gates:');
+  for I := 0 to High(GateStatusLines) do
+    Say('  ' + GateStatusLines[I]);
+  Say('  A refused destructive command names the outstanding items.');
 end;
 
 function ArgValue(const Name: string): string;
@@ -470,7 +482,7 @@ var
   Response: TNOROperationResponse;
   ID: TSPI25JEDECID;
   Data: TBytes;
-  ErrorText, FileName, BackupName: string;
+  ErrorText, FileName, BackupName, GateReason: string;
   ChipSize, Address, PageSize, EraseSize, ReadPasses: QWord;
   EraseOpcode: byte;
   Speed: integer;
@@ -535,13 +547,37 @@ begin
       Say('FAILED: --smart-write requires --backup FILE');
       Exit(EXIT_USAGE);
     end;
-    if not HasFlag('yes') or
-       (GetEnvironmentVariable(WRITE_GATE_ENV) <> WRITE_GATE_VALUE) then
+    if not HasFlag('yes') then
     begin
-      Say('REFUSED before device open: headless CH347 writes await live validation.');
-      Say('Use --yes and set ' + WRITE_GATE_ENV + '=' + WRITE_GATE_VALUE +
-        ' only with a sacrificial chip.');
+      Say('REFUSED before device open: --smart-write requires --yes.');
       Exit(EXIT_FAILED);
+    end;
+
+    // Two ways past this point, and they are not alternatives.
+    //
+    // The first is that the capability has been validated on silicon, in
+    // which case validationgate says so and cites the run that did it. The
+    // second is the environment token, which is not a second door but the
+    // means of performing that validation: somebody has to issue destructive
+    // commands on a sacrificial part before any evidence can exist.
+    //
+    // What changes here is the refusal. It used to say "await live
+    // validation", which told the reader that a decision had been made
+    // somewhere and nothing about how to change it. It now names the specific
+    // checklist items still outstanding and the document they come from.
+    if not IsReleased(gcCH347LibusbWrite, GateReason) then
+    begin
+      if GetEnvironmentVariable(WRITE_GATE_ENV) <> WRITE_GATE_VALUE then
+      begin
+        Say('REFUSED before device open: ' + GateReason);
+        Say;
+        Say('Set ' + WRITE_GATE_ENV + '=' + WRITE_GATE_VALUE +
+          ' to perform that validation on a sacrificial chip.');
+        Exit(EXIT_FAILED);
+      end;
+      Say('WARNING: ' + GateReason);
+      Say('Proceeding on the sacrificial-chip token. This run is a ' +
+        'validation attempt, not a validated operation.');
     end;
   end;
 

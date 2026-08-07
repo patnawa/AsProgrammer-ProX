@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, basehw, msgstr, ch347dll, ch341dll, utilfunc,
-  electricalpreflight;
+  electricalpreflight, signalchar;
 
 type
 
@@ -233,12 +233,19 @@ end;
 //to make a preflight pass would be manufacturing the exact reassurance the
 //preflight exists to withhold.
 //
-//SignalVoltageVerified is False for a separate reason: nobody has put a scope
-//on CS/CLK/MOSI at both rail settings on this board.  The wiring implies one
-//switched supply feeds both the chip and the level the CH347 drives, and the
-//manufacturer's own UI presents it as one control, but implication is not
-//measurement.  hardware/test-procedure.md is the procedure that would settle
-//it; until someone runs it, the program says "assumed" rather than "1.8 V".
+//SignalVoltageVerified is not decided here at all, for a separate reason:
+//nobody has put a scope on CS/CLK/MOSI at both rail settings on this board.
+//The wiring implies one switched supply feeds both the chip and the level the
+//CH347 drives, and the manufacturer's own UI presents it as one control, but
+//implication is not measurement.
+//
+//So the answer comes from signalchar, which holds the bench measurements this
+//project has actually taken -- currently none, which is why the program still
+//says "assumed" rather than "1.8 V".  When someone runs
+//hardware/test-procedure.md and records the result, this backend starts
+//reporting a verified level without being edited, and if the measurement
+//shows the signals *not* following the rail, the preflight refuses on the
+//measured number.
 function TCH347Hardware.GetElectricalCapabilities(
   out Capabilities: TProgrammerElectricalCapabilities): boolean;
 var
@@ -280,7 +287,8 @@ begin
     Capabilities.FixedVioMv := FTargetVoltageMv
   else
     Capabilities.FixedVioMv := CH347_VCC_1V8_MV;
-  Capabilities.SignalVoltageVerified := False;
+  ApplyMeasuredSignalLevel(Capabilities.ProgrammerID, Capabilities.FixedVioMv,
+                           Capabilities);
 
   Capabilities.CanDetectExternalPower := False;
   Capabilities.CanMeasureTargetVoltage := False;
@@ -308,7 +316,9 @@ begin
   Observation.TargetPowerEnabled := True;
   Observation.SelectedTargetMv := FTargetVoltageMv;
   Observation.SelectedProgrammerVioMv := FTargetVoltageMv;
-  Observation.EffectiveTargetVioMv := FTargetVoltageMv;
+  //Not simply the rail: where a measurement exists it is the measured level,
+  //which is the number the chip's absolute maximum has to be compared against.
+  ApplyObservedSignalLevel('CH347', FTargetVoltageMv, Observation);
 
   //Everything below is what this board cannot see.  Leaving the flags False
   //is the whole message: "not observed" must never arrive as a zero that

@@ -130,3 +130,33 @@ Graduating a part requires retained evidence from a socketed sacrificial chip:
 Until that record exists, tests and successful compilation are evidence of
 software behavior only—not proof that destructive commands are safe on
 silicon.
+
+### What lifts the gate
+
+The seven items above are not prose. They are the contents of
+`NAND_CHECKLIST` in `software/validationgate.pas`, and the gate in `cli.pas`
+reads them: `ChipwrightCLI --gates` prints the list with the covered items
+ticked, and a refused `--nand-write` names the outstanding ones rather than
+saying "pending live validation".
+
+Releasing the capability is therefore a transcription, not a decision. Run the
+destructive hardware-in-loop workflow against a sacrificial part, retain its
+evidence bundle, and add one `Append(Result, gcSPINANDMutation, ...)` call to
+`BuildTable`. Coverage is a bit per numbered item; a run that covered six of
+seven is recorded as six of seven, and the gate stays shut and names the
+seventh.
+
+Coverage does not accumulate across runs, deliberately. The value of items 5
+and 7 is that they happened to the same part in the same session as items 1
+to 3 — a restore verified against a backup some other run took last month is
+not a verified restore.
+
+The `ASPROGRAMMER_NAND_LIVE_VALIDATED` token is not a second way through the
+gate. It is how the validation run itself is performed, since somebody has to
+issue destructive commands before any evidence can exist; a run that uses it
+while the capability is gated says so in as many words.
+
+If an item is added to or removed from the list above, change
+`NAND_CHECKLIST` in the same commit. `tests/validationgate_tests.lpr` asserts
+the count, so a list that grows in the document and not in the code is a build
+failure rather than a quietly weakened requirement.
