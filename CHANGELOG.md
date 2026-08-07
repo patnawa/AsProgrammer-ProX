@@ -3,6 +3,47 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.30.0.0 — a switch that removes the ability to change a chip
+
+- **Read-only safe mode**, in Options and as `--safe` on the command line. For
+  an unknown part, or a customer's board, that you need to read and identify
+  and nothing more.
+
+  Every other safeguard in this program is a judgement — is this rail right,
+  is this clip solid, does this image fit. Judgements can be wrong, and these
+  ones are made by software reading a chip that may be lying about what it is.
+  This is not a judgement. It is a switch that removes the capability.
+
+- The latch sits on the eleven mutating SPI NOR opcodes in `spi25.pas`, not on
+  the buttons. Guarding the buttons means guarding only the doors somebody
+  remembered, and the write path is reached from menus, scripts, the
+  status-register editor, the capacity test and the command line. Putting it
+  where the capability actually lives closes every route, including the ones
+  nobody has written yet — a new call site is covered the day it is added.
+
+  The protocol layer refuses silently with the same `-1` it returns for a
+  disconnected cable, which every caller already checks. The sentence
+  explaining *why* comes from the UI layer, which is the layer that knows what
+  the operator was trying to do.
+
+- Status-register writes are included, and that is the part people argue with.
+  They change no byte of the array, so they look harmless. They are how a chip
+  becomes permanently locked: SRP and WPS bits can be set into one-time
+  configurations no software will ever undo. On a customer's part that is
+  worse than a bad write, because a bad write restores from the backup.
+
+- `--force` does not override it, deliberately. `--force` means "I know what I
+  am doing", which belongs on gates gaurding things an operator can know. Safe
+  mode guards against the operator at the operator's own earlier request; a
+  flag that switched it off would make it a suggestion rather than a latch.
+
+- Off at startup. A safety mode that defaults to on gets switched off once, on
+  the first day, and never switched back on.
+
+- An action nobody classified counts as destructive. The cost of being wrong
+  that way is a refused operation; the cost of the default going the other way
+  is somebody else's chip.
+
 ## 4.29.1.0 — the source tree stops carrying 27 MB that was never source
 
 - Removed from the working tree (git history was deliberately left alone, so

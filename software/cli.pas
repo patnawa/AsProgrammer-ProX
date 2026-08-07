@@ -33,6 +33,7 @@ uses
   opresult, prodlog, serialnum, spi25, utilfunc, imgcheck, ifd, DateUtils,
   prodcrypto, prodjob, prodstate, productiongate, electricalpreflight,
   railreport, clicontract,
+  safemode,
   chipprofile, chipsave,
   nandmodel, nandplanner, nandengine, spi25nandadapter, nandcatalog;
 
@@ -51,11 +52,11 @@ const
   );
 
   //สวิตช์ที่เป็นธงเปล่า ๆ
-  FlagSwitches: array[0..16] of string = (
+  FlagSwitches: array[0..17] of string = (
     'erase', 'detect', 'sfdp', 'help', 'force', 'json', 'verify',
     'no-fast-read', 'smart', 'plan-only', 'nand-info', 'nand-raw',
     'chip-test', 'capacity-test', 'surface-scan', 'nand-erase',
-    'preflight'
+    'preflight', 'safe'
   );
 
   //The secret source is station policy, not an arbitrary caller-selected
@@ -268,6 +269,12 @@ begin
   Say('                  validation. A validated station must set');
   Say('                  ' + NAND_LIVE_GATE_ENV + '=1, and every destructive');
   Say('                  invocation must also include --force');
+  Say('');
+  Say('  Safety:');
+  Say('  --safe          read-only safe mode: erase, write, unlock and');
+  Say('                  status-register edits are refused at the protocol');
+  Say('                  layer, so nothing can reach them. --force does not');
+  Say('                  override it. Use it on unknown or customer chips.');
   Say('');
   Say('  Machine-facing:');
   Say('  --preflight     report the target rail and whether a destructive');
@@ -1410,6 +1417,18 @@ begin
   CLIMode := True;
   //เหตุผลของงานก่อนหน้าต้องไม่ไหลมาถึงงานนี้
   ResetCLIOutcome;
+
+  //ตั้งก่อนตรวจสวิตช์อื่นทั้งหมด งานที่ขอมาพร้อมกันในบรรทัดเดียวจะได้อยู่
+  //ใต้แลตช์ตั้งแต่ต้น ไม่ใช่หลังจากเริ่มไปแล้ว
+  //
+  //ไม่มี --force ที่ปลดล็อกได้ โดยตั้งใจ: --safe คือคำสั่งของผู้ใช้เองว่า
+  //"รอบนี้ห้ามแตะชิป" ธงที่ยกเลิกมันได้จะทำให้มันเป็นแค่ข้อเสนอแนะ
+  if HasSwitch('safe') then
+  begin
+    SetSafeMode(True);
+    Say('read-only safe mode: erase, write, unlock and status-register ' +
+        'edits are refused at the protocol layer');
+  end;
 
   if HasSwitch('help') then
   begin

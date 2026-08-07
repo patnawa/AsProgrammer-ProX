@@ -158,7 +158,7 @@ Run-Suite "hwtests" $hwDir @(
   "$root\tests\hwtests.lpr", "$root\tests\mockhw.pas",
   "$root\software\spi25.pas", "$root\software\basehw.pas",
   "$root\software\utilfunc.pas", "$root\software\i2c.pas",
-  "$root\software\electricalpreflight.pas")
+  "$root\software\electricalpreflight.pas", "$root\software\safemode.pas")
 
 # Every backend advertises typed voltage, protocol and clock capabilities;
 # unknown facts must remain unknown rather than becoming permissive defaults.
@@ -186,6 +186,12 @@ Run-Suite "railreport_tests" $railDir @(
 $clockDir = Join-Path $env:TEMP "aspx-tests-clock-tune"
 Run-Suite "clocktune_tests" $clockDir @(
   "$root\tests\clocktune_tests.lpr", "$root\software\clocktune.pas")
+
+# The latch that makes the program incapable of changing a chip: what it
+# stops, what it must never stop, and that nothing quietly falls off the list.
+$safeDir = Join-Path $env:TEMP "aspx-tests-safe-mode"
+Run-Suite "safemode_tests" $safeDir @(
+  "$root\tests\safemode_tests.lpr", "$root\software\safemode.pas")
 
 # The published machine-facing interface: exit codes and JSON key names that
 # other people's scripts depend on, pinned so renaming one is deliberate.
@@ -261,6 +267,7 @@ $adapterDir = Join-Path $env:TEMP "aspx-tests-spi25-adapter"
 Run-Suite "spi25noradapter_tests" $adapterDir @(
   "$root\tests\adapter\spi25noradapter_tests.lpr",
   "$root\software\spi25noradapter.pas", "$root\software\spi25.pas",
+  "$root\software\safemode.pas",
   "$root\software\basehw.pas", "$root\software\utilfunc.pas",
   "$root\software\electricalpreflight.pas",
   "$root\software\operationmodel.pas", "$root\software\norplanner.pas",
@@ -274,7 +281,8 @@ Run-Suite "legacy_protocol_tests" $legacyDir @(
   "$root\tests\legacy_protocol\legacy_mockhw.pas",
   "$root\software\basehw.pas", "$root\software\utilfunc.pas",
   "$root\software\electricalpreflight.pas",
-  "$root\software\spi25.pas", "$root\software\i2c.pas",
+  "$root\software\spi25.pas", "$root\software\safemode.pas",
+  "$root\software\i2c.pas",
   "$root\software\spi95.pas", "$root\software\spi45.pas",
   "$root\software\microwire.pas")
 

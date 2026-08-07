@@ -7,7 +7,7 @@ interface
 //หน่วยนี้ไม่พึ่ง LCL และไม่พึ่ง main โดยตั้งใจ
 //ชั้นโปรโตคอลจึงเอาไปทดสอบกับฮาร์ดแวร์จำลองได้โดยไม่ต้องมีหน้าจอหรือชิปจริง
 uses
-  Classes, SysUtils, utilfunc, BaseHW;
+  Classes, SysUtils, utilfunc, BaseHW, safemode;
 
 const
 
@@ -192,6 +192,24 @@ function SPIWrite(CS: byte; BufferLen: integer; buffer: array of byte): integer;
 function SPIReadWrite(CSR: byte; CSW: byte; RBufferLen: integer; out rbuffer: array of byte; WBufferLen: integer; wbuffer: array of byte): integer;
 
 implementation
+
+//ด่านโหมดอ่านอย่างเดียว วางไว้ที่ตัวคำสั่ง ไม่ใช่ที่ปุ่ม
+//
+//วางไว้ที่ปุ่มแปลว่ามันคุมเฉพาะประตูที่มีคนนึกออก คำสั่งเขียนใน SPI 25 ถูก
+//เรียกจากหลายที่มาก ทั้งเมนู สคริปต์ หน้าต่างแก้ status register เครื่อง
+//ทดสอบความจุ และเส้นทางบรรทัดคำสั่ง การไล่ปิดทีละที่จึงพลาดแน่ ๆ สักที่หนึ่ง
+//และที่พลาดคือที่ที่ไม่มีใครนึกถึงตอนเพิ่มโค้ดใหม่
+//
+//ที่นี่คือที่ที่ความสามารถอยู่จริง ปิดตรงนี้แล้วปิดหมดทุกทาง รวมถึงทางที่
+//ยังไม่มีใครเขียน
+//
+//คืน -1 เงียบ ๆ (เท่ากับ "ส่งไม่สำเร็จ") ผู้เรียกทุกคนตรวจค่านี้อยู่แล้ว
+//เพราะเป็นค่าเดียวกับที่ได้ตอนสายหลุด ส่วนข้อความอธิบายให้คนอ่านเป็นหน้าที่
+//ของชั้น UI ซึ่งรู้ว่าผู้ใช้กำลังพยายามทำอะไรอยู่
+function RefusedBySafeMode(Action: TGuardedAction): boolean; inline;
+begin
+  Result := SafeModeBlocks(Action);
+end;
 
 procedure Reset25ChipHints;
 begin
@@ -513,6 +531,7 @@ function UsbAsp25_WriteSecReg(Addr: longword; buffer: array of byte; bufflen: in
 var
   buff: array[0..3] of byte;
 begin
+  if RefusedBySafeMode(gaWrite) then Exit(-1);
   if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
      (not SPI25AddressRangeValid(Addr, bufflen, False)) then Exit(-1);
 
@@ -529,6 +548,7 @@ function UsbAsp25_EraseSecReg(Addr: longword): integer;
 var
   buff: array[0..3] of byte;
 begin
+  if RefusedBySafeMode(gaErase) then Exit(-1);
   if not SPI25AddressRangeValid(Addr, 1, False) then Exit(-1);
 
   buff[0] := $44;
@@ -545,6 +565,7 @@ function UsbAsp25_EraseSector(Opcode: byte; Addr: longword; FourByteAddr: boolea
 var
   buff: array[0..4] of byte;
 begin
+  if RefusedBySafeMode(gaErase) then Exit(-1);
   if not SPI25AddressRangeValid(Addr, 1, FourByteAddr) then Exit(-1);
 
   buff[0] := Opcode;
@@ -706,6 +727,7 @@ function UsbAsp25_GlobalUnlock(): integer;
 var
   buff: byte;
 begin
+  if RefusedBySafeMode(gaUnlock) then Exit(-1);
   buff := $98;
   Result := SPIWrite(1, 1, buff);
 end;
@@ -726,6 +748,7 @@ function UsbAsp25_ChipErase(): integer;
 var
   buff: byte;
 begin
+  if RefusedBySafeMode(gaErase) then Exit(-1);
   //Atmel AT25F รุ่นเก่าลบทั้งชิปด้วย 62h เท่านั้น
   if Chip25ManufID = $1F then
   begin
@@ -788,6 +811,7 @@ function UsbAsp25_WriteSR(sreg: byte; opcode: byte = $01; Volatile: boolean = Fa
 var
   buff: array[0..1] of byte;
 begin
+  if RefusedBySafeMode(gaWriteStatusRegister) then Exit(-1);
   if not SendSRWriteEnable(Volatile) then Exit(-1);
 
   Buff[0] := opcode;
@@ -799,6 +823,7 @@ function UsbAsp25_WriteSR_2byte(sreg1, sreg2: byte; Volatile: boolean = False): 
 var
   buff: array[0..2] of byte;
 begin
+  if RefusedBySafeMode(gaWriteStatusRegister) then Exit(-1);
   if not SendSRWriteEnable(Volatile) then Exit(-1);
 
   //กรณีที่ status register ยาว 2 ไบต์
@@ -818,6 +843,7 @@ function UsbAsp25_Write(Opcode: byte; Addr: longword; buffer: array of byte; buf
 var
   buff: array[0..3] of byte;
 begin
+  if RefusedBySafeMode(gaWrite) then Exit(-1);
   if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
      (not SPI25AddressRangeValid(Addr, bufflen, False)) then Exit(-1);
 
@@ -833,6 +859,7 @@ function UsbAsp25_Write32bitAddr(Opcode: byte; Addr: longword; buffer: array of 
 var
   buff: array[0..4] of byte;
 begin
+  if RefusedBySafeMode(gaWrite) then Exit(-1);
   if (not SPI25BufferLengthValid(bufflen, Length(buffer))) or
      (not SPI25AddressRangeValid(Addr, bufflen, True)) then Exit(-1);
 
@@ -849,6 +876,7 @@ function UsbAsp25_WriteSSTB(Opcode: byte; Data: byte): integer;
 var
   buff: array[0..1] of byte;
 begin
+  if RefusedBySafeMode(gaWrite) then Exit(-1);
   buff[0] := Opcode;
   buff[1] := Data;
 
@@ -860,6 +888,7 @@ function UsbAsp25_WriteSSTW(Opcode: byte; Data1, Data2: byte): integer;
 var
   buff: array[0..2] of byte;
 begin
+  if RefusedBySafeMode(gaWrite) then Exit(-1);
   buff[0] := Opcode;
   buff[1] := Data1;
   buff[2] := Data2;

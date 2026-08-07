@@ -17,6 +17,7 @@ uses
   prodevidence, eepromengine, eepromadapters,
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
   electricalpreflight, railreport, sessionstate, clocktune, clicontract,
+  safemode,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw,
   serproghw, ezphw;
 
@@ -154,6 +155,7 @@ type
     MenuSwapBytes: TMenuItem;
     MenuCheckIDBefore: TMenuItem;
     MenuAutoBackup: TMenuItem;
+    MenuSafeMode: TMenuItem;
     MenuConnectionDoctor: TMenuItem;
     MenuCompareChip: TMenuItem;
     MenuCompareFiles: TMenuItem;
@@ -332,6 +334,7 @@ type
     procedure ListcomportsMenuItemClick(Sender: TObject);
     procedure MenuCH347VccClick(Sender: TObject);
     procedure MenuAutoTuneClockClick(Sender: TObject);
+    procedure MenuSafeModeClick(Sender: TObject);
     procedure RadioCH347VccChange(Sender: TObject);
     procedure SpeedButton1Click(Sender: TObject);
     procedure StartAddressEditChange(Sender: TObject);
@@ -5964,6 +5967,19 @@ begin
     Exit(False);
   end;
 
+  //โหมดอ่านอย่างเดียวมาก่อนทุกด่าน
+  //
+  //ตัวแลตช์จริงอยู่ใน spi25 ที่ตัวคำสั่ง ซึ่งจะปฏิเสธเงียบ ๆ อยู่แล้วไม่ว่า
+  //จะมาทางไหน ที่นี่มีไว้เพื่อบอกคนว่าทำไม เพราะชั้นนี้คือชั้นที่รู้ว่า
+  //ผู้ใช้กำลังพยายามทำอะไร ส่วน spi25 รู้แค่ว่ามีคำสั่งเขียนวิ่งเข้ามา
+  if SafeModeBlocks(gaWrite) then
+  begin
+    LogPrint(SafeModeRefusal(gaWrite));
+    NoteCLIOutcome(coChipLocked);
+    OpFail('read-only safe mode is on');
+    Exit(False);
+  end;
+
   //ก่อนอย่างอื่นทั้งหมด: ชิปตัวนี้ตอบคำถามเดียวกันเหมือนเดิมทุกครั้งไหม
   //
   //คล็อกที่จูนแล้วพิสูจน์ได้แค่ว่าทะเบียนสามไบต์กลับมาครบ ไม่ได้พิสูจน์ว่า
@@ -9528,6 +9544,21 @@ begin
   //เมนูไม่ถูกปิดตอนงานเดิน คลิกซ้อนแล้วอุปกรณ์ตัวเดียวกันโดนสองงานพร้อมกัน
   if OperationRunning then Exit;
   RunChipDoctor;
+end;
+
+//สลับโหมดอ่านอย่างเดียว
+//
+//เขียนสถานะลงหน่วย safemode ทันที ไม่ใช่ไปอ่านค่าติ๊กของเมนูตอนจะใช้งาน
+//เพราะทางที่ไม่ได้ผ่านหน้าจอ (บรรทัดคำสั่ง สคริปต์) ก็ต้องเห็นสถานะเดียวกัน
+procedure TMainForm.MenuSafeModeClick(Sender: TObject);
+begin
+  SetSafeMode(MenuSafeMode.Checked);
+  if SafeModeActive then
+    LogPrint('read-only safe mode is ON: erase, write, unlock and ' +
+             'status-register edits are refused at the protocol layer, so ' +
+             'no menu, script or command line can reach them')
+  else
+    LogPrint('read-only safe mode is OFF: this chip can be changed again');
 end;
 
 //หาความเร็วที่สายชุดนี้รับไหว แล้วติ๊กเมนูให้ตามนั้น

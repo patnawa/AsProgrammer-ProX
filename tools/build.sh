@@ -103,7 +103,7 @@ hw="$tmp/hw"
 run_suite hwtests "$hw" \
   tests/hwtests.lpr tests/mockhw.pas \
   software/spi25.pas software/basehw.pas software/utilfunc.pas \
-  software/i2c.pas software/electricalpreflight.pas
+  software/i2c.pas software/electricalpreflight.pas software/safemode.pas
 
 capability="$tmp/hardware-capability"
 run_suite hardwarecapability_tests "$capability" \
@@ -129,6 +129,12 @@ run_suite railreport_tests "$rail" \
 clock="$tmp/clock-tune"
 run_suite clocktune_tests "$clock" \
   tests/clocktune_tests.lpr software/clocktune.pas
+
+# The latch that makes the program incapable of changing a chip: what it
+# stops, what it must never stop, and that nothing quietly falls off the list.
+safe="$tmp/safe-mode"
+run_suite safemode_tests "$safe" \
+  tests/safemode_tests.lpr software/safemode.pas
 
 # The published machine-facing interface: exit codes and JSON key names that
 # other people's scripts depend on, pinned so renaming one is deliberate.
@@ -244,7 +250,7 @@ adapter="$tmp/spi25-adapter"
 run_suite spi25noradapter_tests "$adapter" \
   tests/adapter/spi25noradapter_tests.lpr \
   software/spi25noradapter.pas software/spi25.pas software/basehw.pas \
-  software/utilfunc.pas software/electricalpreflight.pas \
+  software/utilfunc.pas software/electricalpreflight.pas software/safemode.pas \
   software/operationmodel.pas software/norplanner.pas software/norengine.pas
 
 legacy="$tmp/legacy"
@@ -252,7 +258,7 @@ run_suite legacy_protocol_tests "$legacy" \
   tests/legacy_protocol/legacy_protocol_tests.lpr \
   tests/legacy_protocol/legacy_mockhw.pas \
   software/basehw.pas software/utilfunc.pas software/spi25.pas \
-  software/electricalpreflight.pas \
+  software/electricalpreflight.pas software/safemode.pas \
   software/i2c.pas software/spi95.pas software/spi45.pas \
   software/microwire.pas
 

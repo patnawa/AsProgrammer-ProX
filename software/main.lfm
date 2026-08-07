@@ -896,6 +896,11 @@ object MainForm: TMainForm
         Checked = True
         Enabled = False
       end
+      object MenuSafeMode: TMenuItem
+        AutoCheck = True
+        Caption = 'Read-only safe mode (no erase, write, unlock or SR edit)'
+        OnClick = MenuSafeModeClick
+      end
       object MenuConnectionDoctor: TMenuItem
         Caption = 'Connection Doctor (read-only)...'
         OnClick = MenuConnectionDoctorClick

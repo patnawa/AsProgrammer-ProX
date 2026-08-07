@@ -34,6 +34,7 @@ adds it to the builds.
 - `railreport_tests`
 - `clocktune_tests`
 - `clicontract_tests`
+- `safemode_tests`
 - `norengine_tests`
 - `eepromengine_tests`
 - `operationrunner_tests`
@@ -55,6 +56,7 @@ adds it to the builds.
 | NOR and EEPROM operations | Differential planning, preserved neighbor bytes, read-twice trust, cancellation boundaries, fail-at-every-call matrices, and randomized final-image invariants |
 | SPI NAND | Geometry, bad-block planning, ECC verdicts, protection, status failures, cancellation, and virtual-device execution |
 | Chip health | Capacity/counterfeit tests restore the original data; protocol packet layouts remain byte-exact |
+| Read-only safe mode | Every action that can change a chip is refused while the latch is on, including status-register writes; no read is ever refused; an unclassified action defaults to destructive; and the refusal names both the operation and where the switch is |
 | Machine-facing contract | Exit codes and JSON key names stay pinned across releases, every engine error maps to an action an automated caller can take, no two outcomes share a number, and an unmeasurable value serialises as null rather than zero |
 | Clock tuning and connection trust | The boundary between a clock the wiring carries and one it does not is found by repetition, an all-FF reply is never mistaken for agreement, a connection fault is reported as one rather than as a speed problem, and two disagreeing reads of the same range refuse the erase |
 | Target rail | Requested and measured voltage stay separate fields, unmeasurable facts never render as numbers, and a decided electrical failure blocks the bus while an uncharacterised backend only warns |
