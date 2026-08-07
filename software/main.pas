@@ -52,6 +52,11 @@ type
     MenuCH347SPIClock: TMenuItem;
     MenuSPIClockSeparator: TMenuItem;
     MenuAutoTuneClock: TMenuItem;
+    MenuAutoTuneOnSilence: TMenuItem;
+    GroupBusClock: TGroupBox;
+    ComboBusClock: TComboBox;
+    ButtonTuneClock: TButton;
+    LabelBusClockHint: TLabel;
     MenuCH347SPIClock468_75KHz: TMenuItem;
     MenuCH347SPIClock60MHz: TMenuItem;
     MenuCH347SPIClock30MHz: TMenuItem;
@@ -69,6 +74,7 @@ type
     RadioCH347Vcc3V3: TRadioButton;
     RadioCH347VccAuto: TRadioButton;
     LabelCH347ChipVcc: TLabel;
+    ButtonTryOtherRail: TButton;
     MenuSendAB: TMenuItem;
     StartAddressEdit: TEdit;
     GroupChipSettings: TGroupBox;
@@ -345,6 +351,8 @@ type
     procedure ListcomportsMenuItemClick(Sender: TObject);
     procedure MenuCH347VccClick(Sender: TObject);
     procedure MenuAutoTuneClockClick(Sender: TObject);
+    procedure ComboBusClockChange(Sender: TObject);
+    procedure ButtonTryOtherRailClick(Sender: TObject);
     procedure MenuSafeModeClick(Sender: TObject);
     procedure MenuI2CScannerClick(Sender: TObject);
     procedure MenuSPIConsoleClick(Sender: TObject);
@@ -622,6 +630,7 @@ var
   //กล่องเลือกแรงดันบนหน้าหลักกำลังถูกตั้งค่าจากโค้ด OnChange ของปุ่มใน
   //กล่องยิงทั้งตอนผู้ใช้คลิกและตอนโค้ดสะท้อนสถานะเมนู กระจกต้องไม่สะท้อนกลับ
   CH347VccPanelUpdating: boolean = False;
+  BusClockPanelUpdating: boolean = False;
 
   //ไฟล์งานที่โหลดไว้ ถ้ามี
   CurrentJob: TJobFile;
@@ -692,6 +701,12 @@ var
   //สำรองที่ยังไม่มีอยู่จริงจะทำให้การกู้ต่อถูกปฏิเสธในภายหลัง ซึ่งถูกต้อง
   //แต่เสียเวลาเปล่า เพราะเรารู้ตั้งแต่ตอนนี้แล้วว่ามันจะไม่ผ่าน
   ActiveWriteJournal: string = '';
+  //ไล่บันไดคล็อกหลังเจอความเงียบไปแล้วหรือยังในเซสชันนี้
+  //
+  //ครั้งเดียวพอ ซ็อกเก็ตว่างคือสถานะปกติก่อนเสียบชิป ถ้าไล่ใหม่ทุกครั้งที่กด
+  //Detect ผู้ใช้จะรอบันไดคล็อกทุกครั้งโดยไม่ได้อะไรเพิ่ม รีเซ็ตเมื่อรางไฟ
+  //เปลี่ยนหรือเปิดอุปกรณ์ใหม่ เพราะตอนนั้นโลกเปลี่ยนไปแล้วจริง ๆ
+  TunedAfterSilence: boolean = False;
 
 {$R *.lfm}
 
@@ -2575,6 +2590,8 @@ end;
 //นิยามอยู่ข้างกลไกเมนูแรงดันของ CH347 แต่ UpdateChipInfo ต้องเรียกมัน
 //ทุกครั้งที่ข้อมูลชิปเปลี่ยน เพื่อให้ช่อง "Chip:" ในกล่องแรงดันตามทัน
 procedure RefreshCH347VccPanel; forward;
+procedure RefreshBusClockPanel; forward;
+procedure PinCH347VccMenu(Millivolts: cardinal); forward;
 
 procedure UpdateChipInfo;
 var
@@ -2642,6 +2659,7 @@ begin
 
   //ช่อง "Chip:" ในกล่องแรงดันของ CH347 แสดงค่าเดียวกันนี้ ต้องตามให้ทัน
   RefreshCH347VccPanel;
+  RefreshBusClockPanel;
 end;
 
 //แผงด้านซ้ายในไฟล์ฟอร์มถูกวางไว้แบบพิกัดตายตัวและแคบเกินไป
@@ -2694,11 +2712,27 @@ begin
   MainForm.GroupCH347Vcc.Width := PanelW - 12;
   MainForm.GroupCH347Vcc.Top := 330;
 
+  //กล่องคล็อกต่อท้ายกล่องแรงดัน สองอย่างที่ต้องตั้งให้ถูกก่อนชิปจะตอบ
+  //อยู่ติดกันและเห็นพร้อมกัน
+  MainForm.GroupBusClock.Left := 6;
+  MainForm.GroupBusClock.Width := PanelW - 12;
+  if MainForm.GroupCH347Vcc.Visible then
+    MainForm.GroupBusClock.Top := MainForm.GroupCH347Vcc.Top +
+                                  MainForm.GroupCH347Vcc.Height + 6
+  else
+    MainForm.GroupBusClock.Top := 330;
+  MainForm.ComboBusClock.Width := MainForm.GroupBusClock.Width - 84;
+  MainForm.ButtonTuneClock.Left := MainForm.GroupBusClock.Width - 70;
+  MainForm.LabelBusClockHint.Width := MainForm.GroupBusClock.Width - 16;
+
   //ภาพชิปกินพื้นที่ที่เหลือทั้งหมดด้านล่าง และยืดตามความสูงหน้าต่าง
-  //ถ้ากล่องแรงดันโผล่ ภาพชิปขยับลงไปต่อท้าย ถ้าหุบก็ทวงพื้นที่คืน
+  //กล่องไหนโผล่ ภาพชิปก็ขยับลงไปต่อท้ายตัวล่างสุด ถ้าหุบก็ทวงพื้นที่คืน
   MainForm.ChipView.Left := 6;
   MainForm.ChipView.Width := PanelW - 12;
-  if MainForm.GroupCH347Vcc.Visible then
+  if MainForm.GroupBusClock.Visible then
+    MainForm.ChipView.Top := MainForm.GroupBusClock.Top +
+                             MainForm.GroupBusClock.Height + 6
+  else if MainForm.GroupCH347Vcc.Visible then
     MainForm.ChipView.Top := MainForm.GroupCH347Vcc.Top +
                              MainForm.GroupCH347Vcc.Height + 6
   else
@@ -3953,6 +3987,11 @@ begin
 
     //แรงดันของชิปที่เลือกอยู่ วางข้างปุ่มให้เทียบกันได้ในสายตาเดียว
     //แบบเดียวกับช่อง "芯片电压" ของโปรแกรมผู้ผลิต
+    //ปุ่มลองรางอีกระดับเป็นของชั่วคราวของรอบตรวจที่เพิ่งล้ม
+    //พอมีอะไรเปลี่ยน มันหมดความหมายทันที
+    if AsProgrammer.Current_HW <> CHW_CH347 then
+      MainForm.ButtonTryOtherRail.Visible := False;
+
     ChipVcc := CatalogVccDisplay(CurrentChipVccText);
     if ChipVcc = '' then ChipVcc := '?';
     MainForm.LabelCH347ChipVcc.Caption := 'Chip: ' + ChipVcc;
@@ -3964,12 +4003,36 @@ begin
   if WasVisible <> MainForm.GroupCH347Vcc.Visible then LayoutLeftPanel;
 end;
 
+//ปุ่ม "ลอง 3.3 V" ที่โผล่เฉพาะตอนที่มันเป็นคำตอบที่เหลืออยู่จริง ๆ
+//
+//โปรแกรมนี้ไม่ยกแรงดันให้เองเด็ดขาด และจะไม่ทำ เพราะ "ไม่มีใครตอบที่ 1.8V"
+//ไม่ได้แปลว่า "ไม่ใช่ชิป 1.8V" มันแปลได้ทั้งสองอย่าง และอย่างที่สองคือชิป
+//1.8V ที่หนีบไม่แน่น ซึ่งจะพังทันทีที่หน้าสัมผัสติดพร้อมกับ 3.3V
+//
+//สิ่งที่ทำได้คือย่นระยะทางระหว่าง "รู้ว่าต้องทำอะไร" กับ "ทำได้" ให้เหลือคลิก
+//เดียว โดยที่คลิกนั้นยังเป็นของผู้ใช้ ไม่ใช่ของโปรแกรม ปุ่มจึงโผล่เฉพาะหลัง
+//จากที่คล็อกถูกตัดออกไปแล้ว ไม่ใช่โผล่ค้างไว้ให้กดเล่น
+procedure TMainForm.ButtonTryOtherRailClick(Sender: TObject);
+begin
+  ButtonTryOtherRail.Visible := False;
+  LogPrint('switching the target rail to 3.3 V at your request. If the part ' +
+           'in the socket is a 1.8 V part, stop now and check the clip ' +
+           'instead: 3.3 V will destroy it');
+  PinCH347VccMenu(CH347_VCC_3V3_MV);
+  //ไล่คล็อกใหม่ได้ที่ระดับใหม่ เพราะรางเปลี่ยนแล้ว
+  TunedAfterSilence := False;
+end;
+
 procedure TMainForm.MenuCH347VccClick(Sender: TObject);
 begin
+  //รางไฟเปลี่ยนแปลว่าโลกเปลี่ยน ผลการไล่คล็อกที่แล้วเป็นของรางเดิม
+  //ชิปที่เงียบที่ 1.8V อาจตอบที่ 3.3V และต้องได้ไล่คล็อกใหม่ที่ระดับนั้น
+  TunedAfterSilence := False;
   //ตั้งให้เห็นผลทันทีที่เลือก ผู้ใช้จะได้ไม่ต้องเดาว่าต้องกดอ่านก่อนไหม
   //อุปกรณ์ที่ยังไม่ได้เปิดจะโดน ApplyCH347Vcc ตอนเริ่มงานอยู่แล้ว
   ApplyCH347Vcc;
   RefreshCH347VccPanel;
+  RefreshBusClockPanel;
 end;
 
 procedure TMainForm.RadioCH347VccChange(Sender: TObject);
@@ -3999,6 +4062,7 @@ begin
                   [CH347VccLevelText(SelectedCH347Vcc)]));
   ApplyCH347Vcc;
   RefreshCH347VccPanel;
+  RefreshBusClockPanel;
 end;
 
 //หลังรู้แล้วว่าชิปตัวนี้คืออะไร: บอกแรงดันที่ชิปต้องการ เทียบกับที่ตั้งไว้
@@ -4419,6 +4483,78 @@ begin
   Identity := Identity + '-' +
     IntToHex(UpdateCRC32($FFFFFFFF, @Data[0], Len), 8);
   Result := True;
+end;
+
+//กล่องเลือกคล็อกบนแผงซ้าย
+//
+//คล็อกคือสาเหตุที่พบบ่อยที่สุดของ "ไม่มีชิปตอบ" และเดิมมันอยู่ลึกสองชั้นใน
+//เมนู Options -> SPI -> Frequency ซึ่งเป็นที่ที่ไม่มีใครไปหาตอนกำลังงงว่า
+//ทำไมซ็อกเก็ตที่มีชิปอยู่ถึงอ่านไม่เจอ
+//
+//วางไว้ข้างกล่องแรงดันด้วยเหตุผลเดียวกับที่กล่องแรงดันอยู่ตรงนั้น: สองอย่างนี้
+//คือสิ่งที่ต้องตั้งให้ถูกก่อนชิปจะตอบ และทั้งคู่ควรมองเห็นพร้อมกันในสายตาเดียว
+//ปุ่ม Tune ข้าง ๆ คือทางที่ให้เครื่องหาคำตอบเอง แทนที่จะให้ผู้ใช้ไล่เดา
+procedure RefreshBusClockPanel;
+var
+  Count, i, Sel: integer;
+  WasVisible: boolean;
+begin
+  WasVisible := MainForm.GroupBusClock.Visible;
+  BusClockPanelUpdating := True;
+  try
+    Count := BuildSPIClockRungs;
+    //เครื่องที่ไม่มีบันไดคล็อกที่รู้ความถี่จริงก็ไม่มีอะไรให้เลือกตรงนี้
+    //โชว์กล่องเปล่าไว้จะแย่กว่าไม่โชว์ เพราะดูเหมือนตั้งได้แต่ตั้งไม่ได้
+    MainForm.GroupBusClock.Visible := Count >= 2;
+    if not MainForm.GroupBusClock.Visible then Exit;
+
+    MainForm.ComboBusClock.Items.BeginUpdate;
+    try
+      MainForm.ComboBusClock.Items.Clear;
+      //เรียงเร็วไปช้า เหมือนเมนู เพื่อไม่ให้สองที่เรียงคนละทาง
+      for i := Count - 1 downto 0 do
+        MainForm.ComboBusClock.Items.AddObject(ClockText(TuneRungs[i].Hz),
+                                               TObject(PtrUInt(i)));
+    finally
+      MainForm.ComboBusClock.Items.EndUpdate;
+    end;
+
+    //ติ๊กให้ตรงกับความถี่ที่ใช้อยู่จริง ไม่ใช่ค่าที่จำไว้ที่ไหนสักแห่ง
+    Sel := -1;
+    for i := 0 to MainForm.ComboBusClock.Items.Count - 1 do
+      if TuneRungs[PtrUInt(MainForm.ComboBusClock.Items.Objects[i])].Hz =
+         CurrentBusHz then Sel := i;
+    MainForm.ComboBusClock.ItemIndex := Sel;
+  finally
+    BusClockPanelUpdating := False;
+  end;
+
+  if WasVisible <> MainForm.GroupBusClock.Visible then LayoutLeftPanel;
+end;
+
+procedure TMainForm.ComboBusClockChange(Sender: TObject);
+var
+  Items: array[0..15] of TMenuItem;
+  Count, i, RungTag: integer;
+begin
+  if BusClockPanelUpdating then Exit;
+  if ComboBusClock.ItemIndex < 0 then Exit;
+
+  RungTag := TuneRungs[PtrUInt(
+    ComboBusClock.Items.Objects[ComboBusClock.ItemIndex])].Tag;
+
+  //ติ๊กเมนูตัวเดียวกัน ไม่เก็บค่าไว้ในตัวแปรแยก
+  //
+  //เมนูคือแหล่งความจริงของความเร็วอยู่แล้ว ทุกที่ในโปรแกรมอ่านจากตรงนั้น
+  //ถ้าคอมโบบ็อกซ์นี้เก็บค่าของตัวเอง สองที่จะไม่ตรงกันทันทีที่มีคนใช้เมนู
+  for i := 0 to High(Items) do Items[i] := nil;
+  Count := SPISpeedMenuLadder(Items);
+  for i := 0 to Count - 1 do
+    Items[i].Checked := Items[i].Tag = RungTag;
+
+  LogPrint('SPI clock set to ' + ClockText(CurrentBusHz));
+  //ความเร็วที่เปลี่ยนแล้วต้องมีผลกับงานถัดไป ไม่ใช่รอบถัดจากนั้น
+  RefreshBusClockPanel;
 end;
 
 function AutoTuneSPIClock: boolean;
@@ -8251,6 +8387,8 @@ const
 var
   ChunkSize: Word;
   BytesRead, Got: integer;
+  //ครั้งที่ต้องสั่งอ่านซ้ำทั้งงาน ศูนย์คือสายที่ดี ไม่ใช่ไม่มีข้อมูล
+  Attempt, ReadRetries: integer;
   DataChunk: array[0..65534] of byte;
   Address: cardinal;
   ProgressPos: integer;
@@ -8281,6 +8419,7 @@ var
 
   LogPrint(STR_READING_FLASH);
   BytesRead := 0;
+  ReadRetries := 0;
   Address := StartAddress;
   SetProgressMax(ChipSize div ChunkSize);
   SetProgressPos(0);
@@ -8308,11 +8447,40 @@ var
   begin
     if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
 
-    Got := ReadData25(ReadOp, FastRead, Use4B, Address, datachunk, ChunkSize);
+    //ทรานสเฟอร์ที่ล้มเหลวสั่งใหม่ได้ การอ่านไม่เปลี่ยนอะไรบนชิป
+    //
+    //เดิมสะดุดครั้งเดียวที่ก้อนไหนก็ได้ในสี่พันก้อน คืองานอ่านทั้งงานล้ม
+    //CH347 แทบไม่เคยสะดุดจึงไม่มีใครเห็น ส่วน CH341A สะดุดเป็นครั้งคราวตอน
+    //สตรีมยาว ๆ ผลคือโค้ดชุดเดียวกันผ่านบนเครื่องหนึ่งและล้มบนอีกเครื่องหนึ่ง
+    //โดยรายงานออกมาเหมือนชิปมีปัญหา
+    //
+    //ทางเขียนมี MaxPageRetry อยู่แล้ว ทางอ่านซึ่งทำอันตรายอะไรไม่ได้เลยกลับ
+    //ไม่มีสักครั้ง นั่นคือสิ่งที่กลับหัวอยู่
+    Attempt := 0;
+    repeat
+      Got := ReadData25(ReadOp, FastRead, Use4B, Address, datachunk, ChunkSize);
+      Inc(Attempt);
+      if not ShouldRetryRead(ClassifyReadResult(Got, ChunkSize),
+                             Attempt, READ_MAX_ATTEMPTS) then Break;
+      Inc(ReadRetries);
+      LogPrint(Format('read retry %d/%d at 0x%.8x: the transfer did not ' +
+        'complete, so nothing was read; asking again',
+        [Attempt, READ_MAX_ATTEMPTS - 1, Address]));
+    until False;
+
     if Got <> ChunkSize then
     begin
-      OpFail(Format('SPI flash short read: received %d of %d bytes',
-                    [Got, ChunkSize]), Address);
+      //ข้อความต้องชี้ไปที่ชั้นขนส่ง ไม่ใช่ที่ชิป "read: FAILED" เฉย ๆ อ่านแล้ว
+      //เหมือนชิปตาย ทั้งที่มันเพิ่งตอบถูกต้องมาหลายเมกะไบต์
+      if ClassifyReadResult(Got, ChunkSize) = rakTransportFailure then
+        OpFail(Format('the %s did not complete a read transfer at 0x%.8x ' +
+          'after %d attempts. Nothing was read; this is the cable, the ' +
+          'supply or the programmer, not the chip',
+          [AsProgrammer.Programmer.HardwareName, Address, READ_MAX_ATTEMPTS]),
+          Address)
+      else
+        OpFail(Format('SPI flash short read: received %d of %d bytes',
+                      [Got, ChunkSize]), Address);
       Break;
     end;
     Inc(BytesRead, Got);
@@ -8343,6 +8511,16 @@ var
   end
   else
     LogPrint(STR_DONE);
+
+  //งานที่สำเร็จโดยต้องสั่งซ้ำ ไม่ใช่งานที่สำเร็จเฉย ๆ
+  //
+  //ข้อมูลถูกต้องครบถ้วน แต่สายเส้นนี้สะดุดไปแล้วหลายครั้ง ถ้าไม่บอก ผู้ใช้จะ
+  //ไม่มีทางรู้จนกว่าจะถึงวันที่สะดุดสามครั้งติดกันแล้วงานล้มจริง
+  if ReadRetries > 0 then
+    LogPrint(Format('the read completed, but %d transfer(s) had to be ' +
+      'repeated. The data is correct; the link is marginal. A shorter cable, ' +
+      'a better clip or a slower clock will make this go away',
+      [ReadRetries]));
 
   SetProgressPos(0);
   ClearSpeed;
@@ -9442,6 +9620,7 @@ begin
 
   //กล่องเลือกแรงดันบนหน้าหลักผูกกับ CH347 เท่านั้น โผล่และหุบตามเครื่องที่เลือก
   RefreshCH347VccPanel;
+  RefreshBusClockPanel;
 end;
 
 //ไล่เปิดอุปกรณ์ทีละตัว เพื่อดูว่ามีเครื่องโปรแกรมตัวไหนเสียบอยู่จริง
@@ -9484,6 +9663,8 @@ end;
 //ติ๊กเมนู Hardware ให้ตรงกับอุปกรณ์ที่ใช้งานอยู่จริง
 procedure SetHardwareMenuCheck(HW: THardwareList);
 begin
+  //เครื่องคนละตัวคือบันไดคล็อกคนละบันได ผลการไล่ครั้งก่อนใช้ไม่ได้
+  TunedAfterSilence := False;
   MainForm.MenuHWUSBASP.Checked    := HW = CHW_USBASP;
   MainForm.MenuHWCH341A.Checked    := HW = CHW_CH341;
   MainForm.MenuHWCH347.Checked     := HW = CHW_CH347;
@@ -11374,6 +11555,8 @@ var
   FamilyName, MatchVendor: string;
   VendorMatchCount, VendorMatchIndex, p: integer;
   ProbeMv: cardinal;
+  //ไล่บันไดคล็อกครบแล้วและไม่มีใครตอบ ใช้ตัดคำแนะนำเรื่องคล็อกทิ้ง
+  ClockRuledOut: boolean;
 begin
   OpBegin(opkDetect);
   //เริ่มตรวจใหม่ = ลืมของเก่าไว้ก่อน ถ้าตรวจไม่สำเร็จก็ต้องไม่เหลือสถานะ
@@ -11395,6 +11578,7 @@ begin
     //ผู้ใช้ปักหมุดไว้เองเท่านั้น (นั่นคือทางเดียวที่ชิป 3.3V ที่เงียบใส่
     //1.8V จะยอมคุยด้วย) ศูนย์ = เครื่องนี้คุมแรงดันไม่ได้
     ProbeMv := 0;
+    ClockRuledOut := False;
     if (AsProgrammer.Current_HW = CHW_CH347) and
        AsProgrammer.Programmer.SupportsTargetVoltage then
     begin
@@ -11482,8 +11666,84 @@ begin
     //ทั้ง 00 หรือทั้ง FF แปลว่าไม่มีชิปตอบกลับ ไม่ต้องไปค้นฐานข้อมูลให้เสียเวลา
     if IsDeadID(ID.ID9FH) then
     begin
+      //ก่อนจะบอกว่า "ไม่มีชิป" ให้ลดคล็อกลงไปหาดูก่อน
+      //
+      //"ไม่มีชิปตอบ" เป็นคำตอบที่กำกวมที่สุดในโปรแกรมนี้ ซ็อกเก็ตว่าง ชิปตาย
+      //หนีบไม่ติด แรงดันผิด และคล็อกเร็วเกินไป ให้ผลหน้าตาเหมือนกันหมดคือ FF
+      //ในห้าอย่างนั้น มีอย่างเดียวที่โปรแกรมทดสอบเองได้โดยไม่เสี่ยงอะไรเลย
+      //
+      //ทิศทางคือเหตุผลทั้งหมด: การ *ลด* คล็อกทำให้ชิปพังไม่ได้ ต่างจากการ
+      //ยกแรงดันขึ้นซึ่งอยู่ข้างล่างนี้และเราไม่ทำให้เด็ดขาด เพราะเดาผิดทีเดียว
+      //ชิป 1.8V ก็จบ อสมมาตรอันเดียวกันกับกฎ fail-low ของแรงดัน
+      //
+      //ทำครั้งเดียวต่อเซสชัน ไม่งั้นการกด Detect บนซ็อกเก็ตว่างจะไล่บันได
+      //คล็อกใหม่ทุกครั้ง ซึ่งเป็นสถานะปกติก่อนเสียบชิป
+      if MainForm.MenuAutoTuneOnSilence.Checked and
+         (not TunedAfterSilence) and
+         MainForm.RadioSPI.Checked and
+         (MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25) then
+      begin
+        TunedAfterSilence := True;
+        LogPrint('nothing answered at ' + ClockText(CurrentBusHz) +
+                 '. Trying slower clocks before calling the socket empty ' +
+                 '(Options -> SPI -> Frequency to turn this off)');
+        if AutoTuneSPIClock then
+        begin
+          //จูนได้แปลว่ามีชิปตอบที่คล็อกช้ากว่า สิ่งที่เพิ่งจะพิมพ์ว่า
+          //"ไม่มีชิป" กลายเป็นความจริงคนละอย่าง: มีชิป แค่มองไม่เห็นมัน
+          LogPrint('a chip answered once the clock came down. The socket was ' +
+                   'never empty; the bus was too fast to read it');
+          FillByte(ID, SizeOf(ID), $FF);
+          UsbAsp25_ReadID(ID);
+
+          //พิมพ์รหัสชุดใหม่ทับของเดิม ไม่งั้นบรรทัด ID(9F): FFFFFF ที่พิมพ์ไป
+          //แล้วจะค้างอยู่ในล็อกเป็นหลักฐานที่ขัดกับผลลัพธ์
+          if ID.Got9F then
+            IDstr9FH := Upcase(IntToHex(ID.ID9FH[0], 2) +
+              IntToHex(ID.ID9FH[1], 2) + IntToHex(ID.ID9FH[2], 2))
+          else
+            IDstr9FH := '--';
+          if ID.Got90 then
+            IDstr90H := Upcase(IntToHex(ID.ID90H[0], 2) +
+              IntToHex(ID.ID90H[1], 2))
+          else
+            IDstr90H := '--';
+          if ID.GotAB then
+            IDstrABH := Upcase(IntToHex(ID.IDABH, 2))
+          else
+            IDstrABH := '--';
+          if ID.Got15 then
+            IDstr15H := Upcase(IntToHex(ID.ID15H[0], 2) +
+              IntToHex(ID.ID15H[1], 2))
+          else
+            IDstr15H := '--';
+
+          LogPrint('ID(9F): ' + IDstr9FH + '  (re-read at ' +
+                   ClockText(CurrentBusHz) + ')');
+          LogPrint('ID(90): ' + IDstr90H);
+          LogPrint('ID(AB): ' + IDstrABH);
+          LogPrint('ID(15): ' + IDstr15H);
+        end
+        else
+          //ไล่ครบทุกขั้นแล้วไม่มีใครตอบ นั่นคือข้อมูล ไม่ใช่ความล้มเหลว:
+          //ความเร็วบัสถูกตัดออกจากรายการผู้ต้องสงสัยไปแล้วหนึ่งข้อ
+          ClockRuledOut := True;
+      end;
+    end;
+
+    if IsDeadID(ID.ID9FH) then
+    begin
       LogPrint(STR_NO_CHIP);
-      if FastSPIClockWarning <> '' then
+      //ถ้าเพิ่งไล่บันไดคล็อกมาแล้ว ห้ามแนะนำให้ "ลองคล็อกช้าลง" อีก
+      //
+      //คำแนะนำนั้นถูกเสมอตอนที่ยังไม่มีใครลอง แต่หลังจากลองครบทุกขั้นแล้ว
+      //มันกลายเป็นการส่งคนไปทำสิ่งที่โปรแกรมเพิ่งทำแทนไปแล้ว และบังคำตอบจริง
+      //ที่เหลืออยู่ให้จมอยู่ในรายการ "อาจจะ" สามข้อเท่าเดิม
+      if ClockRuledOut then
+        LogPrint('every clock on the ladder was tried and none produced an ' +
+                 'answer, so the bus speed is not the reason. What is left ' +
+                 'is the rail, the clip, or the part itself')
+      else if FastSPIClockWarning <> '' then
         LogPrint(Format(STR_NO_CHIP_CLOCK, [FastSPIClockWarning]));
 
       //ความเงียบบนบอร์ดที่สลับแรงดันได้มีคำอธิบายเพิ่มอีกทาง: แรงดันไม่ตรง
@@ -11501,6 +11761,15 @@ begin
         //คำแนะนำอยู่ในล็อกครบแล้ว ให้เขาไปเลือกเองที่ตัวเลือกแรงดันดีกว่า
         LogPrint(STR_CH347_DEAD_1V8);
         LogPrint(STR_CH347_VCC_GUIDE);
+        //ปุ่มโผล่ตรงนี้เท่านั้น: คล็อกถูกตัดออกไปแล้ว รางไฟจึงกลายเป็นคำตอบ
+        //ที่เหลืออยู่จริง ๆ ไม่ใช่หนึ่งในสามข้อสงสัยเหมือนตอนต้น
+        if not CLIMode then
+        begin
+          MainForm.ButtonTryOtherRail.Visible := True;
+          LogPrint('the Target voltage box on the left now offers 3.3 V in ' +
+                   'one click. Check the clip first: if this is a 1.8 V ' +
+                   'part, 3.3 V destroys it');
+        end;
       end
       else if ProbeMv = CH347_VCC_3V3_MV then
       begin
@@ -11511,6 +11780,9 @@ begin
       OpFail('no chip answered');
       Exit;
     end;
+
+    //ชิปตอบแล้ว ปุ่ม "ลองอีกราง" หมดหน้าที่
+    MainForm.ButtonTryOtherRail.Visible := False;
 
     //เก็บรหัสไว้ใช้ตอนบันทึกชิปใหม่ลงตารางของผู้ใช้
     LastID9F := IDstr9FH;
@@ -15666,6 +15938,10 @@ begin
       TDOMElement(ParentNode).SetAttribute('auto_detect_chip', '1') else
         TDOMElement(ParentNode).SetAttribute('auto_detect_chip', '0');
 
+    if MainForm.MenuAutoTuneOnSilence.Checked then
+      TDOMElement(ParentNode).SetAttribute('tune_on_silence', '1') else
+        TDOMElement(ParentNode).SetAttribute('tune_on_silence', '0');
+
     if MainForm.MenuBlankBeforeWrite.Checked then
       TDOMElement(ParentNode).SetAttribute('blank_before_write', '1') else
         TDOMElement(ParentNode).SetAttribute('blank_before_write', '0');
@@ -15854,6 +16130,12 @@ begin
       if  Node.Attributes.GetNamedItem('auto_detect_chip') <> nil then
         MainForm.MenuAutoDetectChip.Checked :=
           Node.Attributes.GetNamedItem('auto_detect_chip').NodeValue = '1';
+
+      //ไม่มีคีย์นี้ในไฟล์เก่า ปล่อยให้เป็นค่าเริ่มต้นคือเปิด: ผู้ใช้เดิมที่
+      //เคยเจอ "ไม่มีชิปตอบ" เพราะคล็อกเร็วเกิน ควรได้ประโยชน์โดยไม่ต้องไปหาเมนู
+      if  Node.Attributes.GetNamedItem('tune_on_silence') <> nil then
+        MainForm.MenuAutoTuneOnSilence.Checked :=
+          Node.Attributes.GetNamedItem('tune_on_silence').NodeValue = '1';
 
       if  Node.Attributes.GetNamedItem('check_id') <> nil then
         MainForm.MenuCheckIDBefore.Checked :=

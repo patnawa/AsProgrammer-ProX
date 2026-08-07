@@ -504,7 +504,7 @@ object MainForm: TMainForm
     end
     object GroupCH347Vcc: TGroupBox
       Left = 8
-      Height = 68
+      Height = 96
       Top = 575
       Width = 184
       Anchors = [akTop, akLeft]
@@ -547,6 +547,54 @@ object MainForm: TMainForm
         Width = 168
         AutoSize = False
         Caption = 'Chip: ?'
+        ParentColor = False
+      end
+      object ButtonTryOtherRail: TButton
+        Left = 8
+        Height = 25
+        Top = 44
+        Width = 168
+        Caption = 'Nothing answered - try 3.3 V'
+        TabOrder = 3
+        Visible = False
+        OnClick = ButtonTryOtherRailClick
+      end
+    end
+    object GroupBusClock: TGroupBox
+      Left = 8
+      Height = 74
+      Top = 650
+      Width = 184
+      Anchors = [akTop, akLeft]
+      Caption = 'SPI clock'
+      TabOrder = 9
+      Visible = False
+      object ComboBusClock: TComboBox
+        Left = 8
+        Height = 23
+        Top = 4
+        Width = 100
+        ItemHeight = 15
+        Style = csDropDownList
+        TabOrder = 0
+        OnChange = ComboBusClockChange
+      end
+      object ButtonTuneClock: TButton
+        Left = 112
+        Height = 25
+        Top = 3
+        Width = 64
+        Caption = 'Tune'
+        TabOrder = 1
+        OnClick = MenuAutoTuneClockClick
+      end
+      object LabelBusClockHint: TLabel
+        Left = 8
+        Height = 15
+        Top = 32
+        Width = 168
+        AutoSize = False
+        Caption = 'Tune finds the fastest clock the wiring carries'
         ParentColor = False
       end
     end
@@ -977,6 +1025,11 @@ object MainForm: TMainForm
           object MenuAutoTuneClock: TMenuItem
             Caption = 'Auto tune clock'
             OnClick = MenuAutoTuneClockClick
+          end
+          object MenuAutoTuneOnSilence: TMenuItem
+            AutoCheck = True
+            Caption = 'Tune automatically when no chip answers'
+            Checked = True
           end
         end
         object MenuCH347Vcc: TMenuItem

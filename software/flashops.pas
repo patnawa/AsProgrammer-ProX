@@ -28,6 +28,40 @@ type
 
   TErasePlan = array of TEraseStep;
 
+//ผลของการอ่านหนึ่งก้อน แยกสามอย่างที่ตัวเลขเดียวกันบอกไม่ได้
+//
+//ความต่างระหว่าง "ทรานสเฟอร์ไม่เกิดขึ้น" กับ "ชิปตอบมาไม่ครบ" คือหัวใจของ
+//เรื่องนี้ ค่า -1 จาก SPIRead แปลว่า DLL ปฏิเสธคำสั่ง ไม่มีไบต์ไหนเดินทางเลย
+//การสั่งใหม่จึงไม่ใช่ "ถามซ้ำจนกว่าจะได้คำตอบที่ชอบ" แต่คือการทำสิ่งที่ยัง
+//ไม่เคยเกิดขึ้นให้เกิดขึ้น ซึ่งการอ่านทำซ้ำได้โดยไม่เปลี่ยนอะไรบนชิปเลย
+//
+//ต่างจากกรณีที่ชิปตอบมาสองครั้งไม่เหมือนกัน อันนั้นห้ามลองใหม่เด็ดขาด และ
+//เป็นหน้าที่ของด่าน connection stability ที่ปฏิเสธไปเลย ไม่ใช่ลองซ้ำ
+type
+  TReadAttemptKind = (
+    rakComplete,          //ได้ครบตามที่ขอ
+    rakTransportFailure,  //ทรานสเฟอร์ล้มเหลว ไม่มีข้อมูลเดินทาง
+    rakShortRead          //ทรานสเฟอร์สำเร็จแต่ได้ไม่ครบ
+  );
+
+//จำนวนครั้งที่ยอมสั่งอ่านก้อนเดิมซ้ำเมื่อทรานสเฟอร์ล้มเหลว
+//
+//สามครั้งเท่าทางเขียน (MaxPageRetry) โดยตั้งใจ เพราะเหตุผลเดียวกัน: สาย USB
+//ที่สะดุดหนึ่งครั้งไม่ควรทำให้งานทั้งงานล้ม แต่สายที่สะดุดสามครั้งติดกัน
+//ไม่ใช่เรื่องบังเอิญแล้ว
+const
+  READ_MAX_ATTEMPTS = 3;
+
+function ClassifyReadResult(Got, Requested: integer): TReadAttemptKind;
+
+//สั่งอ่านก้อนเดิมซ้ำได้หรือไม่
+//
+//เฉพาะทรานสเฟอร์ที่ล้มเหลวเท่านั้น การอ่านได้ไม่ครบแปลว่าชิปหรือ backend
+//ตอบมาแบบนั้นจริง ๆ ซึ่งเป็นคำตอบ ไม่ใช่อุบัติเหตุ และการสั่งซ้ำจะกลายเป็น
+//การกลบข้อมูลที่ควรรายงาน
+function ShouldRetryRead(Kind: TReadAttemptKind;
+  AttemptsMade, MaxAttempts: integer): boolean;
+
 //แอดเดรสเกิน 3 ไบต์หรือไม่ ชิปที่ใหญ่กว่า 128Mbit ต้องใช้แอดเดรส 4 ไบต์
 const
   ADDR_3BYTE_LIMIT = 16777216;   //16MB คือทั้งหมดที่แอดเดรส 3 ไบต์เข้าถึงได้
@@ -90,6 +124,23 @@ function PlanBounds(const Plan: TErasePlan; out FromAddr, ToAddr: cardinal): boo
 function PlanAllHave4B(const Plan: TErasePlan): boolean;
 
 implementation
+
+function ClassifyReadResult(Got, Requested: integer): TReadAttemptKind;
+begin
+  //ขอศูนย์ไบต์แล้วได้ศูนย์ไบต์คือครบ ไม่ใช่ล้มเหลว
+  if (Requested >= 0) and (Got = Requested) then Exit(rakComplete);
+  //ค่าติดลบคือรหัสความล้มเหลวของชั้นขนส่ง ไม่ใช่จำนวนไบต์
+  if Got < 0 then Exit(rakTransportFailure);
+  Result := rakShortRead;
+end;
+
+function ShouldRetryRead(Kind: TReadAttemptKind;
+  AttemptsMade, MaxAttempts: integer): boolean;
+begin
+  Result := (Kind = rakTransportFailure) and
+            (AttemptsMade > 0) and (AttemptsMade < MaxAttempts);
+end;
+
 
 function Needs4ByteAddress(StartAddress, RangeLen, ChipSize: cardinal): boolean;
 begin

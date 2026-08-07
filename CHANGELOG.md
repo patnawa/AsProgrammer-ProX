@@ -3,6 +3,115 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.37.0.0 — the three things that have to be right before a chip answers
+
+A chip stays silent for five reasons — empty socket, dead part, bad clip,
+wrong rail, clock too fast — and all five produce the same all-`FF` reply.
+The program used to name three of them at once and leave the operator to
+guess. This release makes it narrow the list instead, and it draws the line
+where safety draws it: the clock is swept automatically because sweeping a
+clock cannot damage anything, and the rail is not, because it can.
+
+- **A read that loses one USB transfer no longer loses the whole read.**
+
+  A CH341A reported `received -1 of 2048 bytes at 0x004A8000` — 4.6 MB into
+  an 8 MiB read, after the connection-stability gate had passed 8 out of 8.
+  That `-1` is not a short read. It means the transfer never completed and
+  **nothing** was read. The loop treated it as fatal, so a single dropped
+  transaction anywhere in 4096 chunks ended the job.
+
+  The CH347 is a well-behaved high-speed device and essentially never drops
+  one, so the same code passed there and failed on the dongle — and the
+  failure read as `read: FAILED`, which sounds like a dead chip rather than a
+  cable.
+
+  The asymmetry that gave it away: the *write* path has retried pages for
+  years (`MaxPageRetry = 3`). The *read* path — the one that cannot damage
+  anything — had no tolerance at all.
+
+  So reads now retry, and the rule is a typed decision in `flashops` rather
+  than a number in a loop, because it is one distinction away from being
+  wrong:
+
+  | | means | response |
+  |---|---|---|
+  | `-1` | the transfer never happened; nothing was read | **retry** — re-issuing a read is idempotent |
+  | short count | the chip answered with fewer bytes | **report** — that is an answer, not an accident |
+  | two reads disagreeing | the chip answered differently | **refuse** — unchanged, still `ConnectionStableForDestructive` |
+
+  Retrying a failed transport is not asking until the answer is agreeable; it
+  is completing an operation that never occurred. Retrying a *disagreement*
+  would be the sin, and that path is untouched.
+
+  A read that succeeded but needed repeats now says so. The data is correct
+  and the link is marginal, and an operator who is never told will find out on
+  the day three drops land in a row.
+
+- **Detect sweeps the clock itself before calling a socket empty.**
+
+  The commonest cause of "no chip answered" is a clock the wiring cannot
+  carry, and the program already knew how to find the boundary — Auto tune
+  clock has existed for releases. It just sat in a menu nobody visits while
+  wondering why a populated socket reads as empty.
+
+  Now a silent detect walks the ladder automatically, once per session, and
+  re-reads the ID if a chip appears. The log stops contradicting itself: the
+  `ID(9F): FFFFFF` line is replaced by the real one rather than left standing
+  as evidence against the result.
+
+  And when the ladder comes back empty, the program **stops advising a slower
+  clock**. That advice is correct until someone has tried it and misleading
+  afterwards; the message now says the bus speed has been ruled out and what
+  is left is the rail, the clip, or the part. Three simultaneous maybes become
+  one narrowed answer.
+
+  Once per session, reset when the rail or the programmer changes — because
+  those are the moments the world actually changed. Detecting on an empty
+  socket is the normal state before seating a chip, and it must not cost a
+  ladder walk every time.
+
+- **The rail is never swept, and now it is one click away.**
+
+  This was asked for as "auto detect voltage", and the automatic version is
+  the one thing in this area that must not be built. The reasoning an
+  automatic sweep would have to make is:
+
+  > Nothing answered at 1.8 V, therefore it is not a 1.8 V part, therefore
+  > 3.3 V is safe.
+
+  The middle step is false. "Nothing answered at 1.8 V" is equally consistent
+  with a 1.8 V part that is not clipped properly — which is not a rare case,
+  it is the commonest condition on a bench. The sweep would put 3.3 V on it,
+  and the moment the clip seats, the part is gone. Too little voltage costs a
+  retry; too much costs the chip. That asymmetry is what this whole program is
+  built on.
+
+  So the rail stays a decision, and what changed is the distance between
+  knowing what to do and doing it. After the clock has been ruled out — and
+  only then — a **Try 3.3 V** button appears in the Target voltage box, with
+  the consequence stated next to it. It disappears as soon as a chip answers
+  or the rail changes. The click is still the operator's.
+
+- **An SPI clock box on the left panel**, beside Target voltage, with a
+  **Tune** button. The two things that must be right before a chip will answer
+  are now visible together, instead of one being on screen and the other two
+  menus deep.
+
+- **The shipped default clock is 15 MHz, not 60 MHz.** 60 MHz is the top of
+  the CH347's range, and the program's own diagnostic calls it "often too fast
+  for a clip lead or a long cable". Shipping the most aggressive setting and
+  letting the user discover the consequence is backwards for a program whose
+  every other default fails safe. Note this helps new installs only — an
+  existing `settings.xml` keeps its saved value, which is precisely why the
+  automatic sweep above matters more than the default does.
+
+### The build produces Chipwright.exe
+
+Carried over from 4.36.0.0 and worth repeating because it changes what you
+run: `tools\build.ps1` now produces `software\Chipwright.exe` and
+`ChipwrightCLI.exe` directly, rather than building `AsProgrammer*.exe` and
+renaming only inside the release ZIP.
+
 ## 4.36.0.0 — eight things that were decided somewhere nobody could look
 
 Eight changes, and what they have in common is that each replaces a judgement

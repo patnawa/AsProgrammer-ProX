@@ -553,6 +553,50 @@ begin
         (FirstChunkSize($FFFFFF, 256) > 0));
 end;
 
+// ------------------------------------------------ read retry classification
+
+//ความต่างที่เทสต์ชุดนี้ตรึงไว้คือหัวใจของเรื่อง: ทรานสเฟอร์ที่ไม่เกิดขึ้น
+//สั่งใหม่ได้ เพราะการอ่านไม่เปลี่ยนอะไรบนชิป ส่วนคำตอบที่ได้มาไม่ครบคือคำตอบ
+//ไม่ใช่อุบัติเหตุ สั่งซ้ำจะกลายเป็นการกลบข้อมูลที่ควรรายงาน
+procedure TestReadRetry;
+begin
+  WriteLn('Read retry: what may be repeated, and what must not');
+
+  Check('a full read is complete',
+        ClassifyReadResult(2048, 2048) = rakComplete);
+  //-1 คือรหัสความล้มเหลว ไม่ใช่จำนวนไบต์ ไม่มีข้อมูลเดินทางเลย
+  Check('-1 is a transport failure, not a byte count',
+        ClassifyReadResult(-1, 2048) = rakTransportFailure);
+  Check('a partial count is a short read',
+        ClassifyReadResult(1024, 2048) = rakShortRead);
+  Check('zero of a nonzero request is a short read',
+        ClassifyReadResult(0, 2048) = rakShortRead);
+  //ขอศูนย์ไบต์แล้วได้ศูนย์ไบต์คือครบ
+  Check('zero of zero is complete', ClassifyReadResult(0, 0) = rakComplete);
+
+  //เฉพาะทรานสเฟอร์ที่ล้มเหลวเท่านั้นที่สั่งใหม่ได้
+  Check('a failed transfer may be repeated',
+        ShouldRetryRead(rakTransportFailure, 1, READ_MAX_ATTEMPTS));
+  Check('and again on the second attempt',
+        ShouldRetryRead(rakTransportFailure, 2, READ_MAX_ATTEMPTS));
+  //สามครั้งติดกันไม่ใช่เรื่องบังเอิญแล้ว
+  Check('but not past the limit',
+        not ShouldRetryRead(rakTransportFailure, 3, READ_MAX_ATTEMPTS));
+
+  //อันนี้คือข้อที่ห้ามพลาด: ชิปที่ตอบมาไม่ครบกำลังบอกอะไรบางอย่าง
+  //การสั่งซ้ำคือการถามใหม่จนกว่าจะได้คำตอบที่ชอบ
+  Check('a short read is never repeated',
+        not ShouldRetryRead(rakShortRead, 1, READ_MAX_ATTEMPTS));
+  Check('and a complete read has nothing to repeat',
+        not ShouldRetryRead(rakComplete, 1, READ_MAX_ATTEMPTS));
+
+  //ศูนย์ครั้งแปลว่ายังไม่ได้ลองเลย ซึ่งเป็นความผิดพลาดของผู้เรียก
+  Check('a zero attempt count is refused',
+        not ShouldRetryRead(rakTransportFailure, 0, READ_MAX_ATTEMPTS));
+  //เพดานเท่าทางเขียน ทั้งสองทางควรทนสายสะดุดได้เท่ากัน
+  Check('the ceiling matches the write path', READ_MAX_ATTEMPTS = 3);
+end;
+
 procedure TestAlignErase;
 var
   F, T: cardinal;
@@ -1577,6 +1621,7 @@ begin
   TestSerial;
   TestBlockLocks;
   TestFirstChunk;
+  TestReadRetry;
   TestAlignErase;
   TestPlanUniform;
   TestPlanSectorMap;
