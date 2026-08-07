@@ -111,3 +111,18 @@ It fails if the application, Lazarus project, README badge, and newest
 changelog version disagree, or if Windows/POSIX/documented suite catalogs
 drift. It prints translation coverage relative to `en.po`; incomplete
 languages are visible in CI but do not block unrelated fixes.
+
+It reads files only. For the release gate it reports that the publish job
+*names* the `github-release` environment — a string in YAML — and says so in
+those words, because an environment with no protection rules gates nothing
+while that reference still reads as reassurance. To check what the environment
+actually enforces:
+
+```bash
+python tools/check_release_protection.py
+```
+
+That one asks GitHub, so it needs network and an authenticated `gh`. It exits
+`0` when review is required and deployment is restricted to `v*` tags, `1`
+when it is not, and `2` when the question could not be asked — which is
+reported as unverified rather than as a pass.

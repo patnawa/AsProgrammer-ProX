@@ -205,7 +205,24 @@ def main() -> int:
             failures.append(
                 "privileged publish job must use the protected github-release environment"
             )
-        print("release control: publish job is bound to github-release")
+        # Say exactly what was proved, and no more.
+        #
+        # This reads a string out of a YAML file. It does not, and offline
+        # cannot, establish that the environment has any reviewers, any branch
+        # restriction, or any effect at all. The previous wording -- "publish
+        # job is bound to github-release" -- read as a verified control, and
+        # it printed happily for months while the environment had an empty
+        # protection_rules list and every release published unattended.
+        #
+        # That is the same mistake this program refuses to make about a target
+        # rail: showing what was requested and letting it be read as what was
+        # measured. check_release_protection.py is the part that measures.
+        print(
+            "release control: the publish job names the github-release "
+            "environment (a YAML reference; run "
+            "tools/check_release_protection.py to verify the environment "
+            "actually enforces anything)"
+        )
     except (OSError, UnicodeError, ValueError) as exc:
         failures.append(str(exc))
 

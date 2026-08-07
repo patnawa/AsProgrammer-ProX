@@ -55,11 +55,43 @@ GitHub build-provenance attestation using OIDC, and then receives the narrowly
 scoped permissions needed to create the GitHub release. Third-party actions
 are pinned to immutable full commit SHAs.
 
-Create and protect the `github-release` environment in repository settings,
-require maintainers as reviewers, prevent self-review, and restrict deployment
-to protected `v*` tags. The workflow binds its privileged `publish` job to
-that exact environment. Protect the tag pattern separately, and require
-reviewed pull requests and passing build jobs for the tagged commit.
+The workflow binds its privileged `publish` job to the `github-release`
+environment. **Naming an environment in a workflow enforces nothing** — an
+environment with an empty `protection_rules` list gates nothing at all, and
+the publish job runs unattended. That was this repository's actual state from
+2026-08-02 until 4.37.0.0, during which every tagged release published with
+no review, while `check_project_metadata.py` reported "publish job is bound to
+github-release" on every build.
+
+The current configuration:
+
+| Setting | Value | Why |
+|---|---|---|
+| Required reviewers | `patnawa` | the publish job waits for a deliberate approval |
+| Prevent self-review | **off** | see below |
+| Admins can bypass | **off** | otherwise the reviewer requirement is advisory |
+| Deployment branch policy | tag `v*` only | a branch push can never reach the publish job |
+
+Self-review is permitted, deliberately and against the earlier version of this
+document. With a single maintainer, preventing self-review means the only
+person who could approve is forbidden from approving, and no release can ever
+be published. The rule is worth turning on the moment there is a second
+maintainer, and worthless before then. A requirement nobody can satisfy is not
+a stricter control, it is an absent one.
+
+Verify all of the above with:
+
+```bash
+python tools/check_release_protection.py
+```
+
+That script asks GitHub. `check_project_metadata.py` only reads the workflow
+file and now says so — it reports that the job *names* the environment, which
+is a string in YAML, not a control. The distinction is the same one this
+program makes about a target rail: requested is not measured.
+
+Protect the tag pattern separately, and require reviewed pull requests and
+passing build jobs for the tagged commit.
 
 ## Tagging
 
