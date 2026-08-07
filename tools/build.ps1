@@ -414,14 +414,17 @@ Step "building the headless CLI"
 $headlessDir = Join-Path $env:TEMP "aspx-headless-cli-win32"
 Remove-Item -LiteralPath $headlessDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path (Join-Path $headlessDir "units") -Force | Out-Null
+# -o names the binary Chipwright CLI, not the .lpr it was built from. The
+# project file is still AsProgrammerCLI.lpr; the thing a user runs is not.
 & "$fpcBin\fpc.exe" -Twin32 -Pi386 -Mobjfpc -Sh `
   "-Fu$root\software" "-FU$headlessDir\units" "-FE$headlessDir" `
+  "-oChipwrightCLI.exe" `
   "$root\software\AsProgrammerCLI.lpr" | Out-Null
-$headlessExe = Join-Path $headlessDir "AsProgrammerCLI.exe"
+$headlessExe = Join-Path $headlessDir "ChipwrightCLI.exe"
 if (($LASTEXITCODE -ne 0) -or -not (Test-Path -LiteralPath $headlessExe)) {
   Die "the headless Windows CLI did not compile"
 }
-Write-Host "    AsProgrammerCLI.exe"
+Write-Host "    ChipwrightCLI.exe"
 
 # Parser boundary checks run without opening USB. These values wrap to 256
 # and 4096 if a QWord is truncated before the geometry builder sees it.
@@ -445,10 +448,14 @@ if ($LASTEXITCODE -ne 2) { Die "headless CLI accepted a duplicate option" }
 Write-Host "    unknown and duplicate options refused before USB open"
 
 # --- the program ---
-Step "building AsProgrammer.exe"
+Step "building Chipwright.exe"
 & $lazbuild --build-mode=Release "$root\software\AsProgrammer.lpi" | Out-Null
 if ($LASTEXITCODE -ne 0) { Die "the build failed" }
-$exe = "$root\software\AsProgrammer.exe"
+# The Lazarus project file is still AsProgrammer.lpi, but its target filename
+# is Chipwright, so this is what an ordinary build produces -- not only what a
+# -Release package renames it to. Somebody who runs the build script and then
+# double-clicks the result should get the program this project ships.
+$exe = "$root\software\Chipwright.exe"
 if (-not (Test-Path $exe)) { Die "no executable was produced" }
 Write-Host ("    {0:N0} bytes" -f (Get-Item $exe).Length)
 
@@ -464,11 +471,11 @@ Step "assembling $out"
 Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $out | Out-Null
 
-# The build targets are still named AsProgrammer*.exe because the Lazarus
-# project files are, but the shipped program is Chipwright. Rename on the way
-# into the package so the download matches the application. Doing it here and
-# not as a manual step afterwards is the point: CI rebuilds every tagged
-# release from scratch, and a manual rename does not survive that.
+# Both binaries are already named for the program rather than for the project
+# files they were built from, so this is a copy and not a rename. It used to be
+# a rename, which meant an ordinary build left AsProgrammer.exe sitting in
+# software\ and only the packaged copy carried the right name -- so the thing a
+# developer ran was never the thing a user ran.
 Copy-Item $exe (Join-Path $out "Chipwright.exe")
 Copy-Item $headlessExe (Join-Path $out "ChipwrightCLI.exe")
 Remove-Item -LiteralPath $headlessDir -Recurse -Force

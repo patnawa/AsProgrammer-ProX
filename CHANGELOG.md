@@ -217,6 +217,23 @@ Eight new suites, ~500 assertions, all hardware-free: `signalchar_tests`,
 `sessionreport_tests`, `writejournal_tests`, `simhw_tests`,
 `voltagewarning_tests`.
 
+### The build produces Chipwright.exe, not AsProgrammer.exe
+
+The Lazarus target filename is now `Chipwright`, and the headless CLI is built
+with `-oChipwrightCLI`. Both were previously named after the project files they
+were built from and only renamed on the way into a `-Release` package, so an
+ordinary `tools\build.ps1` left `software\AsProgrammer.exe` behind — the binary
+a developer ran was never the one a user ran, and only the packaged copy
+carried the right name. The `.lpi` and `.lpr` files keep their names; nothing
+about the project layout changes.
+
+That surfaced a bug in `tools/hil.ps1`, which searched `release\` for
+`AsProgrammer.exe`. The release folder stopped containing that name some time
+ago, so the search always fell through to its source-tree fallback — meaning a
+hardware-in-loop run could be exercising a developer's last local build while
+reporting on the packaged release. It now looks for `Chipwright.exe` and fails
+loudly if it is absent.
+
 ## 4.35.1.0 — the credits describe what this program actually is
 
 The About box and README still read as though this were a fork with a few
