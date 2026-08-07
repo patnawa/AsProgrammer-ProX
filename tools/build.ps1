@@ -187,6 +187,14 @@ $clockDir = Join-Path $env:TEMP "aspx-tests-clock-tune"
 Run-Suite "clocktune_tests" $clockDir @(
   "$root\tests\clocktune_tests.lpr", "$root\software\clocktune.pas")
 
+# Whether an image fits a chip at an address, and the one sentence saying why
+# not. Shared by the GUI workflow strip and the command line so the two can
+# never disagree about the same job.
+$admitDir = Join-Path $env:TEMP "aspx-tests-write-admission"
+Run-Suite "writeadmission_tests" $admitDir @(
+  "$root\tests\writeadmission_tests.lpr",
+  "$root\software\writeadmission.pas")
+
 # The decidable parts of the bench tools: which I2C addresses may be probed,
 # and how a typed SPI command is parsed before it is sent.
 $labDir = Join-Path $env:TEMP "aspx-tests-lab-tools"

@@ -20,6 +20,7 @@ uses
   safemode,
   norgeometrybuild,
   labtools, synaser, Spin,
+  writeadmission,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw,
   serproghw, ezphw;
 
@@ -1815,41 +1816,65 @@ var
   StateText, SmartWhy: string;
   StateColor: TColor;
   NextStep: TButton;
+  Target: TWriteTarget;
+  Admission: TWriteAdmission;
 begin
   if FWorkflowPanel = nil then Exit;
 
-  BufSize := MPHexEditorEx.DataSize;
-  HasBuffer := BufSize > 0;
+  //กติกา "ภาพนี้ลงชิปนี้ที่แอดเดรสนี้ได้ไหม" ย้ายไปอยู่ใน writeadmission แล้ว
+  //เพราะเดิมมันอยู่ในตัววาดแถบขั้นตอน แปลว่าบรรทัดคำสั่งมีคำตอบของตัวเองต่างหาก
+  //สำหรับคำถามเดียวกัน สองคำตอบต่อหนึ่งคำถามคือมากไปหนึ่งคำตอบ
+  //ที่นี่เหลือแค่การอ่านค่าจากหน้าจอส่งเข้าไป แล้วเอาผลไปทาสี
+  FillChar(Target, SizeOf(Target), 0);
+  if RadioSPI.Checked then
+  begin
+    if ComboSPICMD.ItemIndex = SPI_CMD_25 then
+      Target.Protocol := wpSPI25
+    else
+      Target.Protocol := wpSPIOther;
+  end
+  else if RadioMW.Checked then
+    Target.Protocol := wpMicrowire
+  else
+    Target.Protocol := wpI2C;
 
-  //Smart write ไม่ใช่ของ SPI NOR อย่างเดียวอีกแล้ว ตั้งแต่ 4.6 ตระกูลที่ลบ
-  //ไม่ได้ (24Cxx, 93xx, 95xx) ก็มีตัวจัดการ differential ของตัวเอง
-  SmartCapable := (RadioSPI.Checked and
-                   (ComboSPICMD.ItemIndex = SPI_CMD_25)) or
-                  IsEEPROMSmartWriteTarget;
+  BufSize := MPHexEditorEx.DataSize;
+  Target.BufferSize := BufSize;
 
   ChipSize := 0;
   if IsNumber(ComboChipSize.Text) then
     ChipSize := StrToInt64Def(ComboChipSize.Text, 0);
-  SizeKnown := ChipSize > 0;
+  Target.ChipSize := ChipSize;
+  Target.ChipSizeKnown := ChipSize > 0;
 
-  StartAddr := 0;
-  AddrOK := TryStrToQWord('$' + Trim(StartAddressEdit.Text), Parsed);
-  if AddrOK then StartAddr := Parsed;
+  Target.StartAddressValid :=
+    TryStrToQWord('$' + Trim(StartAddressEdit.Text), Parsed);
+  if Target.StartAddressValid then Target.StartAddress := Parsed;
 
-  //ภาพที่ใหญ่เกินพื้นที่ที่เหลือจากแอดเดรสเริ่ม เดิมรู้ตัวหลังกดเขียนแล้ว
-  FitsChip := SizeKnown and AddrOK and (StartAddr < ChipSize) and
-              (BufSize <= ChipSize - StartAddr);
+  Target.PageSizeValid := TryStrToQWord(Trim(ComboPageSize.Text), Parsed);
+  if Target.PageSizeValid then Target.PageSize := Parsed;
 
-  //93xx เป็นชิปแบบคำ ตัวจัดการต้องการแอดเดรสและความยาวเป็นเลขคู่
-  MWAligned := (not RadioMW.Checked) or
-               (((StartAddr and 1) = 0) and ((BufSize and 1) = 0));
+  Target.ProgrammerPresent := ProgrammerPresent;
+  Target.ChipSelected := ChipDetected;
+  Target.ChipIdentityProven := not (RadioSPI.Checked and
+                                    ChipIdentityUnproven);
+  //Smart write ไม่ใช่ของ SPI NOR อย่างเดียวอีกแล้ว ตั้งแต่ 4.6 ตระกูลที่ลบ
+  //ไม่ได้ (24Cxx, 93xx, 95xx) ก็มีตัวจัดการ differential ของตัวเอง
+  Target.SmartWriteSupported := (RadioSPI.Checked and
+                                 (ComboSPICMD.ItemIndex = SPI_CMD_25)) or
+                                IsEEPROMSmartWriteTarget;
 
-  //ทางเขียนต้องการหน้าเพจที่เป็นตัวเลข 1..2048 ถ้าไม่ตรวจที่นี่ด้วย แถบจะ
-  //ไฟเขียวแล้วงานไปตายเอาหลังกดยืนยันการทำลายข้อมูลไปแล้ว
-  //MicroWire ไม่ใช้ช่องนี้ ตัวจัดการบังคับหน้าเพจเป็น 2 ไบต์เอง
-  PageOK := RadioMW.Checked or
-            (TryStrToQWord(Trim(ComboPageSize.Text), Parsed) and
-             (Parsed >= 1) and (Parsed <= 2048));
+  Admission := EvaluateWriteAdmission(Target);
+  //ชื่อเดิมยังใช้ต่อสำหรับข้อความบนแถบสถานะข้างล่าง แต่ค่าทุกตัวมาจากแกน
+  //ไม่ได้คำนวณซ้ำที่นี่อีกแล้ว
+  HasBuffer := Admission.HasBuffer;
+  SizeKnown := Target.ChipSizeKnown;
+  AddrOK := Target.StartAddressValid;
+  StartAddr := Target.StartAddress;
+  FitsChip := Admission.FitsChip;
+  MWAligned := Admission.Aligned;
+  PageOK := Admission.PageUsable;
+  SmartCapable := Target.SmartWriteSupported;
 
   FWorkflowOpen.Enabled := not OperationRunning;
   FWorkflowDetect.Enabled := (not OperationRunning) and
@@ -1857,26 +1882,17 @@ begin
   FWorkflowRead.Enabled := (not OperationRunning) and
     ProgrammerPresent and ChipDetected and SizeKnown;
   FWorkflowVerify.Enabled := FWorkflowRead.Enabled and HasBuffer;
-  FWorkflowSmart.Enabled := FWorkflowVerify.Enabled and SmartCapable and
-                            FitsChip and MWAligned and PageOK;
+  FWorkflowSmart.Enabled := (not OperationRunning) and
+                            Admission.MaySmartWrite;
 
   //tooltip ของ Smart write บอกเหตุผลที่กดไม่ได้ ไม่ใช่คำอธิบายทั่วไปที่
-  //ไม่เกี่ยวกับสถานะตรงหน้า
-  if FWorkflowSmart.Enabled then
-    SmartWhy := 'Preserve neighbouring bytes, write only what differs, ' +
-                'and verify (Ctrl+Shift+P)'
-  else if not SmartCapable then
-    SmartWhy := 'Smart write covers SPI NOR, SPI 95, I2C 24 and MicroWire 93'
-  else if not HasBuffer then
-    SmartWhy := 'Open an image first'
-  else if not FitsChip then
-    SmartWhy := 'The image does not fit the chip from this start address'
-  else if not MWAligned then
-    SmartWhy := STR_WORKFLOW_MW_ODD
-  else if not PageOK then
-    SmartWhy := STR_WORKFLOW_BAD_PAGE
+  //ไม่เกี่ยวกับสถานะตรงหน้า และเหตุผลนั้นมาจากแกนตัวเดียวกับที่บรรทัดคำสั่ง
+  //ใช้ จะได้ไม่มีวันขัดกันเอง
+  if Admission.Reason <> '' then
+    SmartWhy := Admission.Reason
   else
-    SmartWhy := 'Connect a programmer and select a chip first';
+    SmartWhy := 'Preserve neighbouring bytes, write only what differs, ' +
+                'and verify (Ctrl+Shift+P)';
   FWorkflowSmart.Hint := SmartWhy;
 
   NextStep := nil;

@@ -60,7 +60,7 @@ Nothing here is inferred upward. A chip whose voltage cannot be established is a
 <tr><td><b>🧪 Lab Tools</b></td><td>I²C bus scanner, SPI console and UART terminal — kept in their own menu, out of the way of the flash programmer</td></tr>
 </table>
 
-Every rule above lives in a hardware-free core unit and is covered by the test suite — **24 suites, no hardware required**. See [`docs/testing.md`](docs/testing.md).
+Every rule above lives in a hardware-free core unit and is covered by the test suite — **25 suites, no hardware required**. See [`docs/testing.md`](docs/testing.md).
 
 ---
 

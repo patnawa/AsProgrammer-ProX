@@ -3,6 +3,43 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.35.0.0 — one answer to "does this image fit this chip"
+
+- **`writeadmission`**, a new core unit holding the rule that decides whether
+  an image can be written to a chip at an address, and the one sentence saying
+  why not.
+
+  The rule lived inside the GUI's workflow-strip painter, which meant the
+  command line had its own separate answer to the same question. Two answers to
+  "does this fit" is one answer too many — the GUI would grey out a button
+  while the CLI accepted the job, or the reverse, and which one was right
+  depended on which file somebody had edited more recently.
+
+  It is also the check that decides whether a write runs off the end of a part.
+  Getting it wrong produces no error: it produces a write that stops partway
+  with the chip half-programmed, discovered at verify if verify is on at all.
+
+- 37 assertions, and the ones worth reading are the boundaries. An image
+  ending exactly at the last byte is admitted and one byte past it is not. The
+  fit test is written as `ChipSize - StartAddress` rather than
+  `StartAddress + BufferSize` specifically so an enormous buffer or an address
+  near the top of the range cannot wrap the addition into a false fit — and
+  that has a test rather than only a comment.
+
+- The refusal names **the next thing to fix, not the worst thing wrong**. An
+  operator with three problems wants the first one, so the order runs from
+  "connect a programmer" through to "the chip has not answered an identity
+  read yet".
+
+  That last one is the softest reason and is flagged as such in the result,
+  because picking a chip by name and writing it is a real workflow — just an
+  unproven one. Callers get an explicit boolean instead of pattern-matching
+  the sentence.
+
+- MicroWire is exempted from the page-size check, because its handler fixes
+  the page at two bytes itself and refusing a job over a field with no effect
+  would be a rule enforcing nothing.
+
 ## 4.34.0.0 — Lab Tools
 
 A new top-level **Lab Tools** menu, deliberately separate from the flash

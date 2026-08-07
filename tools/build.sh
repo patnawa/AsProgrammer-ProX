@@ -130,6 +130,13 @@ clock="$tmp/clock-tune"
 run_suite clocktune_tests "$clock" \
   tests/clocktune_tests.lpr software/clocktune.pas
 
+# Whether an image fits a chip at an address, and the one sentence saying why
+# not. Shared by the GUI workflow strip and the command line so the two can
+# never disagree about the same job.
+admit="$tmp/write-admission"
+run_suite writeadmission_tests "$admit" \
+  tests/writeadmission_tests.lpr software/writeadmission.pas
+
 # The decidable parts of the bench tools: which I2C addresses may be probed,
 # and how a typed SPI command is parsed before it is sent.
 lab="$tmp/lab-tools"
