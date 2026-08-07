@@ -3,6 +3,42 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.35.1.0 — the credits describe what this program actually is
+
+The About box and README still read as though this were a fork with a few
+patches on top. That stopped being true some time ago, and the licence file
+named only the upstream author for a codebase whose safety architecture,
+electrical model, machine interface and entire test suite were written here.
+
+- `LICENSE` now carries **both** copyright lines, which is exactly what MIT is
+  built for. The project's own line comes first; the upstream line stays and
+  says what it covers — the inherited protocol units, hardware backends,
+  script engine and chip catalogue — and that it must be retained for as long
+  as those remain in the tree.
+
+  That second line is not optional and is not about which licence this project
+  chose. MIT requires the notice to travel with the code it covers, so
+  removing it would make the result undistributable. Everything else that read
+  as deference to the upstream project is gone.
+
+- The About box leads with Chipwright and names its own work first. Prior work
+  is a factual paragraph further down rather than the headline, and the
+  separately licensed components — MPHexEditor, Ararat Synapse, FTDI D2XX,
+  flashrom's chip data — are listed as what they are.
+
+- Promotional links to the upstream repositories are removed from the About
+  box, the Credits dialog and the Buzzpirat help menu item, which now points
+  at this project's own repository. Someone pressing Help in this program
+  wants this program's documentation.
+
+  One upstream URL stays, in `tools/build.ps1`: the pinned archive the vendor
+  runtime DLLs are downloaded and hash-verified from. That is a functional
+  dependency recorded in `vendor-manifest.json`, not a credit, and removing it
+  would break the release build.
+
+- `OriginalFilename` in the exe resource said `AsProgrammer.exe` while the
+  shipped binary has been `Chipwright.exe` for some time.
+
 ## 4.35.0.0 — one answer to "does this image fit this chip"
 
 - **`writeadmission`**, a new core unit holding the rule that decides whether

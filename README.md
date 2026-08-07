@@ -310,9 +310,15 @@ Every release tells its story in **[`CHANGELOG.md`](CHANGELOG.md)** — what was
 
 ## Credits
 
-Chipwright builds on **[AsProgrammer](https://github.com/nofeletru/UsbAsp-flash)** by nofeletru, via AsProgrammer ProX. The chip catalogue, protocol engines and most backends are their work; this fork adds CH347 voltage control, the activity LED and the voltage-resolution fixes described above.
+Chipwright is written by **Patnawa**.
 
-See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for the full list. Released under the [MIT licence](LICENSE).
+The safety architecture is this project's own work: the electrical preflight and target-rail reporting, the session admission ladder, clock auto-tuning, the connection-stability gate, read-only safe mode, the erase-geometry builder, the write-admission rule, the machine-facing JSON and exit-code contract, CH347 voltage control, the production job and evidence chain, and the Lab Tools — with the test suite that holds all of it in place.
+
+It began as a fork of AsProgrammer by nofeletru. The SPI, I²C and MicroWire protocol units, several hardware backends, the script engine and the chip catalogue descend from that work and are used under its MIT licence.
+
+Components carrying their own separate licences — MPHexEditor, Ararat Synapse, FTDI D2XX, libusb, and the flashrom chip data — are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+Released under the [MIT licence](LICENSE).
 
 <div align="center">
 <sub>Built for people who would rather read a datasheet than replace a chip.</sub>

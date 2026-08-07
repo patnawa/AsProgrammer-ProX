@@ -12758,7 +12758,10 @@ end;
 
 procedure TMainForm.BzHelpMenuItemClick(Sender: TObject);
 begin
-     ExecuteProcess('cmd.exe', '/c start https://github.com/therealdreg/asprogrammer-dregmod', []);
+  //ชี้มาที่โครงการนี้ ไม่ใช่ต้นทางที่ fork มา ผู้ใช้ที่กด Help ในโปรแกรมนี้
+  //ต้องการเอกสารของโปรแกรมนี้
+  ExecuteProcess('cmd.exe',
+    '/c start https://github.com/patnawa/Chipwright', []);
 end;
 
 //นับจำนวนชิปในไฟล์ฐานข้อมูล ใช้โชว์ในหน้าต่างข้อมูลรุ่น
@@ -12803,35 +12806,41 @@ begin
 
     if ShowCredits then
     begin
-      s.Add('Chipwright is built on the work of:');
+      s.Add('Chipwright ' + PROX_VERSION);
+      s.Add('https://github.com/patnawa/Chipwright');
       s.Add('');
-      s.Add('  nofeletru');
-      s.Add('    AsProgrammer / UsbAsp-flash, the original program');
-      s.Add('    https://github.com/nofeletru/UsbAsp-flash');
+      s.Add('Written by Patnawa.');
       s.Add('');
-      s.Add('  Dreg  @therealdreg');
-      s.Add('    the dregmod fork and its Buzzpirat / Bus Pirate support');
-      s.Add('    https://github.com/therealdreg/asprogrammer-dregmod');
+      s.Add('The electrical preflight, the target-rail reporting, the session');
+      s.Add('admission ladder, clock auto-tuning, the connection-stability');
+      s.Add('gate, read-only safe mode, the erase-geometry builder, the write');
+      s.Add('admission rule, the machine-facing JSON and exit-code contract,');
+      s.Add('the CH347 voltage control and activity LED, the production job');
+      s.Add('and evidence chain, and the Lab Tools are this project''s own.');
       s.Add('');
-      s.Add('  Ian Lesnet');
-      s.Add('    creator of the Bus Pirate');
-      s.Add('    https://buspirate.com/');
+      s.Add('--- Prior work this began from ---');
       s.Add('');
-      s.Add('  Floyd77');
-      s.Add('    the method for adding an unknown chip to the database');
+      s.Add('Chipwright started as a fork of AsProgrammer by nofeletru, later');
+      s.Add('by way of the dregmod fork. The SPI, I2C and MicroWire protocol');
+      s.Add('units, several hardware backends, the script engine and the chip');
+      s.Add('catalogue descend from that work and are used under its MIT');
+      s.Add('licence.');
       s.Add('');
-      s.Add('  the flashrom project');
-      s.Add('    chip data in chiplist-flashrom.xml, GPL-2.0-or-later');
-      s.Add('    https://github.com/flashrom/flashrom');
+      s.Add('--- Components with their own licences ---');
       s.Add('');
-      s.Add('  David Sanchez and Mecanico');
-      s.Add('    the wiring photographs');
+      s.Add('  Markus Stephany     MPHexEditor, the hex editor component');
+      s.Add('  Ararat Synapse      the serial transport (synaser)');
+      s.Add('  FTDI                the D2XX interface unit');
+      s.Add('  the flashrom project  chip data in chiplist-flashrom.xml,');
+      s.Add('                        GPL-2.0-or-later');
+      s.Add('  Ian Lesnet          creator of the Bus Pirate');
+      s.Add('  Floyd77             the method for adding an unknown chip');
+      s.Add('  David Sanchez and Mecanico   the wiring photographs');
       s.Add('');
-      s.Add('  Markus Stephany');
-      s.Add('    MPHexEditor, the hex editor component');
+      s.Add('--- Licence ---');
       s.Add('');
-      s.Add('Licence: MIT, see the LICENSE file next to the program.');
-      s.Add('Copyright (c) 2015 nofeletru and contributors.');
+      s.Add('MIT. Copyright (c) 2015 nofeletru and contributors.');
+      s.Add('See LICENSE and THIRD_PARTY_NOTICES.md next to the program.');
     end
     else
     begin
@@ -12974,15 +12983,18 @@ begin
   credits :=
     'Chipwright ' + PROX_VERSION + LineEnding +
     'https://github.com/patnawa/Chipwright' + LineEnding + LineEnding +
-    'Built on:' + LineEnding +
-    '  nofeletru - AsProgrammer / UsbAsp-flash' + LineEnding +
-    '  https://github.com/nofeletru/UsbAsp-flash' + LineEnding + LineEnding +
-    '  Dreg @therealdreg - dregmod fork' + LineEnding +
-    '  https://github.com/therealdreg/asprogrammer-dregmod' + LineEnding + LineEnding +
-    '  Ian Lesnet - Bus Pirate' + LineEnding +
-    '  Chip data in chiplist-flashrom.xml from the flashrom project (GPL-2.0-or-later)' +
-    LineEnding + LineEnding +
-    'MIT licence, see LICENSE';
+    'Written by Patnawa.' + LineEnding + LineEnding +
+    'Forked from AsProgrammer by nofeletru; the protocol units, several' +
+    LineEnding +
+    'hardware backends, the script engine and the chip catalogue descend' +
+    LineEnding +
+    'from that work.' + LineEnding + LineEnding +
+    'Components under their own licences: MPHexEditor, Ararat Synapse,' +
+    LineEnding +
+    'FTDI D2XX, and chiplist-flashrom.xml from the flashrom project' +
+    LineEnding +
+    '(GPL-2.0-or-later).' + LineEnding + LineEnding +
+    'MIT licence. See LICENSE and THIRD_PARTY_NOTICES.md.';
 
   ShowMessage(credits);
 end;

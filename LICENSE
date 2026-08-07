@@ -1,6 +1,15 @@
 The MIT License (MIT)
 
-Copyright (c) 2015 nofeletru
+Copyright (c) 2026 Patnawa
+Copyright (c) 2015 nofeletru and contributors
+
+Chipwright began as a fork of AsProgrammer. Both copyright lines above apply
+to the combined work: the second covers the inherited protocol units, hardware
+backends, script engine and chip catalogue, and must be retained for as long
+as those remain. The first covers everything added since.
+
+Some components carry their own separate licences and are not covered by this
+notice; see THIRD_PARTY_NOTICES.md.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
