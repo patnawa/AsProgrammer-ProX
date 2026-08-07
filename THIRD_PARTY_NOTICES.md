@@ -18,6 +18,17 @@ change the project's source-code license.
   Other imported chip catalogs retain the notices recorded beside their
   importers/data files.
 
+[`vendor-manifest.json`](vendor-manifest.json) is the machine-readable version
+of this list: every third-party binary with its SHA-256, its licence, and how
+its origin was established. Entries marked `unrecorded` there have known bytes
+and an unknown origin — no URL has been invented to fill the gap. A release ZIP
+also carries a CycloneDX SBOM listing every packaged file with its hash.
+
+Most of the driver installers that used to sit under `drivers/` are no longer
+in a source checkout. They remain in git history, and the manifest records what
+each one was; fetch the current version from the vendor rather than from a
+clone of this repository.
+
 See the packaged upstream readmes and repository history for attribution. Do
 not assume a third-party component is MIT merely because it is in the release
 ZIP.

@@ -3,6 +3,58 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.29.1.0 — the source tree stops carrying 27 MB that was never source
+
+- Removed from the working tree (git history was deliberately left alone, so
+  nothing is lost and no clone or fork is invalidated):
+
+  - `software/.text`, `.data`, `.bss`, `.idata` and `.rsrc/` — 2.8 MB of PE
+    sections someone had unpacked out of a built `AsProgrammer.exe` and
+    committed. `.text` is the compiled code and `.rsrc` holds the form and
+    icon resources; every build regenerates all of it.
+  - Six vendor runtime DLLs from `software/`, plus two duplicates under
+    `software/buzzpirathlp/`. `tools/build.ps1` already downloads these from
+    one pinned upstream archive and checks every byte against a recorded
+    SHA-256, so the copies in the tree were a second, unverified answer to a
+    question that already had a verified one.
+  - 15.8 MB of Zadig — three builds of one tool, for an OS matrix that has not
+    included Windows XP or Vista for a long time.
+  - The FTDI and WCH driver installers, and `CH341PAR.ZIP`, which duplicated
+    the extracted `CH341PAR/` directory sitting beside it.
+  - `firmware/AVRISP-MKII/WindowsDriver/`, byte-identical to
+    `drivers/AVRISPMK2/`.
+
+  `software/libusb0.dll`, `mphexeditor.zip` and `drivers/EZP2023Plus/` stay:
+  the build needs all three locally and no pinned download exists for them.
+
+- New `vendor-manifest.json` records every third-party binary — what it is,
+  its SHA-256, its licence, and where it came from. The `provenance` field is
+  the honest part: `pinned` means the build downloads it from the recorded URL
+  and refuses to package it on a hash mismatch; `unrecorded` means the bytes
+  are known and the origin is not, because nobody wrote down where the file
+  was downloaded from. No URL has been invented to fill a gap.
+
+- Releases now carry a CycloneDX SBOM listing every packaged file with its
+  SHA-256, generated from the assembled folder rather than a hand-kept list,
+  and a `.sha256` file beside the ZIP.
+
+- New `hardware/` directory. The board is a commercial CH347Ⅱ V2.13, so this
+  is reverse engineering rather than design output — which is precisely why it
+  needs recording, because the software refuses operations on the strength of
+  claims about how this board behaves.
+
+  `pinout.md` tags every claim with how it was established. One is marked
+  UNVERIFIED: whether CS/CLK/MOSI actually follow the target rail. A board
+  that switches VCC to 1.8 V while its logic keeps driving 3.3 V passes every
+  check the software can perform and destroys 1.8 V parts.
+  `test-procedure.md` is the fifteen minutes with a scope that settles it, in
+  either direction, and says exactly which line of `ch347hw.pas` changes for
+  each possible answer.
+
+- The driver hints in the log named paths under `drivers\` that a fresh clone
+  no longer has. They now name the driver — "the WCH CH34xPAR driver" — and
+  point at `vendor-manifest.json` for the vendor, version and hash.
+
 ## 4.29.0.0 — a caller that is not a person gets a real answer
 
 - Both front ends used to answer every question with 0, 1 or 2. A script could

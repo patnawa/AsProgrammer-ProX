@@ -1168,20 +1168,28 @@ end;
 
 //บอกให้ตรงจุดว่าไดรเวอร์ของฮาร์ดแวร์ตัวไหนน่าจะยังไม่ได้ติดตั้ง
 //ข้อความจาก DLL มักบอกแค่ว่าเปิดอุปกรณ์ไม่ได้ ซึ่งไม่ช่วยอะไรเลย
+//
+//ชี้ไปที่ "ไดรเวอร์ตัวไหนของใคร" ไม่ใช่พาธในโฟลเดอร์ drivers\ อีกต่อไป
+//ตัวติดตั้งของผู้ผลิตถูกย้ายออกจาก source tree แล้ว (ดู vendor-manifest.json)
+//การชี้ไปยังไฟล์ที่ clone ใหม่ไม่มี คือคำแนะนำที่พาไปเจอทางตัน
 procedure LogDriverHint;
 begin
   case AsProgrammer.Current_HW of
     CHW_CH341:
-      LogPrint(STR_DRIVER_HINT + 'drivers\USBCH341\CH341PAR.EXE (WCH CH341PAR)');
+      LogPrint(STR_DRIVER_HINT + 'the WCH CH341PAR driver');
     CHW_CH347:
-      LogPrint(STR_DRIVER_HINT + 'drivers\CH34X\CH34XPAR.EXE (WCH CH34xPAR)');
+      LogPrint(STR_DRIVER_HINT + 'the WCH CH34xPAR driver');
     CHW_FT232H:
-      LogPrint(STR_DRIVER_HINT + 'drivers\FT232\CDM212364_Setup.exe (FTDI D2XX)');
+      LogPrint(STR_DRIVER_HINT + 'the FTDI D2XX (CDM) driver');
     CHW_USBASP, CHW_AVRISP:
-      LogPrint(STR_DRIVER_HINT + 'drivers\usbasp\zadig (libusb-win32)');
+      LogPrint(STR_DRIVER_HINT + 'libusb-win32, installed with Zadig');
     CHW_ARDUINO, CHW_BUZZPIRAT:
       LogPrint(STR_DRIVER_HINT_COM);
   end;
+  if AsProgrammer.Current_HW in [CHW_CH341, CHW_CH347, CHW_FT232H,
+                                 CHW_USBASP, CHW_AVRISP] then
+    LogPrint('see vendor-manifest.json for the vendor, version and SHA-256 ' +
+             'of each driver package');
 end;
 
 function OpenDevice: boolean;
@@ -9566,14 +9574,16 @@ var
   function DriverGuidance: string;
   begin
     case AsProgrammer.Current_HW of
+      //ชื่อไดรเวอร์ ไม่ใช่พาธ: ตัวติดตั้งของผู้ผลิตไม่ได้อยู่ใน source tree
+      //แล้ว รายละเอียดว่าเอามาจากไหนอยู่ใน vendor-manifest.json
       CHW_CH341:
-        Result := 'Install drivers\USBCH341\CH341PAR.EXE (WCH CH341PAR).';
+        Result := 'Install the WCH CH341PAR driver.';
       CHW_CH347:
-        Result := 'Install drivers\CH34X\CH34XPAR.EXE (WCH CH34xPAR).';
+        Result := 'Install the WCH CH34xPAR driver.';
       CHW_FT232H:
-        Result := 'Install drivers\FT232\CDM212364_Setup.exe (FTDI D2XX).';
+        Result := 'Install the FTDI D2XX (CDM) driver.';
       CHW_USBASP, CHW_AVRISP:
-        Result := 'Use Zadig from drivers\usbasp to install libusb-win32.';
+        Result := 'Use Zadig to install the libusb-win32 driver.';
       CHW_ARDUINO, CHW_BUZZPIRAT, CHW_SERPROG:
         Result := 'Check the selected COM port and close any other program ' +
                   'that may own it.';

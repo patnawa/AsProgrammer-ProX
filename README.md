@@ -106,7 +106,7 @@ Signal (CS/CLK/MOSI):      1.8 V (assumed to follow the rail, not measured)
 
 "not measurable" is the answer, not a gap. Showing only the requested level reads as confirmation — a CH347 with a stuck GPIO, a clip on the wrong pad, and a rail loaded down by a motherboard all display an identical "1.8 V". No CH341, CH347 or FT232H has an ADC on the target rail, a sense resistor, a load switch or backfeed detection, so today that is the honest reply for all three. A board with sensing fills the same fields and these lines start carrying real numbers with no other change.
 
-The last line is the one to take seriously. A board that switches VCC to 1.8 V while its logic keeps swinging to 3.3 V passes every other electrical check and destroys 1.8 V parts. Nobody has put a scope on this board's signal pins at both rails, so Chipwright says *assumed* rather than claiming a figure.
+The last line is the one to take seriously. A board that switches VCC to 1.8 V while its logic keeps swinging to 3.3 V passes every other electrical check and destroys 1.8 V parts. Nobody has put a scope on this board's signal pins at both rails, so Chipwright says *assumed* rather than claiming a figure — and [`hardware/test-procedure.md`](hardware/test-procedure.md) is the fifteen minutes that settles it.
 
 Before CS or CLK moves, the same electrical preflight that authenticated production has always used runs under a bench policy. A rail outside the chip's range, or a signal level above what the part tolerates, stops the operation before the first clock edge. Things nobody has characterised produce a note and continue; requiring proof no supported programmer can give would just teach people to switch the gate off.
 
@@ -205,6 +205,12 @@ Exit codes distinguish the cases where your next action differs:
 | `4` programmer lost | `5` no chip answered | `6` chip mismatch | `7` voltage refused |
 | `8` connection unstable | `9` chip locked | `10` file size mismatch | `11` verify failed |
 | `12` file error | `13` cancelled | | |
+
+## Hardware
+
+The board is a commercial CH347Ⅱ V2.13, so [`hardware/`](hardware/) is reverse engineering rather than design output — which is exactly why it is written down, because the software refuses operations on the strength of claims about how this board behaves. [`hardware/pinout.md`](hardware/pinout.md) tags every claim with how it was established, and one is still marked UNVERIFIED.
+
+[`vendor-manifest.json`](vendor-manifest.json) records every third-party binary with its SHA-256, licence and origin. Entries marked `unrecorded` have known bytes and an unknown source; no URL has been invented to fill the gap.
 
 ## Building
 

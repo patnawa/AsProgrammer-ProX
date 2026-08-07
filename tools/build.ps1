@@ -491,6 +491,55 @@ try {
   }
 }
 
+# --- SBOM ---
+#
+# Every file that is about to go into the ZIP, with its SHA-256, in CycloneDX
+# form. Generated from the assembled folder rather than from a hand-kept list,
+# because a hand-kept list is wrong the first time somebody adds a file and
+# nobody notices until an audit.
+#
+# vendor-manifest.json in the repository records where third-party components
+# came from; this records what actually shipped.
+Step "generating the SBOM"
+$sbomComponents = @()
+foreach ($file in Get-ChildItem -Recurse -File $out | Sort-Object FullName) {
+  $rel = $file.FullName.Substring(
+    ((Resolve-Path $out).Path.TrimEnd('\') + '\').Length) -replace '\\', '/'
+  $sbomComponents += [ordered]@{
+    type    = 'file'
+    name    = $rel
+    version = $Version
+    hashes  = @(@{
+      alg     = 'SHA-256'
+      content = (Get-FileHash -LiteralPath $file.FullName `
+                   -Algorithm SHA256).Hash.ToLowerInvariant()
+    })
+  }
+}
+$sbom = [ordered]@{
+  bomFormat    = 'CycloneDX'
+  specVersion  = '1.5'
+  version      = 1
+  metadata     = [ordered]@{
+    component = [ordered]@{
+      type    = 'application'
+      name    = 'Chipwright'
+      version = $Version
+    }
+  }
+  components   = $sbomComponents
+}
+$sbomPath = Join-Path $out "chipwright-$Version.cdx.json"
+# WriteAllText with an explicit BOM-less encoder, not Set-Content -Encoding
+# utf8: Windows PowerShell 5.1 always prepends a byte order mark, and a BOM in
+# front of '{' makes the file invalid JSON to strict parsers -- which is most
+# of the tools an SBOM exists to be consumed by.
+[System.IO.File]::WriteAllText($sbomPath, ($sbom | ConvertTo-Json -Depth 8),
+  (New-Object System.Text.UTF8Encoding $false))
+# The SBOM lists the 85 files that existed when it was written; it does not
+# list itself. That is the usual convention and avoids the obvious paradox.
+Write-Host "    $($sbomComponents.Count) components"
+
 $zipOut = "$root\release\Chipwright-$Version.zip"
 Remove-Item $zipOut -ErrorAction SilentlyContinue
 
@@ -530,4 +579,11 @@ try {
 } finally {
   $check.Dispose()
 }
+# The checksum of the artefact people actually download. Written beside the
+# ZIP so a release upload carries both without a manual step.
+$zipHash = (Get-FileHash -LiteralPath $zipOut -Algorithm SHA256).Hash
+"$($zipHash.ToLowerInvariant())  Chipwright-$Version.zip" |
+  Set-Content -LiteralPath "$zipOut.sha256" -Encoding ascii
+Write-Host "    SHA-256 $zipHash"
+
 Step ("done -> {0} ({1:N0} bytes)" -f $zipOut, (Get-Item $zipOut).Length)

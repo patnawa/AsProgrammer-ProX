@@ -1,0 +1,179 @@
+{
+  "$comment": [
+    "Every third-party binary this project builds with, ships, or used to keep",
+    "in the source tree. One row per artefact: what it is, where it came from,",
+    "what licence it carries, and the SHA-256 that identifies it exactly.",
+    "",
+    "The 'provenance' field is the load-bearing one, and it is not decorative:",
+    "",
+    "  pinned      - tools/build.ps1 downloads this from the recorded URL and",
+    "                refuses to package it unless the SHA-256 matches. The URL",
+    "                and hash below are the same values the build asserts.",
+    "  in-repo     - kept in the tree because the build needs it locally and",
+    "                no pinned download exists. Hash recorded here.",
+    "  unrecorded  - the file's bytes are known, its origin is not. Nobody",
+    "                wrote down where it was downloaded from, and this project",
+    "                will not invent a URL to fill the gap. Treat these as",
+    "                unverified until somebody re-downloads them from the",
+    "                vendor and confirms the hash matches.",
+    "",
+    "Artefacts marked 'removed-from-tree' are no longer in a source checkout.",
+    "They remain in git history, which was deliberately not rewritten; a clone",
+    "does not carry them into the working tree any more."
+  ],
+  "schema_version": 1,
+  "artifacts": [
+    {
+      "name": "asprogrammer-dregmod runtime archive",
+      "version": "v3.17",
+      "provenance": "pinned",
+      "source_url": "https://github.com/therealdreg/asprogrammer-dregmod/releases/download/v3.17/asprogrammer-dregmod-v3.17.zip",
+      "sha256": "23BF51CDE094FCFDE873DEE0EFBA4492F3E0B93CE382575D6126D21F6F7EBB59",
+      "license": "mixed; see THIRD_PARTY_NOTICES.md",
+      "used_for": "supplies the six runtime DLLs below",
+      "contains": [
+        {
+          "path": "CH341DLL.DLL",
+          "sha256": "935F5D2EA6A40D47FCBB4892127670E09633374CA524B8739615B30A02C4D178",
+          "license": "WCH vendor redistributable"
+        },
+        {
+          "path": "CH347DLL.DLL",
+          "sha256": "6B63BBDFCD36BF4945A4F7DA49F11AF36DC1AB0A77DD65D6A2E88443D5C8E14A",
+          "license": "WCH vendor redistributable"
+        },
+        {
+          "path": "ftd2xx.dll",
+          "sha256": "60BB0D6348B1EB0127401AA902F34C963D9196D2778C66F4008A6CF0C6F098A5",
+          "license": "FTDI vendor redistributable"
+        },
+        {
+          "path": "buzzpirathlp.dll",
+          "sha256": "5026074608F9BC859725252B5D1E3CFAD97B68FCE22A0A47A2479E4DB14C28DD",
+          "license": "see THIRD_PARTY_NOTICES.md"
+        },
+        {
+          "path": "libiconv2.dll",
+          "sha256": "6DEEDAD652BFAB7B09EBD0E06045810390B6AC6CB5AA9EF41C9DAA5616181F22",
+          "license": "LGPL"
+        },
+        {
+          "path": "libintl3.dll",
+          "sha256": "F48CE1866602B114E653C876334B771107559ACF1C685373D2305034613958F0",
+          "license": "LGPL"
+        }
+      ]
+    },
+    {
+      "name": "libusb",
+      "version": "1.0.29",
+      "provenance": "pinned",
+      "source_url": "https://github.com/libusb/libusb/releases/download/v1.0.29/libusb-1.0.29.7z",
+      "sha256": "964A38152CA9A104CD00EC8D2F0617B89CD814F9B635E29763C68563D951521D",
+      "license": "LGPL-2.1-or-later",
+      "used_for": "the headless x86 Windows CLI",
+      "contains": [
+        {
+          "path": "VS2022/MS32/dll/libusb-1.0.dll",
+          "sha256": "E868ED4705CCC82506EE66A22D981ABC90DEBD300C0F38B5D17873CEB0C0A43A",
+          "license": "LGPL-2.1-or-later"
+        }
+      ]
+    },
+    {
+      "name": "libusb-win32 runtime",
+      "version": "1.4.0.2",
+      "provenance": "in-repo",
+      "path": "software/libusb0.dll",
+      "sha256": "F56C6F28BFB864761CEBC05494B56AF8BED97493F3B6E7B19AFCB8F1ABCD2CBE",
+      "license": "LGPL-2.1-or-later",
+      "used_for": "the EZP2023+ transport",
+      "note": "Signed release 1.4.0.2. Kept in the tree because it is not in any pinned archive; tools/build.ps1 asserts both its FileVersion and this hash before packaging. Do not replace it with the older libusb0.dll in the dregmod archive."
+    },
+    {
+      "name": "EZP2023+ driver bundle",
+      "version": "device-package 1.2.6.0 / libusb-win32 1.4.0.2",
+      "provenance": "in-repo",
+      "path": "drivers/EZP2023Plus/",
+      "sha256": "per-file, see drivers/EZP2023Plus/SHA256SUMS.txt",
+      "license": "LGPL-2.1-or-later; upstream notices retained in the bundle",
+      "used_for": "packaged into the release ZIP",
+      "note": "tools/build.ps1 verifies every payload file against SHA256SUMS.txt while assembling a release, and fails the build on any mismatch."
+    },
+    {
+      "name": "MPHexEditor for Lazarus",
+      "provenance": "unrecorded",
+      "path": "mphexeditor.zip",
+      "sha256": "A6883D73603F1A8F7696B767258E9253B9CF893F10D6D378AEA0E6069F91D6F2",
+      "size_bytes": 212624,
+      "license": "see the licence file inside the archive",
+      "used_for": "the hex editor component; tools/build.ps1 extracts and registers it before compiling",
+      "note": "Kept in the tree because the build cannot proceed without it and no pinned download is recorded. Nobody wrote down which upstream release this archive is; that should be established and this entry promoted to 'pinned'."
+    },
+    {
+      "name": "Zadig",
+      "provenance": "unrecorded",
+      "status": "removed-from-tree",
+      "former_paths": [
+        "drivers/usbasp/zadig_xp_2.2.exe",
+        "drivers/usbasp/zadig_seven+_2.8.exe",
+        "drivers/usbasp/zadig_vista+_2.2.exe"
+      ],
+      "license": "GPL-3.0-or-later",
+      "used_for": "installing the libusb-win32 driver for USBasp and AVRISP mkII",
+      "sha256": {
+        "zadig_xp_2.2.exe": "3E4E3FBC498D682821EEF9E236A2DB23FE4833C6E7186CC7384A271A76B93F4C",
+        "zadig_seven+_2.8.exe": "20E4CD7B6768718848F603FE928F36E207DC5CA96FC9DB7085D841410D0ABAE4",
+        "zadig_vista+_2.2.exe": "62ABD567C48CB3D74DF096AED8C0810F7F5027F1355DA26FBC7FCD59758DB582"
+      },
+      "note": "Three builds of one tool, 15.8 MB, for an OS matrix that no longer includes Windows XP or Vista. Get the current version from the Zadig project rather than from this repository."
+    },
+    {
+      "name": "FTDI D2XX/VCP driver installer",
+      "version": "CDM 2.12.36.4",
+      "provenance": "unrecorded",
+      "status": "removed-from-tree",
+      "former_paths": ["drivers/FT232/CDM212364_Setup.exe"],
+      "sha256": "835DD64B199190D20DC37C0CADEB064B7EAAAEF271703781B2B259B7085437A4",
+      "license": "FTDI driver licence",
+      "used_for": "FT232H support",
+      "note": "Version taken from the filename, not from a recorded download. Obtain the current driver from FTDI."
+    },
+    {
+      "name": "WCH CH34x driver installers",
+      "provenance": "unrecorded",
+      "status": "removed-from-tree",
+      "former_paths": [
+        "drivers/CH34X/CH341SER.EXE",
+        "drivers/CH34X/CH343SER.EXE",
+        "drivers/CH34X/CH343SER.ZIP",
+        "drivers/CH34X/CH34XPAR.EXE"
+      ],
+      "sha256": {
+        "CH341SER.EXE": "74D12019023390D27739625773005ECCCF1BC6C4547E0C46088E86665E519524",
+        "CH343SER.EXE": "FD09F9DF44ADA0B08A5128A30464D149D1F3D024A5FCB4C6B13BA496D4553713",
+        "CH343SER.ZIP": "9A43704C8AA807CA8A0CBCAD3B828078383BA4479C02D923EC5A55C0B5B5D0B0",
+        "CH34XPAR.EXE": "7F8D4C822B4A5F1BD146E90DF17666F0C435878F488C5D0828A00254B65CCF77"
+      },
+      "license": "WCH vendor redistributable",
+      "used_for": "CH341A and CH347 support",
+      "note": "Obtain from WCH. CH343SER.ZIP and CH343SER.EXE were two packagings of the same driver."
+    },
+    {
+      "name": "WCH CH341PAR archive",
+      "provenance": "unrecorded",
+      "status": "removed-from-tree",
+      "former_paths": ["drivers/CH347T-Driver/CH341PAR.ZIP"],
+      "sha256": "1E50A624F3C2D77A5F7A10EED5AFFFD5EFDE927BF4CD91306E769E4CF866F0FD",
+      "license": "WCH vendor redistributable",
+      "note": "Removed because its extracted contents sit beside it in drivers/CH347T-Driver/CH341PAR/, which is what actually gets used. Keeping both meant every change to one silently diverged from the other."
+    },
+    {
+      "name": "AVRISP mkII Windows driver",
+      "provenance": "in-repo",
+      "path": "drivers/AVRISPMK2/",
+      "license": "LGPL-2.1-or-later (libusb-win32); see drivers/AVRISPMK2/license/",
+      "note": "A byte-identical copy also lived at firmware/AVRISP-MKII/WindowsDriver/ and has been removed. drivers/ is where the other driver bundles live."
+    }
+  ]
+}
