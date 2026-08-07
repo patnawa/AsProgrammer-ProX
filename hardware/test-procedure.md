@@ -58,16 +58,51 @@ signal pins.
 
 | Result | What it means | What to do |
 |---|---|---|
-| All four signals now swing to ~1.8 V | The board level-shifts with the rail, as assumed | Set `SignalVoltageVerified := True` in `TCH347Hardware.GetElectricalCapabilities` and record the measurements in `pinout.md` |
-| VCC moved but the signals still swing to ~3.3 V | The board switches supply only | **Do not program 1.8 V parts on this board without an external level shifter.** Leave `SignalVoltageVerified` at `False`, and change `FixedVioMv` in `ch347hw.pas` to 3300 so preflight refuses 1.8 V parts outright |
-| Some signals shift and others do not | Partial level shifting — the worst case, because it looks fine at a glance | Record which pins do what, and treat the highest as the effective signal level |
+| All four signals now swing to ~1.8 V | The board level-shifts with the rail, as assumed | Record both rails in `signalchar.pas` (step 6). The program starts saying "1.8 V" instead of "assumed", and production admission stops refusing |
+| VCC moved but the signals still swing to ~3.3 V | The board switches supply only | **Do not program 1.8 V parts on this board without an external level shifter.** Record it anyway — a record saying `RailMv: 1800; SignalMv: 3300` is what makes the preflight refuse every 1.8 V part on absolute maximum instead of clocking them |
+| Some signals shift and others do not | Partial level shifting — the worst case, because it looks fine at a glance | Record the **highest** of the four as `SignalMv`, and say which pin it was in `Method`. The field is defined as the worst level for exactly this case |
 | VCC did not move | GPIO6 is not doing what `pinout.md` says on this board revision | Stop and re-establish the GPIO map before trusting anything else in this file |
+
+Note that only the first row is good news, and all four rows are worth
+recording. The second and third are the results the software cannot reach any
+other way, and leaving them unrecorded keeps the program guessing in exactly
+the direction that destroys parts.
 
 **6 — Record the result.**
 
-Put the actual numbers in `pinout.md`, replacing the unverified row, and note
-the board revision and date in `revisions.md`. A measurement without a board
-revision beside it is not reusable by the next person.
+One place, in `software/signalchar.pas`, inside `BuildTable`. Add one call per
+rail measured:
+
+```pascal
+Append(Result, 'CH347', 1800, 1810,
+       'peak on CLK at the socket, 10x probe, during --detect',
+       '2026-08-14', 'test-procedure.md rev 1');
+Append(Result, 'CH347', 3300, 3310,
+       'peak on CLK at the socket, 10x probe, during --detect',
+       '2026-08-14', 'test-procedure.md rev 1');
+```
+
+`SignalMv` is the **highest** level seen on CS, CLK or MOSI at that rail, not
+a typical or average one: the number exists to be compared against a chip's
+absolute maximum, and an average hides the excursion that does the damage.
+
+Each rail is a separate record. Measuring 3.3 V says nothing about 1.8 V —
+different regulator state, and the unmeasured one is the dangerous one — so a
+single record verifies a single rail and the program keeps saying "assumed"
+about the other.
+
+Then delete the `the compiled-in table is empty` assertion in
+`tests/signalchar_tests.lpr`, in the same commit. It exists so that a claim
+about real hardware cannot appear as a side effect of an unrelated change.
+
+Nothing else needs editing. `ch347hw.pas` and `ft232hhw.pas` already ask
+`signalchar` rather than asserting an answer, so the rail report, the
+electrical preflight, the CLI's `signal_mv`/`signal_measured` fields and the
+session report all start carrying the measured number at once.
+
+Finally, put the actual numbers in `pinout.md`, replacing the unverified row,
+and note the board revision and date in `revisions.md`. A measurement without a
+board revision beside it is not reusable by the next person.
 
 ## Also worth checking while you are there
 

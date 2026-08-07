@@ -123,6 +123,21 @@ run_suite railreport_tests "$rail" \
   tests/railreport_tests.lpr software/railreport.pas \
   software/electricalpreflight.pas
 
+# The one measurement the whole electrical model rests on: what a programmer
+# actually drives on CS/CLK/MOSI. The assertions that matter are the refusals
+# -- an unmeasured rail is never verified by a measurement at the other one.
+signal="$tmp/signal-char"
+run_suite signalchar_tests "$signal" \
+  tests/signalchar_tests.lpr software/signalchar.pas \
+  software/electricalpreflight.pas
+
+# What it takes to release a capability that is written but unreachable. The
+# assertions that matter are about partial credit: six of seven leaves the gate
+# shut and names the seventh, and coverage never accumulates across runs.
+gate="$tmp/validation-gate"
+run_suite validationgate_tests "$gate" \
+  tests/validationgate_tests.lpr software/validationgate.pas
+
 # Choosing a clock the wiring can carry, against a fake chip with a
 # configurable breaking point, and refusing to erase when the same address
 # range comes back two different ways.
@@ -151,6 +166,56 @@ run_suite norgeometrybuild_tests "$geom" \
   tests/norgeometrybuild_tests.lpr software/norgeometrybuild.pas \
   software/norplanner.pas software/operationmodel.pas \
   tests/spi25.pas software/sfdp.pas
+
+# Describing a chip the catalogue has never heard of, from its own SFDP
+# tables. Every incoherent geometry must fall back to read-only rather than to
+# a guess, and no path here may narrow the voltage question.
+sfdp_profile="$tmp/sfdp-profile"
+run_suite sfdpprofile_tests "$sfdp_profile" \
+  tests/sfdpprofile_tests.lpr software/sfdpprofile.pas \
+  tests/spi25.pas software/sfdp.pas
+
+# Whether a quad read may be used, given that setting it up is not allowed.
+# The assertion that looks like a missing feature is the point: a clear
+# quad-enable bit means a single-bit read, with no flag that changes it.
+quad="$tmp/quad-policy"
+run_suite quadpolicy_tests "$quad" \
+  tests/quadpolicy_tests.lpr software/quadpolicy.pas \
+  tests/spi25.pas software/sfdp.pas \
+  software/basehw.pas software/electricalpreflight.pas
+
+# The document a bench session leaves behind. Almost every assertion is about
+# something it refuses to do: render an unrun check as a passed one, drop an
+# empty section, or let a backup path appear without its hash.
+report="$tmp/session-report"
+run_suite sessionreport_tests "$report" \
+  tests/sessionreport_tests.lpr software/sessionreport.pas
+
+# What a write had done when the cable came out. The append-only rule is the
+# design: a torn line loses one repeated block, never invents finished work,
+# and a resume is refused outright when the chip, image or backup has moved.
+journal="$tmp/write-journal"
+run_suite writejournal_tests "$journal" \
+  tests/writejournal_tests.lpr software/writejournal.pas
+
+# A programmer that is not there, driven through the real spi25 protocol
+# layer. The assertions that matter are where it refuses to be convenient:
+# no write-enable does nothing, programming only clears bits, and a program
+# past the end of a page wraps to the head of that same page.
+sim="$tmp/simulated-hw"
+run_suite simhw_tests "$sim" \
+  tests/simhw_tests.lpr software/simhw.pas \
+  software/spi25.pas software/basehw.pas software/utilfunc.pas \
+  software/electricalpreflight.pas software/safemode.pas \
+  software/signalchar.pas
+
+# The last warning before a 1.8 V part meets a rail that would destroy it.
+# Lifted out of a GUI function so its cases can be reached at all; the one
+# that matters is an Auto rail that cannot resolve, which must warn rather
+# than be mistaken for an Auto rail that happens to be right.
+volt="$tmp/voltage-warning"
+run_suite voltagewarning_tests "$volt" \
+  tests/voltagewarning_tests.lpr software/voltagewarning.pas
 
 # The latch that makes the program incapable of changing a chip: what it
 # stops, what it must never stop, and that nothing quietly falls off the list.

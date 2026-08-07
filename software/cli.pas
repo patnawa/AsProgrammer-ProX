@@ -35,7 +35,8 @@ uses
   railreport, clicontract,
   safemode,
   chipprofile, chipsave,
-  nandmodel, nandplanner, nandengine, spi25nandadapter, nandcatalog;
+  nandmodel, nandplanner, nandengine, spi25nandadapter, nandcatalog,
+  validationgate;
 
 const
   EXIT_OK    = 0;
@@ -52,11 +53,11 @@ const
   );
 
   //สวิตช์ที่เป็นธงเปล่า ๆ
-  FlagSwitches: array[0..17] of string = (
+  FlagSwitches: array[0..18] of string = (
     'erase', 'detect', 'sfdp', 'help', 'force', 'json', 'verify',
     'no-fast-read', 'smart', 'plan-only', 'nand-info', 'nand-raw',
     'chip-test', 'capacity-test', 'surface-scan', 'nand-erase',
-    'preflight', 'safe'
+    'preflight', 'safe', 'gates'
   );
 
   //The secret source is station policy, not an arbitrary caller-selected
@@ -119,10 +120,32 @@ begin
     if SameText(ParamStr(i), '--' + Name) then Exit(True);
 end;
 
-function NANDMutationGateEnabled: boolean;
+//ประตูของ NAND mutation มีสามสถานะ ไม่ใช่สองอย่างที่เคยเป็น
+//
+//  ngReleased      มีหลักฐาน hardware-in-loop ครบตามรายการใน
+//                  docs/design-spi-nand.md แล้ว validationgate เป็นคนตอบ
+//  ngValidationRun ยังไม่มีหลักฐาน แต่ผู้ใช้ตั้ง token ไว้ นี่ไม่ใช่ประตูที่สอง
+//                  แต่คือวิธีสร้างหลักฐานนั้นขึ้นมา เพราะต้องมีคนสั่งลบสั่งเขียน
+//                  ลงชิปสำรองก่อน หลักฐานถึงจะมีอยู่ได้
+//  ngRefused       ยังไม่มีทั้งสองอย่าง
+//
+//คำปฏิเสธเดิมบอกแค่ว่า "disabled pending live validation" ซึ่งบอกผู้อ่านว่ามีคน
+//ตัดสินใจอะไรบางอย่างไว้ แต่ไม่บอกว่าต้องทำอะไรถึงจะเปลี่ยนได้ ตอนนี้มันบอกชื่อ
+//ข้อที่ยังขาดเป็นข้อ ๆ พร้อมเอกสารที่มันมาจาก
+type
+  TNANDGateVerdict = (ngReleased, ngValidationRun, ngRefused);
+
+function NANDMutationGate(out Reason: string): TNANDGateVerdict;
 begin
-  Result := SysUtils.GetEnvironmentVariable(NAND_LIVE_GATE_ENV) =
-            NAND_LIVE_GATE_VALUE;
+  if IsReleased(gcSPINANDMutation, Reason) then Exit(ngReleased);
+
+  if SysUtils.GetEnvironmentVariable(NAND_LIVE_GATE_ENV) =
+     NAND_LIVE_GATE_VALUE then
+    Exit(ngValidationRun);
+
+  Result := ngRefused;
+  Reason := Reason + '. Set ' + NAND_LIVE_GATE_ENV + '=' +
+    NAND_LIVE_GATE_VALUE + ' to perform that validation on a sacrificial chip';
 end;
 
 //ค่าที่ตามหลังสวิตช์ คืนสตริงว่างถ้าไม่มี
@@ -265,10 +288,11 @@ begin
   Say('  --nand-backup F required for mutation: two matching ECC-checked');
   Say('                  main-area reads of every good block are atomically');
   Say('                  published to a new recovery file before mutation');
-  Say('                  NAND mutation is disabled by default pending live');
-  Say('                  validation. A validated station must set');
-  Say('                  ' + NAND_LIVE_GATE_ENV + '=1, and every destructive');
-  Say('                  invocation must also include --force');
+  Say('                  NAND mutation is gated until a hardware-in-loop run');
+  Say('                  covers the checklist in docs/design-spi-nand.md.');
+  Say('                  Run --gates to see which items are outstanding. To');
+  Say('                  perform that validation, set ' + NAND_LIVE_GATE_ENV + '=1;');
+  Say('                  every destructive invocation also needs --force');
   Say('');
   Say('  Safety:');
   Say('  --safe          read-only safe mode: erase, write, unlock and');
@@ -888,6 +912,7 @@ var
   Geo, ONFIGeo: TNANDGeometry;
   ONFIParams: TONFIParameterPage;
   ParameterAccess: TSPINANDParameterPageAccess;
+  GateReason: string;
   Layout: TNANDImageLayout;
   Policy: TNANDBadBlockPolicy;
   Map: TNANDBlockMap;
@@ -1022,9 +1047,17 @@ begin
     Exit(Fail('--' + Action + ' needs a file name', EXIT_USAGE));
 
   Mutation := (Action = 'nand-write') or (Action = 'nand-erase');
-  if Mutation and (not NANDMutationGateEnabled) then
-    Exit(Fail('SPI NAND mutation is disabled pending live validation. ' +
-      'A validated station must set ' + NAND_LIVE_GATE_ENV + '=1'));
+  if Mutation then
+  begin
+    case NANDMutationGate(GateReason) of
+      ngRefused: Exit(Fail(GateReason));
+      //ทำต่อได้ แต่ต้องบอกให้ชัดว่านี่คือการรันเพื่อ *สร้าง* หลักฐาน
+      //ไม่ใช่การรันที่มีหลักฐานรองรับแล้ว
+      ngValidationRun:
+        Say('WARNING: ' + GateReason + '. This run is a validation attempt, ' +
+            'not a validated operation');
+    end;
+  end;
   if Mutation and (not HasSwitch('force')) then
     Exit(Fail('--nand-write and --nand-erase are destructive; add --force ' +
       'to acknowledge this invocation', EXIT_USAGE));
@@ -1408,6 +1441,10 @@ var
   RegionName: string;
   Region: TIFDRegion;
   DidSaveChip: boolean;
+  GateReason: string;
+  GateLines: TGateLines;
+  Capability: TGatedCapability;
+  i: integer;
 begin
   Result := EXIT_USAGE;
   Action := 'none';
@@ -1436,6 +1473,21 @@ begin
     Exit(EXIT_OK);
   end;
 
+  //--gates ตอบคำถามเดียวว่า "ทำไมสั่งเขียน NAND ไม่ได้" โดยไม่ต้องเปิดอุปกรณ์
+  //และไม่ต้องไปอ่านเอกสาร คำตอบมาจากตารางเดียวกับที่ประตูจริงอ่าน จึงขัดกันเองไม่ได้
+  if HasSwitch('gates') then
+  begin
+    GateLines := GateStatusLines;
+    for i := 0 to High(GateLines) do Say(GateLines[i]);
+    for Capability := Low(TGatedCapability) to High(TGatedCapability) do
+    begin
+      Say('');
+      GateLines := ChecklistLinesIn(AllValidationEvidence, Capability);
+      for i := 0 to High(GateLines) do Say(GateLines[i]);
+    end;
+    Exit(EXIT_OK);
+  end;
+
   if not CheckSwitches(Bad) then
   begin
     Say('unknown option: ' + Bad);
@@ -1446,10 +1498,9 @@ begin
   //Defense at the outermost boundary: a disabled NAND mutation request is
   //rejected before PollProgrammer or OpenDevice can acquire hardware.
   if (HasSwitch('nand-write') or HasSwitch('nand-erase')) and
-     (not NANDMutationGateEnabled) then
+     (NANDMutationGate(GateReason) = ngRefused) then
   begin
-    Say('SPI NAND mutation is disabled pending live validation. A validated ' +
-        'station must set ' + NAND_LIVE_GATE_ENV + '=1');
+    Say(GateReason);
     Exit(EXIT_FAIL);
   end;
   if (HasSwitch('nand-write') or HasSwitch('nand-erase')) and

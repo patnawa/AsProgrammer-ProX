@@ -18,11 +18,11 @@ uses
   pascalc, ScriptsFunc, ScriptEdit, comparewnd, appver,
   electricalpreflight, railreport, sessionstate, clocktune, clicontract,
   safemode,
-  norgeometrybuild,
+  norgeometrybuild, sfdpprofile, quadpolicy, sessionreport,
   labtools, synaser, Spin,
-  writeadmission,
+  writeadmission, voltagewarning, writejournal,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw,
-  serproghw, ezphw;
+  serproghw, ezphw, simhw;
 
 type
 
@@ -130,6 +130,7 @@ type
     MenuSerprogCOMPort: TMenuItem;
     MenuHWSERPROG: TMenuItem;
     MenuHWEZP: TMenuItem;
+    MenuHWSIM: TMenuItem;
     MenuChipDoctor: TMenuItem;
     MenuCapacityTest: TMenuItem;
     MenuSurfaceScan: TMenuItem;
@@ -154,6 +155,7 @@ type
     MenuBackgroundOps: TMenuItem;
     MenuDarkTheme: TMenuItem;
     SaveLogMenuItem: TMenuItem;
+    SaveSessionReportMenuItem: TMenuItem;
     MenuFillBuffer: TMenuItem;
     MenuSwapBytes: TMenuItem;
     MenuCheckIDBefore: TMenuItem;
@@ -265,6 +267,7 @@ type
     procedure MenuBackgroundOpsClick(Sender: TObject);
     procedure MenuDarkThemeClick(Sender: TObject);
     procedure SaveLogMenuItemClick(Sender: TObject);
+    procedure SaveSessionReportMenuItemClick(Sender: TObject);
     procedure MenuFillBufferClick(Sender: TObject);
     procedure MenuSwapBytesClick(Sender: TObject);
     procedure MenuCompareChipClick(Sender: TObject);
@@ -303,6 +306,7 @@ type
     procedure MenuBuzzpiratCOMPortClick(Sender: TObject);
     procedure MenuSerprogCOMPortClick(Sender: TObject);
     procedure MenuHWSERPROGClick(Sender: TObject);
+    procedure MenuHWSIMClick(Sender: TObject);
     procedure MenuHWEZPClick(Sender: TObject);
     procedure MenuChipDoctorClick(Sender: TObject);
     procedure MenuCapacityTestClick(Sender: TObject);
@@ -682,6 +686,12 @@ var
   //Older settings files have no marker, so existing users see the new doctor
   //once.  Afterwards it remains available from Options.
   ConnectionDoctorSeen: boolean = False;
+  //สมุดบันทึกของงานเขียนที่กำลังเดินอยู่ ว่างเมื่อไม่มีงานเขียน
+  //
+  //ตั้งค่าหลังจากไฟล์สำรองถูกเผยแพร่แล้วเท่านั้น สมุดบันทึกที่ชี้ไปยังไฟล์
+  //สำรองที่ยังไม่มีอยู่จริงจะทำให้การกู้ต่อถูกปฏิเสธในภายหลัง ซึ่งถูกต้อง
+  //แต่เสียเวลาเปล่า เพราะเรารู้ตั้งแต่ตอนนี้แล้วว่ามันจะไม่ผ่าน
+  ActiveWriteJournal: string = '';
 
 {$R *.lfm}
 
@@ -920,8 +930,38 @@ end;
 procedure TNORUIBridge.Receive(const Event: TOperationEvent);
 var
   Done, Total: cardinal;
+  Mark: TJournalMark;
+  JournalErr: string;
 begin
   case Event.Kind of
+    //หน่วยของงานที่เสร็จไปแล้วหนึ่งหน่วย บันทึกทันทีและ flush ทันที
+    //
+    //นี่คือจุดที่ทำให้ "สายหลุดกลางคัน" กลายเป็นสิ่งที่บรรยายได้ ถ้าไม่บันทึก
+    //ตรงนี้ ชิปจะอยู่ในสภาพที่ไม่มีอะไรในโปรแกรมนี้บอกได้ว่าลบไปถึงไหน
+    //เขียนไปถึงไหน และทางเดียวที่เหลือคือเขียนใหม่ทั้งตัว
+    //
+    //บันทึก *หลัง* คำสั่งเสร็จเสมอ ไม่ใช่ก่อน ทิศทางของความผิดพลาดจึงเป็น
+    //"ทำแล้วแต่ไม่ได้บันทึก" ซึ่งเสียแค่การทำซ้ำหนึ่งหน่วย ไม่ใช่
+    //"บันทึกแล้วแต่ไม่ได้ทำ" ซึ่งคือข้อมูลหาย
+    evCommandFinished:
+      if ActiveWriteJournal <> '' then
+      begin
+        Mark.Address := Event.Address;
+        Mark.Length := Event.Length;
+        //ชื่อที่ norplanner ใช้ตรงกับชื่อในสมุดบันทึกพอดี ส่วน verify ไม่ต้อง
+        //บันทึก เพราะการอ่านซ้ำไม่ได้เปลี่ยนอะไรบนชิป
+        if Event.MessageText = 'erase' then
+          Mark.Kind := juErase
+        else if Event.MessageText = 'program' then
+          Mark.Kind := juProgram
+        else
+          Exit;
+        if not AppendJournalMark(ActiveWriteJournal, Mark, JournalErr) then
+          //ไม่ใช่เหตุให้ล้มงาน งานเขียนที่กำลังไปได้ดีไม่ควรถูกตัดบทเพราะ
+          //สมุดบันทึกเขียนไม่ลง แต่ต้องบอก เพราะแปลว่าถ้าสายหลุดตอนนี้
+          //จะกู้ต่อไม่ได้
+          LogPrint('write journal: ' + JournalErr);
+      end;
     evProgress:
       begin
         if Event.BytesDone > High(cardinal) then Done := High(cardinal)
@@ -5611,67 +5651,80 @@ end;
 //เตือนก่อนแตะชิป 1.8 โวลต์ ถ้าเครื่องโปรแกรมจ่ายไฟให้ไม่ได้
 //CH341A จ่าย 3.3-5V, CH347 กับ FT232H จ่าย 3.3V ทั้งหมดสูงเกินไปสำหรับชิป 1.8V
 //ต่อผิดครั้งเดียวชิปพังถาวร จึงต้องถามก่อนทุกครั้ง
+//การตัดสินอยู่ใน voltagewarning ที่นี่เหลือแค่การถาม
+//
+//เดิมกฎทั้งหมดอยู่ในฟังก์ชันนี้ ปนกับ MessageDlg สามที่ ซึ่งแปลว่าไม่มีใคร
+//ทดสอบมันได้เลยถ้าไม่มีหน้าจอ ทั้งที่ตัวการตัดสินไม่ได้เกี่ยวกับหน้าจอเลย
+//มันเป็นฟังก์ชันของช่วงแรงดันชิป เครื่องที่ใช้ และระดับที่เครื่องนั้นตั้งอยู่
+//กล่องข้อความคือสิ่งที่ทำ *หลังจาก* ได้คำตอบ
+//
+//เคสที่เคยเข้าไม่ถึงและตอนนี้มีเทสต์คุมคือ Auto ที่แก้ค่าไม่ออก ซึ่งต้องนับ
+//เป็น "ยังไม่รู้ว่าจะจ่ายเท่าไร" ไม่ใช่ "บังเอิญถูกอยู่แล้ว"
 function VoltageWarningOK: boolean;
 var
+  Ctx: TVoltageContext;
   VMinMv, VMaxMv, VWantMv: cardinal;
 begin
-  Result := True;
-  //Strict production has already passed the typed measured electrical gate.
-  //Do not replace that result with a model-name heuristic or a dialog.
-  if StrictProductionMode then Exit;
+  Ctx := Default(TVoltageContext);
+  Ctx.StrictProduction := StrictProductionMode;
 
-  //เดิมดูจากชื่อรุ่นอย่างเดียว ตามธรรมเนียมที่ใส่ _1.8V ต่อท้าย
-  //ซึ่งพลาดชิป 1.8V ที่ชื่อไม่ได้บอก และนั่นคือกลุ่มใหญ่
-  //  W25Q64FW  W25Q256FW  (id EF60xx)   MX25U6435F   GD25LQ32
-  //ทั้งหมดนี้พังทันทีถ้าได้รับ 3.3V ซึ่งเป็นสิ่งที่เกิดขึ้นบ่อยที่สุด
-  //ตอนนี้จึงเชื่อค่า vcc ใน chiplist ก่อน แล้วค่อยถอยไปดูชื่อ
-  //ตัวหาสามชั้นรวมทั้งช่อง vcc ชื่อรุ่น และรหัส JEDEC ไว้แล้ว ชั้นที่สาม
-  //คือชั้นที่จับกลุ่มใหญ่ที่ว่านี้ได้ (EF60xx, C225xx, C860xx ฯลฯ) ซึ่ง
-  //ทั้งช่อง vcc และชื่อรุ่นไม่ได้บอกอะไรเลย
-  if Pos('1.8', ChipVccText(CurrentICParam.Vcc, CurrentICParam.Name,
-                            CurrentICParam.ID)) = 0 then Exit;
+  //ตัวหาสี่ชั้น: ช่อง vcc ของแค็ตตาล็อก ส่วนท้ายชื่อรุ่น ตระกูลชื่อรุ่น
+  //และรหัส JEDEC ชั้นสุดท้ายคือชั้นที่จับกลุ่มใหญ่ได้ (EF60xx, C860xx ฯลฯ)
+  //ซึ่งทั้งช่อง vcc และชื่อรุ่นไม่ได้บอกอะไรเลย
+  Ctx.ChipVccText := ChipVccText(CurrentICParam.Vcc, CurrentICParam.Name,
+                                 CurrentICParam.ID);
 
-  //Bus Pirate ตั้งขาเป็น open-drain แล้วจ่ายไฟจากภายนอกได้ จึงไม่เตือน
-  if AsProgrammer.Current_HW in [CHW_BUZZPIRAT, CHW_ARDUINO] then Exit;
+  //Bus Pirate ตั้งขาเป็น open-drain แล้วจ่ายไฟจากภายนอกได้
+  Ctx.ExternallyPowered := AsProgrammer.Current_HW in
+                           [CHW_BUZZPIRAT, CHW_ARDUINO];
 
-  //CH347 ที่พิสูจน์แล้วว่าสลับแรงดันได้: ตัดสินจากระดับที่จะจ่ายจริง
-  //ไม่ใช่จากชื่อรุ่นเครื่อง คำเตือนเรื่องไฟเลี้ยงภายนอกไม่เกี่ยวกับบอร์ดนี้
-  if (AsProgrammer.Current_HW = CHW_CH347) and CH347VoltageControlSeen then
-  begin
-    //ปักหมุด 1.8V ไว้ หรือ Auto ที่อ่านช่วงจากแค็ตตาล็อกได้ (ชิปตรงหน้า
-    //ผ่านด่านบนมาแปลว่าเป็นชิป 1.8V ช่วงที่อ่านได้จึงลงเอยที่ 1.8V เสมอ):
-    //ระดับที่จะจ่ายคือ 1.8V จริง ไม่มีอะไรต้องเตือน
-    if SelectedCH347Vcc = CH347_VCC_1V8_MV then Exit;
-    if (SelectedCH347Vcc = 0) and
-       VccRangeMv(CurrentChipVccText, VMinMv, VMaxMv) and
-       CH347VccForChip(VMinMv, VMaxMv, VWantMv) and
-       (VWantMv = CH347_VCC_1V8_MV) then Exit;
+  Ctx.RailSelectable := (AsProgrammer.Current_HW = CHW_CH347) and
+                        CH347VoltageControlSeen;
+  Ctx.SelectedRailMv := SelectedCH347Vcc;
+  Ctx.LowRailMv := CH347_VCC_1V8_MV;
+  if VccRangeMv(CurrentChipVccText, VMinMv, VMaxMv) and
+     CH347VccForChip(VMinMv, VMaxMv, VWantMv) then
+    Ctx.AutoResolvesToMv := VWantMv
+  else
+    //ศูนย์แปลว่าแก้ค่าไม่ออก ซึ่งต่างจาก "จ่าย 0 โวลต์" และต่างจาก
+    //"บังเอิญถูก" อย่างสิ้นเชิง voltagewarning เป็นคนแยกสองอย่างนี้
+    Ctx.AutoResolvesToMv := 0;
 
-    //ปัก 3.3V ค้างไว้ หรือ Auto ที่ตัดสินไม่ได้เพราะแค็ตตาล็อกไม่บอกช่วง:
-    //เสนอปัก 1.8V ให้ชัดก่อนเดินต่อ ทั้งสองปุ่มปลอดภัย ไม่มีปุ่มไหนแปลว่า
-    //"จ่าย 3.3V ใส่ชิป 1.8V ต่อไป"
-    if CLIMode then
-    begin
-      LogPrint(STR_VOLT_ABORTED);
-      Exit(False);
-    end;
-    Result := MessageDlg('AsProgrammer', STR_CH347_VOLT_FIX_Q,
-                         mtWarning, [mbYes, mbNo], 0) = mrYes;
-    if Result then
-      PinCH347VccMenu(CH347_VCC_1V8_MV)
-    else
-      LogPrint(STR_VOLT_ABORTED);
-    Exit;
+  case AdviseVoltage(Ctx) of
+    vaProceed, vaProductionGateDecides:
+      Exit(True);
+
+    vaOfferPinLowRail:
+      begin
+        //ทั้งสองปุ่มปลอดภัย ไม่มีปุ่มไหนแปลว่า "จ่าย 3.3V ใส่ชิป 1.8V ต่อไป"
+        if CLIMode then
+        begin
+          LogPrint(STR_VOLT_ABORTED);
+          Exit(False);
+        end;
+        Result := MessageDlg('AsProgrammer', STR_CH347_VOLT_FIX_Q,
+                             mtWarning, [mbYes, mbNo], 0) = mrYes;
+        if Result then
+          PinCH347VccMenu(CH347_VCC_1V8_MV)
+        else
+          LogPrint(STR_VOLT_ABORTED);
+      end;
+
+    vaWarnRailTooHigh:
+      begin
+        if CLIMode then
+        begin
+          LogPrint(STR_VOLT_ABORTED);
+          Exit(False);
+        end;
+        Result := MessageDlg('AsProgrammer', STR_VOLT_WARN,
+                             mtWarning, [mbYes, mbNo], 0) = mrYes;
+        if not Result then LogPrint(STR_VOLT_ABORTED);
+      end;
+  else
+    //ค่าใหม่ที่ยังไม่มีใครเขียนทางเดินให้ ต้องถือว่าไม่ปลอดภัย
+    Result := False;
   end;
-
-  if CLIMode then
-  begin
-    LogPrint(STR_VOLT_ABORTED);
-    Exit(False);
-  end;
-
-  Result := MessageDlg('AsProgrammer', STR_VOLT_WARN, mtWarning, [mbYes, mbNo], 0) = mrYes;
-  if not Result then LogPrint(STR_VOLT_ABORTED);
 end;
 
 //ถามผู้ใช้ ถ้าไม่มีใครนั่งอยู่ก็ตอบตามค่าที่ปลอดภัย
@@ -7129,15 +7182,57 @@ begin
   end;
 end;
 
+//ชิปที่ไม่มีในแค็ตตาล็อก อธิบายด้วยตารางที่ตัวมันเองพกมา
+//
+//เดิมทางนี้ตั้งชื่อว่า 'SFDP 8192K' แล้วทิ้ง CurrentICParam.ID ให้ว่าง
+//ซึ่งมีปัญหาสองข้อ ชื่อไม่ได้บอกว่าชิปตัวไหน สองตัวที่ขนาดเท่ากันจึงได้ชื่อ
+//เดียวกันทั้งใน log ใน manifest ของ backup และในไฟล์ evidence ส่วน ID ที่ว่าง
+//แปลว่าด่านตรวจตัวตนซ้ำก่อนทุกงานทำลายข้อมูลไม่มีอะไรให้เทียบ ทั้งที่ตอน
+//ตรวจเจอ เราถือรหัส 9Fh อยู่ในมือแล้ว
+//
+//และมันยัง "เอาขนาดลบที่เล็กที่สุดที่ชิปแจ้ง" มาใช้โดยไม่ถามว่ารูปทรงที่ชิป
+//แจ้งมามันสมเหตุสมผลไหม ชิปที่ประกาศว่ามี sector map แล้วให้ map ที่แก้ไม่ออก
+//จะได้ geometry แบบขนาดเดียวทั้งตัว ซึ่งบนชิปที่มี boot block คือการลบผิดบล็อก
+//แล้วรายงานว่าสำเร็จ
+//
+//sfdpprofile ตอบคำถามพวกนี้ในที่เดียว และตอบว่า "อ่านได้ แต่ยังเขียนไม่ได้"
+//เมื่อรูปทรงยังไม่ชัด ซึ่งเป็นคำตอบที่ถูกต้องกว่าการเดา
 procedure ApplySFDPInfo(const Info: TSFDPInfo);
 var
-  ESize: cardinal;
-  EOpcode: byte;
+  Profile: TProvisionalProfile;
+  Lines: TProfileLines;
+  QuadLines: TQuadLines;
+  Quad: TQuadPlan;
+  MemCaps: TProgrammerMemoryCapabilities;
+  ErrMsg: string;
+  i: integer;
 begin
   LogSFDPDetails(Info);
 
+  //ชิปตัวนี้อ่านสี่เส้นได้ไหม และถ้าได้ ติดตรงไหน
+  //
+  //ยังไม่มีเครื่องโปรแกรมตัวไหนในโปรแกรมนี้ที่ขับสี่เส้นได้จริง DLL ของ WCH
+  //มีแค่ CH347StreamSPI4 ซึ่งเลข 4 หมายถึงจำนวน "สาย" คือ CS CLK MOSI MISO
+  //ไม่ใช่จำนวนเส้นข้อมูล ส่วน MPSSE ของ FT232H ก็ขับออกเส้นเดียวเข้าเส้นเดียว
+  //
+  //แต่การบอกไปเลยว่า "ชิปพร้อม เครื่องไม่ไหว" มีประโยชน์กว่าการเงียบ เพราะ
+  //ผู้ใช้จะได้รู้ว่าต้องเปลี่ยนอะไรถึงจะเร็วขึ้น ไม่ใช่เดาว่าชิปมีปัญหา
+  //
+  //บิต QE ไม่ได้อ่านตรงนี้ เพราะการอ่านต้องยิง opcode ที่ SFDP เพิ่งบอกมา
+  //และเรายังไม่รู้ว่ามันคุ้มจะยิงไหม ส่ง "ยังไม่ได้อ่าน" ไป ซึ่งต่างจาก
+  //"อ่านแล้วเป็นศูนย์" อย่างชัดเจนในคำตอบที่ได้กลับมา
+  if AsProgrammer.Programmer <> nil then
+    AsProgrammer.Programmer.GetMemoryCapabilities(MemCaps)
+  else
+    FillChar(MemCaps, SizeOf(MemCaps), 0);
+  Quad := PlanQuadRead(Info.Valid, Info, False, 0, MemCaps.SupportsQuadSPI);
+  QuadLines := QuadPlanLines(Quad);
+  for i := 0 to High(QuadLines) do LogPrint(QuadLines[i]);
+
   //เอาวิธีเข้าโหมด 4 ไบต์และคำสั่งปลดล็อกที่ชิปแจ้งมาใช้จริง
   ApplySFDPHints(Info);
+
+  BuildProvisionalProfile(LastID9F, Info.Valid, Info, Profile, ErrMsg);
 
   MainForm.ComboSPICMD.ItemIndex := SPI_CMD_25;
   MainForm.RadioSPI.Checked := True;
@@ -7145,26 +7240,39 @@ begin
 
   MainForm.ComboChipSize.Text := IntToStr(Info.Density);
   MainForm.ComboPageSize.Text := IntToStr(Info.PageSize);
-  MainForm.LabelChipName.Caption := 'SFDP ' + IntToStr(Info.Density div 1024) + 'K';
+
+  //ชื่อที่พกรหัส 9Fh ไปด้วย ถ้ามี ไม่งั้นถอยไปใช้ชื่อเดิมที่บอกแค่ขนาด
+  if Profile.Valid then
+    MainForm.LabelChipName.Caption := Profile.Name
+  else
+    MainForm.LabelChipName.Caption :=
+      'SFDP ' + IntToStr(Info.Density div 1024) + 'K';
 
   CurrentICParam.Name := MainForm.LabelChipName.Caption;
   CurrentICParam.Size := Info.Density;
   CurrentICParam.Page := Info.PageSize;
   CurrentICParam.SpiCmd := SPI_CMD_25;
   CurrentICParam.Script := '';
-  CurrentICParam.ID := '';
+  //ตัวตนที่อ่านมาได้จริง ไม่ใช่ช่องว่าง ด่านตรวจซ้ำก่อนงานทำลายข้อมูล
+  //จะได้มีอะไรเทียบ
+  CurrentICParam.ID := Profile.JedecID;
   MainForm.ComboBox_chip_scriptrun.Items.Clear;
 
-  if SFDPSmallestErase(Info, ESize, EOpcode) then
+  //ขนาดลบตั้งได้ต่อเมื่อรูปทรงที่ชิปแจ้งมาสอดคล้องกันจริง ๆ
+  //ศูนย์แปลว่ายังลบไม่ได้ ซึ่ง norgeometrybuild จะปฏิเสธอีกชั้นอยู่แล้ว
+  if Profile.Capability = pvReadWrite then
   begin
-    CurrentICParam.Sector := ESize;
-    CurrentICParam.SectorOpcode := EOpcode;
+    CurrentICParam.Sector := Profile.EraseSize;
+    CurrentICParam.SectorOpcode := Profile.EraseOpcode;
   end
   else
   begin
     CurrentICParam.Sector := 0;
     CurrentICParam.SectorOpcode := 0;
   end;
+
+  Lines := ProvisionalProfileLines(Profile);
+  for i := 0 to High(Lines) do LogPrint(Lines[i]);
 
   UpdateChipInfo;
   LogPrint(STR_SFDP_APPLIED);
@@ -9385,6 +9493,7 @@ begin
   MainForm.MenuHWFT232H.Checked    := HW = CHW_FT232H;
   MainForm.MenuHWSERPROG.Checked   := HW = CHW_SERPROG;
   MainForm.MenuHWEZP.Checked       := HW = CHW_EZP;
+  MainForm.MenuHWSIM.Checked       := HW = CHW_SIM;
 end;
 
 //เช็คว่ามีเครื่องโปรแกรมต่ออยู่ไหม ถ้าตัวที่เลือกไว้หายไปและเปิดโหมดค้นหาอัตโนมัติ
@@ -9721,6 +9830,22 @@ end;
 procedure TMainForm.MenuHWEZPClick(Sender: TObject);
 begin
   SelectHW(CHW_EZP);
+end;
+
+//เครื่องโปรแกรมที่ไม่มีอยู่จริง
+//
+//มีไว้ให้ลองโปรแกรมโดยไม่ต้องมีเครื่อง ให้ทำซ้ำรายงานปัญหาโดยไม่ต้องมีชิปของ
+//คนแจ้ง และให้สร้างภาพหน้าจอของ README ได้โดยไม่ต้องนั่งที่โต๊ะ
+//
+//มันบอกตัวเองว่า SIMULATED ทุกที่ที่ชื่อเครื่องไปถึง ทั้งแถบสถานะ log
+//รายงานรอบงาน และ JSON ของ CLI และไม่มีตัวเลือกไหนที่ทำให้มันดูเหมือนของจริง
+//เพราะบันทึกงานที่ออกมาจากที่นี่แล้วไม่บอกว่ามาจากที่นี่ คือบันทึกที่เป็นเท็จ
+procedure TMainForm.MenuHWSIMClick(Sender: TObject);
+begin
+  SelectHW(CHW_SIM);
+  LogPrint('SIMULATED programmer selected: there is no hardware. A W25Q64 ' +
+           'shaped part lives in memory and every byte is discarded when ' +
+           'this window closes.');
 end;
 
 procedure TMainForm.MenuChipDoctorClick(Sender: TObject);
@@ -11691,6 +11816,104 @@ begin
   end;
 end;
 
+//รายงานของรอบงานนี้ เป็นเอกสารที่ส่งต่อให้คนอื่นได้
+//
+//โหมด production มีหลักฐานที่เซ็นชื่อกำกับอยู่แล้ว แต่งานหน้าโต๊ะได้แค่ log ที่
+//เลื่อนขึ้นไปเรื่อย ๆ ซึ่งไม่ใช่เอกสาร มันแนบไปกับใบเสร็จไม่ได้ หายไปตอนปิด
+//หน้าต่าง และเอารายงานแรงดันไปปนกับบรรทัดความคืบหน้าอีกร้อยบรรทัด
+//
+//ข้อเท็จจริงทุกอย่างที่ควรบันทึกถูกคำนวณไว้แล้วที่ไหนสักแห่งในโปรแกรมนี้
+//แรงดันที่สั่งกับที่วัดได้ ชิปที่ตอบมา ขั้นบันไดการอนุญาต ไฟล์สำรองกับ SHA-256
+//ผลตรวจกับเวลาที่ใช้ ไม่มีใครรวบมันไว้ที่เดียว
+//
+//ตรงนี้รวบ และ sessionreport เป็นคนตัดสินว่าอะไรพิมพ์อย่างไร สิ่งที่สำคัญที่สุด
+//คือขั้นที่ "ยังไม่ได้ทำ" ต้องไม่พิมพ์ออกมาเหมือนขั้นที่ "ผ่าน"
+procedure TMainForm.SaveSessionReportMenuItemClick(Sender: TObject);
+var
+  Dlg: TSaveDialog;
+  Report: TSessionReport;
+  Caps: TProgrammerElectricalCapabilities;
+  Obs: TElectricalObservation;
+  CapsValid, ObsValid: boolean;
+  Lines: TReportLines;
+  Doc: TStringList;
+  i: integer;
+
+  //ข้อเท็จจริงที่ยังไม่ได้พิสูจน์คือ "ยังไม่ได้ทำ" ไม่ใช่ "ไม่ผ่าน"
+  //ผู้ใช้ที่เพิ่งเสียบเครื่องยังไม่ได้ทำอะไรผิด
+  function FactOutcome(Fact: TSessionFact): TSessionOutcome;
+  begin
+    if Session.Holds(Fact) then Result := soPassed else Result := soNotRun;
+  end;
+
+begin
+  Report := TSessionReport.Create(PROX_VERSION,
+    FormatDateTime('yyyy-mm-dd"T"hh:nn:ss"Z"', LocalTimeToUniversal(Now)));
+  try
+    if CollectElectricalFacts(Caps, Obs, CapsValid, ObsValid) then
+    begin
+      if CapsValid then
+        Report.SetProgrammer(Caps.ProgrammerID, Caps.FirmwareVersion);
+      //ส่งบรรทัดของ railreport ไปทั้งอย่างนั้น ไม่แปลงใหม่: หน่วยนั้นเป็นเจ้าของ
+      //ข้อความว่า "not measurable on this programmer" อยู่แล้ว การเขียนซ้ำที่นี่
+      //คือการมีสองที่ที่ต้องคอยทำให้ตรงกัน
+      Report.SetRailLines(RailReportLines(
+        BuildRailReport(Caps, Obs, CapsValid, ObsValid)));
+    end;
+
+    Report.SetChip(CurrentICParam.Name, CurrentICParam.ID,
+                   CurrentICParam.Size,
+                   Copy(CurrentICParam.Name, 1, 5) = 'SFDP-');
+    Report.SetSafeMode(SafeModeActive);
+
+    //ขั้นบันไดการอนุญาต ทุกขั้นอยู่ในรายการเสมอ ขั้นที่ยังไม่ผ่านจะได้ไม่หายไป
+    //เงียบ ๆ แล้วเหลือแต่ขั้นที่ผ่าน ซึ่งอ่านเหมือนว่าตรวจครบแล้ว
+    Report.AddStep('Programmer open', FactOutcome(sfProgrammerOpen));
+    Report.AddStep('Target rail configured', FactOutcome(sfRailConfigured));
+    Report.AddStep('Chip detected', FactOutcome(sfChipDetected));
+    Report.AddStep('Image loaded', FactOutcome(sfImageLoaded));
+    Report.AddStep('Electrical preflight', FactOutcome(sfPreflightPassed));
+    Report.AddStep('Armed for a destructive run', FactOutcome(sfArmed));
+
+    if LastOp.Started then
+    begin
+      if LastOp.Cancelled then
+        Report.AddOperation(OpKindName(LastOp.Kind), soCancelled, 0,
+                            LastOp.ErrorText)
+      else if LastOp.Failed then
+        Report.AddOperation(OpKindName(LastOp.Kind), soFailed, 0,
+                            LastOp.ErrorText)
+      else
+        Report.AddOperation(OpKindName(LastOp.Kind), soPassed, 0,
+          Format('%d of %d bytes', [LastOp.BytesDone, LastOp.BytesTotal]));
+    end;
+
+    Report.AddNote('Session state', SessionStateName(Session.State));
+
+    Dlg := TSaveDialog.Create(nil);
+    try
+      Dlg.Filter := 'Markdown|*.md|Text file|*.txt|All files|*.*';
+      Dlg.DefaultExt := 'md';
+      Dlg.FileName := 'chipwright-session.md';
+      if not Dlg.Execute then Exit;
+
+      Lines := Report.Render;
+      Doc := TStringList.Create;
+      try
+        for i := 0 to High(Lines) do Doc.Add(Lines[i]);
+        Doc.SaveToFile(Dlg.FileName);
+      finally
+        Doc.Free;
+      end;
+      LogPrint('session report written to ' + Dlg.FileName);
+    finally
+      Dlg.Free;
+    end;
+  finally
+    Report.Free;
+  end;
+end;
+
 //เติมค่าเดียวกันลงทั้งบัฟเฟอร์
 procedure TMainForm.MenuFillBufferClick(Sender: TObject);
 var
@@ -13118,6 +13341,9 @@ begin
   AsProgrammer.AddHW(TCH347Hardware.Create);
   AsProgrammer.AddHW(TSerprogHardware.Create);
   AsProgrammer.AddHW(TEZPHardware.Create);
+  //ต่อท้ายสุด และ ProbeProgrammer ไม่แตะมันเลย เครื่องจำลองที่ถูกเลือก
+  //อัตโนมัติได้จะกลายเป็นตัวที่ตอบแทนฮาร์ดแวร์ที่ไม่ได้เสียบอยู่
+  AsProgrammer.AddHW(TSimulatedHardware.Create);
 
   SelectHW(CHW_BUZZPIRAT); // ทางลัดแบบหยาบ ๆ ของ dreg
 
@@ -14158,6 +14384,7 @@ var
   ExecutorOptions: TNORExecutorOptions;
   ThisTimeout: cardinal;
   Preview: string;
+  JournalHeader: TJournalHeader;
 
   procedure ReleasePreflightSession;
   begin
@@ -14719,6 +14946,41 @@ begin
     Bridge.EvidenceSize := PatchSize;
     Bridge.EvidenceCRC := LastProgramCRC;
     Bridge.EvidenceUID := LastChipUID;
+    //เปิดสมุดบันทึกก่อนคำสั่งทำลายข้อมูลคำสั่งแรก
+    //
+    //ต้องหลังจากไฟล์สำรองถูกเผยแพร่แล้วเท่านั้น เพราะการกู้ต่อพึ่งไฟล์นั้น
+    //และเราจดแฮชของมันไว้เพื่อให้รู้ทีหลังว่ามันยังเป็นไฟล์เดิมอยู่หรือเปล่า
+    //สมุดที่ชี้ไปยังไฟล์สำรองที่ยังไม่มีจริงจะถูกปฏิเสธตอนกู้ ซึ่งถูกต้อง
+    //แต่เสียเวลาเปล่า เพราะรู้ได้ตั้งแต่ตอนนี้
+    ActiveWriteJournal := '';
+    if LastBackupFileName <> '' then
+    begin
+      JournalHeader := Default(TJournalHeader);
+      JournalHeader.ProgramVersion := PROX_VERSION;
+      JournalHeader.StartedUtc :=
+        FormatDateTime('yyyy-mm-dd"T"hh:nn:ss"Z"', LocalTimeToUniversal(Now));
+      JournalHeader.ChipName := CurrentICParam.Name;
+      JournalHeader.ChipJedecID := CurrentICParam.ID;
+      JournalHeader.ChipCapacity := ChipSize;
+      JournalHeader.ImageSha256 := LowerCase(Request.ImageHash);
+      JournalHeader.Address := PatchStart;
+      JournalHeader.Length := PatchSize;
+      JournalHeader.BackupPath := LastBackupFileName;
+      if SHA256File(LastBackupFileName, Digest, Err) then
+        JournalHeader.BackupSha256 := LowerCase(DigestToHex(Digest))
+      else
+        JournalHeader.BackupSha256 := '';
+
+      //สมุดที่เปิดไม่ได้ไม่ใช่เหตุให้ล้มงาน งานเขียนที่ถูกต้องทุกอย่างไม่ควร
+      //ถูกปฏิเสธเพราะจดบันทึกไม่ได้ แต่ต้องบอก เพราะแปลว่าถ้าสายหลุด
+      //จะกู้ต่อไม่ได้ ต้องเขียนใหม่ทั้งตัว
+      if BeginJournal(LastBackupFileName + '.journal', JournalHeader, Err) then
+        ActiveWriteJournal := LastBackupFileName + '.journal'
+      else
+        LogPrint('write journal: ' + Err +
+                 ' -- an interrupted write will have to be redone in full');
+    end;
+
     Token := TCancellationToken.Create;
     ActiveNORCancellation := Token;
     try
@@ -14759,6 +15021,15 @@ begin
         osSucceeded:
           begin
             OpProgress(PatchSize, PatchSize);
+            //งานเสร็จครบแล้ว สมุดบันทึกหมดหน้าที่ ต้องลบทิ้ง
+            //
+            //สมุดที่ค้างอยู่หลังงานสำเร็จจะชวนให้กู้ต่องานที่ไม่ต้องกู้ และ
+            //ยังชี้ไปยังไฟล์สำรองที่ผู้ใช้อาจลบทิ้งไปแล้วเพราะงานสำเร็จ
+            if ActiveWriteJournal <> '' then
+            begin
+              DeleteFile(ActiveWriteJournal);
+              ActiveWriteJournal := '';
+            end;
             LogPrint(STR_DONE);
           end;
         osCancelled:
@@ -14779,6 +15050,10 @@ begin
              E.Message);
   end;
   finally
+    //สมุดบันทึกที่ยังเหลืออยู่ตรงนี้แปลว่างานไม่ได้จบด้วยความสำเร็จ ปล่อยไฟล์
+    //ไว้บนดิสก์ตั้งใจ นั่นคือของที่การกู้ต่อต้องใช้ แต่เลิกเขียนต่อ เพราะงาน
+    //รอบนี้จบแล้ว
+    ActiveWriteJournal := '';
     ActiveNORCancellation := nil;
     try
       Executor.Free;

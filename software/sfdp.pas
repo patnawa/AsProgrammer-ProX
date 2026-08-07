@@ -88,6 +88,31 @@ type
     RegionCount: integer;
     Regions: array[0..SFDP_MAX_REGIONS-1] of TSFDPRegion;
 
+    //--- Quad read: DWORD-1, DWORD-3 และ DWORD-15 ---
+    //
+    //ชิปส่วนใหญ่อ่านสี่เส้นได้ ซึ่งเร็วกว่าเส้นเดียวเกือบสี่เท่า แต่การจะใช้ได้
+    //ต้องมีบิต QE ตั้งอยู่แล้ว และ QE อยู่คนละที่กันในแต่ละยี่ห้อ
+    //
+    //DWORD-15 บิต 22:20 คือ Quad Enable Requirements ซึ่งบอกว่าบิตนั้นอยู่
+    //รีจิสเตอร์ไหน บิตที่เท่าไร และอ่านด้วย opcode อะไร โปรแกรมนี้ไม่เคย "ตั้ง"
+    //QE ให้ใคร เพราะนั่นคือการแก้ชิปของลูกค้าอย่างถาวรเพื่อความเร็วของเราเอง
+    //แต่ถ้ามันตั้งอยู่แล้วก็ใช้ได้ฟรี ๆ จึงเก็บมาเฉพาะฝั่งอ่าน
+    //
+    //Mode clocks สำคัญไม่แพ้กัน โหมด continuous read ที่ต้องส่ง mode byte
+    //ถ้าส่งผิดชิปจะค้างอยู่ในสถานะที่ตีความคำสั่งถัดไปเป็นแอดเดรส
+    HasQuadInfo: boolean;
+    Supports114: boolean;           //อ่านข้อมูลสี่เส้น แอดเดรสเส้นเดียว (6Bh)
+    Supports144: boolean;           //ทั้งแอดเดรสและข้อมูลสี่เส้น (EBh)
+    Read114Opcode: byte;
+    Read114DummyCycles: byte;
+    Read114ModeClocks: byte;
+    Read144Opcode: byte;
+    Read144DummyCycles: byte;
+    Read144ModeClocks: byte;
+
+    HasQER: boolean;
+    QERCode: byte;                  //0..7 ตาม JESD216 DWORD-15 บิต 22:20
+
     //--- DWORD-10 และ DWORD-11: เวลาที่ชิปบอกเองว่าใช้จริง ---
     //
     //เดิมเพดานรอเป็นค่าคงที่ 5 วินาทีต่อเพจ 30 วินาทีต่อเซกเตอร์ 600 วินาทีต่อชิป
@@ -128,6 +153,19 @@ function SFDPExtent(Reader: TSFDPReadProc): cardinal;
 //ขนาดลบที่เล็กที่สุดที่ชิปรองรับ ปกติคือ 4K
 function SFDPSmallestErase(const Info: TSFDPInfo; out Size: cardinal; out Opcode: byte): boolean;
 function SFDPAddrBytesStr(const Info: TSFDPInfo): string;
+
+//บิต QE อยู่ที่ไหน ตามรหัส QER ที่ชิปแจ้ง
+//
+//คืน False เมื่อรหัสนั้นเป็นค่าสงวน หรือเมื่อชิปบอกว่าไม่มีบิต QE เลย
+//(รหัส 0 แปลว่าสี่เส้นใช้ได้อยู่แล้วตลอด ซึ่ง QuadAlwaysEnabled ตอบแยก)
+//
+//Opcode ที่คืนมาคือ opcode สำหรับ *อ่าน* รีจิสเตอร์นั้น หน่วยนี้ไม่มีฝั่งเขียน
+//โดยตั้งใจ การตั้ง QE คือการแก้ชิปของคนอื่นอย่างถาวรเพื่อความเร็วของเราเอง
+function SFDPQuadEnableBit(const Info: TSFDPInfo;
+  out ReadOpcode: byte; out BitIndex: byte): boolean;
+
+//ชิปแจ้งว่าสี่เส้นเปิดอยู่เสมอ ไม่มีบิตให้ตั้ง
+function SFDPQuadAlwaysEnabled(const Info: TSFDPInfo): boolean;
 
 //ชิปต้องสลับโหมดเพื่อใช้แอดเดรส 4 ไบต์หรือไม่
 //ชิปที่มีชุดคำสั่งเฉพาะหรือทำงานที่ 4 ไบต์อยู่แล้วไม่ต้องสลับ
@@ -248,6 +286,67 @@ begin
   Info.Entry4B.NvConfigB1   := (B and $10) <> 0;
   Info.Entry4B.DedicatedSet := (B and $20) <> 0;
   Info.Entry4B.Always4B     := (B and $40) <> 0;
+end;
+
+//------------------------------------------------- DWORD-1 / DWORD-3 / DWORD-15
+
+//DWORD-3 เก็บพารามิเตอร์ของการอ่านสี่เส้นสองแบบไว้ในดเวิร์ดเดียว
+//  บิต 4:0    จำนวน dummy cycle ของ (1-4-4)
+//  บิต 7:5    จำนวน mode clock ของ (1-4-4)
+//  บิต 15:8   opcode ของ (1-4-4)
+//  บิต 20:16  จำนวน dummy cycle ของ (1-1-4)
+//  บิต 23:21  จำนวน mode clock ของ (1-1-4)
+//  บิต 31:24  opcode ของ (1-1-4)
+procedure ParseQuadReadParams(Dw: cardinal; var Info: TSFDPInfo);
+begin
+  Info.Read144DummyCycles := Dw and $1F;
+  Info.Read144ModeClocks  := (Dw shr 5) and $07;
+  Info.Read144Opcode      := (Dw shr 8) and $FF;
+
+  Info.Read114DummyCycles := (Dw shr 16) and $1F;
+  Info.Read114ModeClocks  := (Dw shr 21) and $07;
+  Info.Read114Opcode      := (Dw shr 24) and $FF;
+end;
+
+//DWORD-15 บิต 22:20 คือ Quad Enable Requirements
+procedure ParseQER(Dw: cardinal; var Info: TSFDPInfo);
+begin
+  Info.HasQER := True;
+  Info.QERCode := (Dw shr 20) and $07;
+end;
+
+function SFDPQuadAlwaysEnabled(const Info: TSFDPInfo): boolean;
+begin
+  //รหัส 0 คือ "ไม่มีบิต QE ทั้งสี่เส้นใช้ได้ตลอด"
+  Result := Info.HasQER and (Info.QERCode = 0);
+end;
+
+function SFDPQuadEnableBit(const Info: TSFDPInfo;
+  out ReadOpcode: byte; out BitIndex: byte): boolean;
+begin
+  ReadOpcode := 0;
+  BitIndex := 0;
+  Result := False;
+  if not Info.HasQER then Exit;
+
+  //ตาราง QER ของ JESD216B ฝั่งอ่านอย่างเดียว
+  //ตัวเลขพวกนี้คือเหตุผลที่ต้องอ่านจาก SFDP แทนที่จะเดาจากรหัสผู้ผลิต:
+  //Winbond เก็บ QE ไว้ที่ SR2 บิต 1 ส่วน Macronix เก็บไว้ที่ SR1 บิต 6
+  //ซึ่งเป็นบิตที่แผนผังของ Winbond เรียกว่า SEC การอ่านผิดตารางจึงไม่ใช่แค่
+  //ได้คำตอบผิด แต่ได้คำตอบผิดที่ดูสมเหตุสมผล
+  case Info.QERCode of
+    //1: SR2 บิต 1 อ่านด้วย 35h
+    1: begin ReadOpcode := $35; BitIndex := 1; Result := True; end;
+    //2: SR1 บิต 6 อ่านด้วย 05h
+    2: begin ReadOpcode := $05; BitIndex := 6; Result := True; end;
+    //3: SR2 บิต 7 อ่านด้วย 3Fh
+    3: begin ReadOpcode := $3F; BitIndex := 7; Result := True; end;
+    //4, 5, 6: SR2 บิต 1 อ่านได้ด้วย 35h เหมือนกัน ต่างกันแค่ฝั่งเขียน
+    //ซึ่งหน่วยนี้ไม่แตะ
+    4, 5, 6: begin ReadOpcode := $35; BitIndex := 1; Result := True; end;
+  else
+    //0 คือไม่มีบิต ส่วน 7 เป็นค่าสงวน ทั้งคู่ไม่มีที่ให้ไปอ่าน
+  end;
 end;
 
 //------------------------------------------------------- DWORD-10 / DWORD-11
@@ -622,6 +721,10 @@ begin
     Info.AddrBytes := 3;
   end;
 
+  //บิต 21 และ 22 บอกว่ารองรับการอ่านสี่เส้นแบบไหน
+  Info.Supports144 := (Dw and (cardinal(1) shl 21)) <> 0;
+  Info.Supports114 := (Dw and (cardinal(1) shl 22)) <> 0;
+
   //DWORD-2: ความจุ
   Dw := GetDword(Table, 4);
   if (Dw and $80000000) = 0 then
@@ -634,6 +737,15 @@ begin
       Info.Density := 0
     else
       Info.Density := Pow2(ShiftVal - 3);
+  end;
+
+  //DWORD-3: opcode, dummy cycle และ mode clock ของการอ่านสี่เส้น
+  //HasQuadInfo แยกจาก Supports114/144 เพราะตารางที่สั้นกว่าสาม DWORD
+  //ไม่ได้แปลว่าชิปไม่รองรับ แต่แปลว่าเราไม่รู้ว่าต้องส่งอะไร ซึ่งต่างกัน
+  if DwordCount >= 3 then
+  begin
+    Info.HasQuadInfo := True;
+    ParseQuadReadParams(GetDword(Table, 8), Info);
   end;
 
   //DWORD-8 และ DWORD-9: ชนิดการลบ ขนาดคือ 2^N ไบต์
@@ -682,6 +794,10 @@ begin
     ParseEraseTiming(GetDword(Table, 36), Info);
     ParseProgTiming(GetDword(Table, 40), GetDword(Table, 36), Info);
   end;
+
+  //DWORD-15: บิต QE อยู่รีจิสเตอร์ไหน บิตที่เท่าไร
+  if DwordCount >= 15 then
+    ParseQER(GetDword(Table, 56), Info);
 
   //DWORD-16: วิธีเข้าโหมด 4 ไบต์ การรีเซ็ต และคำสั่งปลดล็อก status register
   if DwordCount >= 16 then

@@ -180,6 +180,22 @@ Run-Suite "railreport_tests" $railDir @(
   "$root\tests\railreport_tests.lpr", "$root\software\railreport.pas",
   "$root\software\electricalpreflight.pas")
 
+# The one measurement the whole electrical model rests on: what a programmer
+# actually drives on CS/CLK/MOSI. The assertions that matter are the refusals
+# -- an unmeasured rail is never verified by a measurement at the other one.
+$signalDir = Join-Path $env:TEMP "aspx-tests-signal-char"
+Run-Suite "signalchar_tests" $signalDir @(
+  "$root\tests\signalchar_tests.lpr", "$root\software\signalchar.pas",
+  "$root\software\electricalpreflight.pas")
+
+# What it takes to release a capability that is written but unreachable. The
+# assertions that matter are about partial credit: six of seven leaves the gate
+# shut and names the seventh, and coverage never accumulates across runs.
+$gateDir = Join-Path $env:TEMP "aspx-tests-validation-gate"
+Run-Suite "validationgate_tests" $gateDir @(
+  "$root\tests\validationgate_tests.lpr",
+  "$root\software\validationgate.pas")
+
 # Choosing a clock the wiring can carry, against a fake chip with a
 # configurable breaking point, and refusing to erase when the same address
 # range comes back two different ways.
@@ -210,6 +226,57 @@ Run-Suite "norgeometrybuild_tests" $geomDir @(
   "$root\software\norgeometrybuild.pas", "$root\software\norplanner.pas",
   "$root\software\operationmodel.pas", "$root\tests\spi25.pas",
   "$root\software\sfdp.pas")
+
+# Describing a chip the catalogue has never heard of, from its own SFDP
+# tables. Every incoherent geometry must fall back to read-only rather than to
+# a guess, and no path here may narrow the voltage question.
+$sfdpProfileDir = Join-Path $env:TEMP "aspx-tests-sfdp-profile"
+Run-Suite "sfdpprofile_tests" $sfdpProfileDir @(
+  "$root\tests\sfdpprofile_tests.lpr", "$root\software\sfdpprofile.pas",
+  "$root\tests\spi25.pas", "$root\software\sfdp.pas")
+
+# Whether a quad read may be used, given that setting it up is not allowed.
+# The assertion that looks like a missing feature is the point: a clear
+# quad-enable bit means a single-bit read, with no flag that changes it.
+$quadDir = Join-Path $env:TEMP "aspx-tests-quad-policy"
+Run-Suite "quadpolicy_tests" $quadDir @(
+  "$root\tests\quadpolicy_tests.lpr", "$root\software\quadpolicy.pas",
+  "$root\tests\spi25.pas", "$root\software\sfdp.pas",
+  "$root\software\basehw.pas", "$root\software\electricalpreflight.pas")
+
+# The document a bench session leaves behind. Almost every assertion is about
+# something it refuses to do: render an unrun check as a passed one, drop an
+# empty section, or let a backup path appear without its hash.
+$reportDir = Join-Path $env:TEMP "aspx-tests-session-report"
+Run-Suite "sessionreport_tests" $reportDir @(
+  "$root\tests\sessionreport_tests.lpr", "$root\software\sessionreport.pas")
+
+# What a write had done when the cable came out. The append-only rule is the
+# design: a torn line loses one repeated block, never invents finished work,
+# and a resume is refused outright when the chip, image or backup has moved.
+$journalDir = Join-Path $env:TEMP "aspx-tests-write-journal"
+Run-Suite "writejournal_tests" $journalDir @(
+  "$root\tests\writejournal_tests.lpr", "$root\software\writejournal.pas")
+
+# A programmer that is not there, driven through the real spi25 protocol
+# layer. The assertions that matter are where it refuses to be convenient:
+# no write-enable does nothing, programming only clears bits, and a program
+# past the end of a page wraps to the head of that same page.
+$simDir = Join-Path $env:TEMP "aspx-tests-simulated-hw"
+Run-Suite "simhw_tests" $simDir @(
+  "$root\tests\simhw_tests.lpr", "$root\software\simhw.pas",
+  "$root\software\spi25.pas", "$root\software\basehw.pas",
+  "$root\software\utilfunc.pas", "$root\software\electricalpreflight.pas",
+  "$root\software\safemode.pas", "$root\software\signalchar.pas")
+
+# The last warning before a 1.8 V part meets a rail that would destroy it.
+# Lifted out of a GUI function so its cases can be reached at all; the one
+# that matters is an Auto rail that cannot resolve, which must warn rather
+# than be mistaken for an Auto rail that happens to be right.
+$voltDir = Join-Path $env:TEMP "aspx-tests-voltage-warning"
+Run-Suite "voltagewarning_tests" $voltDir @(
+  "$root\tests\voltagewarning_tests.lpr",
+  "$root\software\voltagewarning.pas")
 
 # The latch that makes the program incapable of changing a chip: what it
 # stops, what it must never stop, and that nothing quietly falls off the list.

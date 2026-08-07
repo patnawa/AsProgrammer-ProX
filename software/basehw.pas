@@ -10,7 +10,12 @@ uses
 type
 
 //รายชื่ออุปกรณ์ที่รองรับ
-THardwareList = (CHW_NONE, CHW_CH341, CHW_CH347, CHW_AVRISP, CHW_USBASP, CHW_ARDUINO, CHW_FT232H, CHW_BUZZPIRAT, CHW_SERPROG, CHW_EZP);
+// CHW_SIM is a programmer that is not there: an in-memory 25-series part
+// driven through the same TBaseHardware seam as every real backend, so the
+// application above it runs unchanged with nothing plugged in.  It is last in
+// the list on purpose -- auto-detection walks real devices, and a simulator
+// that could be auto-selected would silently answer for absent hardware.
+THardwareList = (CHW_NONE, CHW_CH341, CHW_CH347, CHW_AVRISP, CHW_USBASP, CHW_ARDUINO, CHW_FT232H, CHW_BUZZPIRAT, CHW_SERPROG, CHW_EZP, CHW_SIM);
 
 // Capability-oriented seam used by admission, setup, and headless callers.
 // A caller asks only whether the selected programmer can serve its protocol;
@@ -28,7 +33,31 @@ TProgrammerMemoryCapabilities = record
   NativeWholeChipRead: boolean;
   NativeWholeChipWrite: boolean;
   NativeWholeChipErase: boolean;
+  // Whether this backend can clock four data lines, not one.
+  //
+  // False for every backend here, and that is a fact about the hardware
+  // rather than an unimplemented feature. The WCH DLL's fastest SPI entry
+  // point is CH347StreamSPI4, where the 4 counts *wires* -- CS, CLK, MOSI,
+  // MISO -- and there is no quad entry point at all. FT232H MPSSE drives one
+  // data line out and one in; reaching IO2 and IO3 would mean bit-banging
+  // all four, which costs more than the four-fold gain.
+  //
+  // The flag exists so that quadpolicy can tell an operator the useful
+  // thing: that their chip is ready and their programmer is the limit. A
+  // backend that gains the ability sets this and needs no other change.
+  SupportsQuadSPI: boolean;
 end;
+
+// What a given programmer model can serve, as a plain function of its id.
+//
+// Lifted out of TBaseHardware.GetMemoryCapabilities, which is where it used
+// to live, so that the table can be exercised without constructing a backend
+// -- and a backend needs a DLL present to construct. A table nobody can test
+// is a table where a capability quietly becomes True.
+function DefaultMemoryCapabilities(HW: THardwareList):
+  TProgrammerMemoryCapabilities;
+
+type
 
 //คลาสฐานของฮาร์ดแวร์
 TBaseHardware = class
@@ -201,36 +230,45 @@ begin
   Result := False;
 end;
 
-function TBaseHardware.GetMemoryCapabilities(
-  out Capabilities: TProgrammerMemoryCapabilities): boolean;
+function DefaultMemoryCapabilities(HW: THardwareList):
+  TProgrammerMemoryCapabilities;
 begin
-  FillChar(Capabilities, SizeOf(Capabilities), 0);
-  Capabilities.Known := FHardwareID <> CHW_NONE;
-  case FHardwareID of
+  FillChar(Result, SizeOf(Result), 0);
+  Result.Known := HW <> CHW_NONE;
+  case HW of
     CHW_CH347, CHW_BUZZPIRAT:
       begin
-        Capabilities.Protocols := [mpSPI, mpI2C];
-        Capabilities.RawSPICommands := True;
+        Result.Protocols := [mpSPI, mpI2C];
+        Result.RawSPICommands := True;
       end;
     CHW_CH341, CHW_AVRISP, CHW_USBASP, CHW_ARDUINO, CHW_FT232H:
       begin
-        Capabilities.Protocols := [mpSPI, mpI2C, mpMicroWire];
-        Capabilities.RawSPICommands := True;
+        Result.Protocols := [mpSPI, mpI2C, mpMicroWire];
+        Result.RawSPICommands := True;
       end;
-    CHW_SERPROG:
+    CHW_SERPROG, CHW_SIM:
       begin
-        Capabilities.Protocols := [mpSPI];
-        Capabilities.RawSPICommands := True;
+        Result.Protocols := [mpSPI];
+        Result.RawSPICommands := True;
       end;
     CHW_EZP:
       begin
-        Capabilities.Protocols := [mpSPI];
-        Capabilities.RawSPICommands := False;
-        Capabilities.NativeWholeChipRead := True;
-        Capabilities.NativeWholeChipWrite := True;
-        Capabilities.NativeWholeChipErase := True;
+        Result.Protocols := [mpSPI];
+        Result.RawSPICommands := False;
+        Result.NativeWholeChipRead := True;
+        Result.NativeWholeChipWrite := True;
+        Result.NativeWholeChipErase := True;
       end;
   end;
+  //SupportsQuadSPI is left False for every model, deliberately.  See the
+  //field's declaration: none of these can clock four data lines, and that is
+  //a fact about the silicon and its driver rather than a gap here.
+end;
+
+function TBaseHardware.GetMemoryCapabilities(
+  out Capabilities: TProgrammerMemoryCapabilities): boolean;
+begin
+  Capabilities := DefaultMemoryCapabilities(FHardwareID);
   Result := Capabilities.Known;
 end;
 

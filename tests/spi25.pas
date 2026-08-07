@@ -24,7 +24,9 @@ type
     fcBootBlock,   // one unambiguous sector map with mixed erase sizes
     fcMapBitTrap,  // bit 0 set but bit 1 clear: command, never a map
     fcConfigurableMap, // detection command + two selectable maps
-    fcAmbiguousMaps    // multiple maps without a way to select one
+    fcAmbiguousMaps,   // multiple maps without a way to select one
+    fcQuad,            // declares 1-1-4 and 1-4-4, QE at SR2 bit 1
+    fcQuadModeClocks   // declares 1-1-4 requiring continuous-read mode clocks
   );
 
 procedure SetFakeChip(AChip: TFakeChip);
@@ -105,6 +107,32 @@ begin
 
   // DWORD-11: page size 2^8
   PutDword(TablePtr + 40, $00000080);
+
+  // The quad fixtures carry the three words a quad read is decided from, so
+  // the bit positions in sfdp.pas are proved against a table rather than
+  // against a hand-built TSFDPInfo. A transposed shift in DWORD-3 sends the
+  // wrong dummy-cycle count, which shifts every byte of a read.
+  if AChip in [fcQuad, fcQuadModeClocks] then
+  begin
+    // DWORD-1 bit 21 = (1-4-4) supported, bit 22 = (1-1-4) supported
+    PutDword(TablePtr + 0, $00602001);
+
+    // DWORD-3: (1-4-4) in the low half, (1-1-4) in the high half.
+    //   bits  4:0  (1-4-4) dummy cycles   = 6
+    //   bits  7:5  (1-4-4) mode clocks    = 0
+    //   bits 15:8  (1-4-4) opcode         = EBh
+    //   bits 20:16 (1-1-4) dummy cycles   = 8
+    //   bits 23:21 (1-1-4) mode clocks    = 0 (or 2 for the trap fixture)
+    //   bits 31:24 (1-1-4) opcode         = 6Bh
+    if AChip = fcQuadModeClocks then
+      PutDword(TablePtr + 8, $6B48EB06)   // mode clocks = 2
+    else
+      PutDword(TablePtr + 8, $6B08EB06);
+
+    // DWORD-15 bits 22:20: Quad Enable Requirements = 1, meaning QE is bit 1
+    // of status register 2, read with 35h.
+    PutDword(TablePtr + 56, $00100000);
+  end;
 
   case AChip of
 

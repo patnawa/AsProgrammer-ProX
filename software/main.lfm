@@ -1272,6 +1272,12 @@ object MainForm: TMainForm
         RadioItem = True
         OnClick = MenuHWEZPClick
       end
+      object MenuHWSIM: TMenuItem
+        AutoCheck = True
+        Caption = 'Simulated (no hardware) - W25Q64 in memory'
+        RadioItem = True
+        OnClick = MenuHWSIMClick
+      end
     end
     object ScriptsMenuItem: TMenuItem
       Caption = 'Скрипты'
@@ -1743,6 +1749,10 @@ object MainForm: TMainForm
     object SaveLogMenuItem: TMenuItem
       Caption = 'Save log to file...'
       OnClick = SaveLogMenuItemClick
+    end
+    object SaveSessionReportMenuItem: TMenuItem
+      Caption = 'Save session report...'
+      OnClick = SaveSessionReportMenuItemClick
     end
   end
   object DropdownMenuLock: TPopupMenu

@@ -58,9 +58,13 @@ Nothing here is inferred upward. A chip whose voltage cannot be established is a
 <tr><td><b>🏭 Production mode</b></td><td>HMAC-authenticated jobs, canonical chip profiles, durable signed evidence, and anti-replay state</td></tr>
 <tr><td><b>🔬 Diagnostics</b></td><td>Chip doctor, true-capacity/counterfeit test, surface scan, SFDP decode, and a connection doctor</td></tr>
 <tr><td><b>🧪 Lab Tools</b></td><td>I²C bus scanner, SPI console and UART terminal — kept in their own menu, out of the way of the flash programmer</td></tr>
+<tr><td><b>🆕 Uncatalogued chips</b></td><td>A part the chip table has never heard of is described from its own SFDP data — provisionally, and read-only wherever its declared geometry does not hold together</td></tr>
+<tr><td><b>📄 Session report</b></td><td>One saveable document per session: rail, chip, every admission step with its verdict, backup hashes, timings. A check that never ran is marked as such, never as one that passed</td></tr>
+<tr><td><b>↩️ Interrupted writes</b></td><td>An append-only journal beside the backup, so a write that lost its cable is resumable rather than redone in full — and refused outright if the chip, image or backup has moved</td></tr>
+<tr><td><b>🖥️ No hardware needed</b></td><td>A simulated programmer with a 25-series part in memory, so the program runs, demos and reproduces bug reports with nothing plugged in</td></tr>
 </table>
 
-Every rule above lives in a hardware-free core unit and is covered by the test suite — **25 suites, no hardware required**. See [`docs/testing.md`](docs/testing.md).
+Every rule above lives in a hardware-free core unit and is covered by the test suite — **33 suites, no hardware required**. See [`docs/testing.md`](docs/testing.md).
 
 ---
 

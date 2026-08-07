@@ -3,6 +3,220 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.36.0.0 — eight things that were decided somewhere nobody could look
+
+Eight changes, and what they have in common is that each replaces a judgement
+call with something a person can check. A gate that says "pending live
+validation" and a gate that names the six outstanding checklist items refuse
+exactly the same operations; only one of them tells you what to do next.
+
+- **`signalchar`**, the place a bench measurement of what a programmer drives
+  on CS/CLK/MOSI is written down.
+
+  Everything in this program's electrical model is downstream of one sentence
+  in the rail report: *"assumed to follow the rail, not measured"*. A board
+  that switches VCC to 1.8 V while its logic keeps swinging to 3.3 V passes the
+  rail check, passes the preflight, passes the whole admission ladder, and
+  destroys the part. Nothing in software can see it.
+
+  `ch347hw` and `ft232hhw` no longer assert an answer to that question; they
+  ask this unit. The table is **empty**, which is the correct and current state
+  of the world — nobody has put a probe on those pins — so the program still
+  says "assumed" and production admission still refuses. What changes is that
+  recording a measurement is now a six-line diff in one place, after which the
+  rail report, the preflight, the CLI's `signal_mv`/`signal_measured` and the
+  session report all start carrying the measured number without further edits.
+
+  And if the measurement comes back *bad* — signals at 3.3 V on a 1.8 V rail —
+  the preflight refuses on `signal_voltage_too_high`, using a rule that was
+  already written. The table is compiled in rather than read from a file, for
+  the same reason the evidence table below is: it unlocks the strictest gate in
+  the program, so it has to be reviewable in source.
+
+  `hardware/test-procedure.md` now ends by telling you where to put the result,
+  and says plainly that three of its four possible outcomes are still worth
+  recording.
+
+- **`validationgate`**, which turns "pending live validation" into a checklist
+  with ticks against it.
+
+  SPI NAND erase/program and destructive Smart Write over libusb are both
+  written, both tested, and both unreachable. Each design document sets out a
+  numbered list of what live validation involves — and neither says what result
+  lifts the gate. So the gate stayed shut not because the evidence was missing
+  but because nobody could point at the thing that would settle it.
+
+  The two checklists now live in this unit as data. `ChipwrightCLI --gates`
+  prints them with covered items ticked; a refused `--nand-write` or
+  `--smart-write` names the outstanding items and the document they come from.
+  Releasing a capability is a transcription of a hardware-in-loop run into one
+  `Append(...)` call, and the destructive HIL workflow now leaves behind a
+  draft of exactly that record — with the checklist coverage deliberately left
+  at zero, because a workflow that filled that in for itself would be attesting
+  to work it cannot see.
+
+  Coverage does not accumulate across runs. The value of "restore the original
+  image and verify it" is that it happened to the same part, in the same
+  session, as the identification that opened the run.
+
+  The environment tokens stay, and are not a second way through: they are how
+  the validation run itself is performed, since somebody has to issue
+  destructive commands before any evidence can exist. A run that uses one while
+  the capability is gated now says it is a validation attempt, not a validated
+  operation.
+
+- **`sfdpprofile`**, which describes a chip the catalogue has never heard of.
+
+  The catalogue holds 658 SPI NOR entries. A part that is missing from it was a
+  dead end: the JEDEC ID came back, the vendor byte decoded, and there was
+  nowhere to go — while the chip had been carrying a full description of its own
+  geometry the whole time, in the SFDP tables this program already parses
+  completely.
+
+  Every incoherent geometry falls back to **read-only** rather than to a guess:
+  a declared-but-unresolvable sector map, a capacity that is not a whole number
+  of erase units, a part above 16 MiB that names no four-byte erase opcode.
+  Reading is the operation that cannot destroy anything and is how somebody
+  gets their data off an unknown part, so it is the last thing surrendered.
+
+  It narrows the voltage question by nothing, and that is what makes it safe to
+  add. SFDP has no supply-voltage field anywhere, so the four-tier ladder runs
+  unchanged — including tier 4, which works from the JEDEC ID and catches the
+  dangerous parts. The synthesised name is prefixed `SFDP-` and is built so it
+  cannot trip the name-based inference rules; the suite asserts that, because a
+  voltage inferred from a string this program made up itself would be the worst
+  kind of wrong.
+
+  The GUI's SFDP path used to name such a part `SFDP 8192K` and leave its
+  JEDEC ID blank — so two different parts got the same name in the log, the
+  backup manifest and the evidence file, and the identity re-check before every
+  destructive step had nothing to compare against. It now carries the ID that
+  was read.
+
+- **`quadpolicy`**, and an honest answer about quad reads.
+
+  Most parts can be read four bits at a time, which on a 16 MiB chip is the
+  difference between a coffee and a glance. Quad needs the QE bit set, and QE
+  is non-volatile: setting it is a permanent modification to somebody else's
+  chip, made for the programmer's convenience, and a board that boots its flash
+  in single-bit mode can be made unbootable by it. So the rule is narrow and
+  absolute — **use quad if it is already on, never turn it on** — and there is
+  no flag that changes it.
+
+  `sfdp` now parses the three words the decision needs: DWORD-1's mode bits,
+  DWORD-3's opcodes and dummy cycles, and DWORD-15's quad-enable requirement,
+  which is what says whether QE lives at bit 1 of SR2 (Winbond) or bit 6 of
+  SR1 (Macronix — the bit the Winbond layout calls SEC). Reading the wrong
+  table does not give a wrong answer, it gives a plausible wrong answer.
+
+  A declared mode needing continuous-read mode clocks is refused outright: get
+  the mode byte wrong and the part reads the next command as an address, and
+  the way out is a reset the programmer may not be able to issue.
+
+  And then the honest part. **No supported programmer can drive four data
+  lines.** The WCH DLL's fastest SPI entry point is `CH347StreamSPI4`, where the
+  4 counts wires — CS, CLK, MOSI, MISO — and there is no quad entry point at
+  all; FT232H MPSSE drives one line out and one in. So `SupportsQuadSPI` is
+  False on every backend, and the SFDP report says the useful thing: your chip
+  is ready, your programmer is the limit. That is worth more than silence, and
+  the policy is in place for the day a backend gains the ability.
+
+- **`sessionreport`**, the document a bench session leaves behind.
+
+  Authenticated production produces signed evidence. Bench work produced a
+  scrolling log pane, which cannot be attached to an invoice and disappears
+  when the window closes. Every fact worth recording was already computed
+  somewhere; nothing collected them. **Log → Save session report...** now does.
+
+  Its value is entirely in what it refuses to smooth over. A check that never
+  ran is marked `[ ]` and stays in the list, because a report showing six ticks
+  because the seventh check never happened is worse than no report. A refusal is
+  an outcome, not an absence — a session where the program declined to write is
+  a successful session and reads that way. The rail lines are carried through
+  from `railreport` verbatim, so "not measurable on this programmer" and
+  "assumed to follow the rail" arrive intact. There is no summary verdict,
+  because this unit has no basis for deciding whether a session went well.
+
+- **`writejournal`**, so an interrupted write does not have to be redone in full.
+
+  Step 8 of the write chain is erase-and-program. If USB drops halfway, the chip
+  is in a state nothing in this program could describe: some blocks erased, some
+  programmed, and no record of which. The backup made the data recoverable, but
+  only by writing the whole part again — minutes of redone work, and another
+  chance to be interrupted.
+
+  The journal is append-only, and that is the entire design. A file that rewrote
+  itself after each block would have a window in which it is half old and half
+  new, and the crash this exists for is exactly the crash that lands in that
+  window. A header is written once and each completed unit is one appended,
+  flushed line. A line counts only once its newline is on disk.
+
+  That is safe because every recorded unit is idempotent: erasing an erased
+  block sets it to FF again, programming a page with the bytes it already holds
+  writes the same bytes. A torn line costs one repeated block. The opposite
+  error — a line surviving for work that did not finish — would be data loss,
+  and the loss is held to the safe direction by construction.
+
+  The refusals are the other half. A resume is only the same operation as the
+  one that was planned if the chip identity, the capacity, the image and the
+  backup are all still what they were, and each is checked separately. The
+  backup one matters most: resuming without a matching backup is a write with
+  no way back, on a chip that is already half written.
+
+- **`simhw`**, a programmer that is not there.
+
+  The program has been unusable without hardware, which costs three things:
+  nobody can evaluate it before buying a CH347, a bug report cannot be
+  reproduced without the reporter's chip, and the README screenshots can only be
+  made at a bench. The test suites solved this for themselves four times over,
+  but all of those sit above or beside `TBaseHardware`, so none could be
+  *selected*. This one is a `TBaseHardware`: **Hardware → Simulated (no
+  hardware)**, and everything above it runs unchanged.
+
+  It models the wire, not the engine. A program without WEL does nothing,
+  silently. Programming only clears bits, so a missing erase produces exactly
+  the corruption it produces on silicon. A program past the end of a page wraps
+  to the head of that same page. An erase address inside a sector erases the
+  whole sector. All four are behaviours that make a caller's bug invisible, and
+  a simulator that smoothed them over would certify code that fails on the
+  first real chip.
+
+  It calls itself SIMULATED everywhere the programmer name reaches, and there
+  is no setting that changes that: a screenshot or a report that came from here
+  and does not say so is a false record of work on somebody's board. Its
+  electrical capabilities are the honest ones for a thing with no pins — it
+  reports that it cannot measure anything, exactly as the CH347 does. Reporting
+  a perfect 1.8 V would have made every electrical check pass while proving
+  nothing about them. It is last in the hardware list and auto-detection never
+  selects it.
+
+- **`voltagewarning`**, lifted out of a GUI function.
+
+  The last warning before a 1.8 V part meets a rail that would destroy it lived
+  inside `VoltageWarningOK`, interleaved with three `MessageDlg` calls, so none
+  of its cases could be exercised. The decision has nothing to do with a screen:
+  it is a function of the chip's range, the programmer, and the rail that
+  programmer is set to. The dialogs are what you do with the answer.
+
+  The case worth having tests for is Auto. On a board that can switch its rail,
+  "Auto" is not a rail, and the rule has to tell an Auto that will resolve to
+  1.8 V from an Auto that cannot resolve at all — nagging about a correct rail
+  trains people to click through warnings, and staying silent about an
+  unresolvable one costs a chip. The suite walks every combination the context
+  record can hold and asserts two invariants across all of them: no verdict ever
+  approves a high rail for a low-voltage part, and no board that cannot switch
+  is ever offered a switch.
+
+  `DefaultMemoryCapabilities` came out of `TBaseHardware` in the same spirit —
+  the model-to-capability table needed a constructed backend to exercise, and a
+  backend needs a DLL present, so the table was untestable and a capability
+  could have quietly become True.
+
+Eight new suites, ~500 assertions, all hardware-free: `signalchar_tests`,
+`validationgate_tests`, `sfdpprofile_tests`, `quadpolicy_tests`,
+`sessionreport_tests`, `writejournal_tests`, `simhw_tests`,
+`voltagewarning_tests`.
+
 ## 4.35.1.0 — the credits describe what this program actually is
 
 The About box and README still read as though this were a fork with a few

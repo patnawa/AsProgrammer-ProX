@@ -66,6 +66,27 @@ Until that record exists, compile success must be described as compile
 coverage—not silicon validation—and the destructive environment gate stays.
 See [hardware-in-loop.md](hardware-in-loop.md).
 
+### What lifts the gate
+
+The six items above are the contents of `CH347_CHECKLIST` in
+`software/validationgate.pas`. `headlesscli.pas` reads them, so a refused
+`--smart-write` names the outstanding items and the document they come from
+instead of saying "await live validation", and `--help` prints the state of
+every gate.
+
+The environment token is not a second way through. It is how the validation
+run itself is performed: somebody has to issue destructive commands on a
+sacrificial part before any evidence can exist. A run that uses the token
+while the capability is gated prints a warning saying it is a validation
+attempt, not a validated operation.
+
+Releasing the capability is a transcription of a hardware-in-loop run into one
+`Append(Result, gcCH347LibusbWrite, ...)` call in `BuildTable`, with a bit per
+numbered item. Partial coverage keeps the gate shut and names what is missing.
+
+If an item is added to or removed from the list above, change
+`CH347_CHECKLIST` in the same commit; the suite asserts the count.
+
 ## Next backends
 
 The next cross-platform work should reuse the same `TBaseHardware` capability
