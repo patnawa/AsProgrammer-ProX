@@ -130,6 +130,12 @@ clock="$tmp/clock-tune"
 run_suite clocktune_tests "$clock" \
   tests/clocktune_tests.lpr software/clocktune.pas
 
+# The decidable parts of the bench tools: which I2C addresses may be probed,
+# and how a typed SPI command is parsed before it is sent.
+lab="$tmp/lab-tools"
+run_suite labtools_tests "$lab" \
+  tests/labtools_tests.lpr software/labtools.pas
+
 # The arithmetic that decides which blocks an erase may touch. Lifted out of
 # main.pas so it can be exercised at all; a wrong block list erases data that
 # was never part of the job and reports success.

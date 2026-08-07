@@ -19,6 +19,7 @@ uses
   electricalpreflight, railreport, sessionstate, clocktune, clicontract,
   safemode,
   norgeometrybuild,
+  labtools, synaser, Spin,
   baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw,
   serproghw, ezphw;
 
@@ -157,6 +158,10 @@ type
     MenuCheckIDBefore: TMenuItem;
     MenuAutoBackup: TMenuItem;
     MenuSafeMode: TMenuItem;
+    MenuLabTools: TMenuItem;
+    MenuI2CScanner: TMenuItem;
+    MenuSPIConsole: TMenuItem;
+    MenuUARTTerminal: TMenuItem;
     MenuConnectionDoctor: TMenuItem;
     MenuCompareChip: TMenuItem;
     MenuCompareFiles: TMenuItem;
@@ -336,6 +341,9 @@ type
     procedure MenuCH347VccClick(Sender: TObject);
     procedure MenuAutoTuneClockClick(Sender: TObject);
     procedure MenuSafeModeClick(Sender: TObject);
+    procedure MenuI2CScannerClick(Sender: TObject);
+    procedure MenuSPIConsoleClick(Sender: TObject);
+    procedure MenuUARTTerminalClick(Sender: TObject);
     procedure RadioCH347VccChange(Sender: TObject);
     procedure SpeedButton1Click(Sender: TObject);
     procedure StartAddressEditChange(Sender: TObject);
@@ -462,6 +470,11 @@ type
   //เพราะไม่มีบอร์ดไหนที่รองรับตัดไฟฝั่งเป้าหมายได้
   function ReVerifyInFreshSession(StartAddr, Len: cardinal): boolean;
 
+  //ล็อกและปลดล็อกหน้าจอระหว่างงานเดิน หน่วยหน้าจอที่แยกออกไปแล้วต้องใช้
+  //ตัวเดียวกัน ไม่ใช่ทำของตัวเองขึ้นมาใหม่ ไม่งั้นสองชุดจะไม่ตรงกัน
+  procedure LockControl;
+  procedure UnlockControl;
+
   //ดัมป์ตาราง SFDP ดิบ ๆ ลงไฟล์ ต้องอยู่ในโหมดโปรแกรมแล้ว
   function DumpSFDPToFile(const FileName: string; out ErrMsg: string): boolean;
 
@@ -548,6 +561,11 @@ var
 
   //ทำงานจากบรรทัดคำสั่ง ไม่มีคนนั่งอยู่หน้าจอที่จะตอบไดอะล็อกได้
   //ทุกจุดที่ปกติจะถาม ต้องตัดสินใจเองแบบปลอดภัยไว้ก่อน
+  //กันการเรียกซ้อน เพราะเมนูไม่เหมือนปุ่มบนแถบเครื่องมือ
+  //มันยังคลิกได้อยู่ตอนที่ thread หลักกำลังปั๊ม message
+  //อยู่ใน interface เพราะหน่วยหน้าจอที่แยกออกไปต้องเห็นด้วย
+  OperationRunning: boolean = False;
+
   CLIMode: boolean = False;
   //ผู้ใช้สั่ง --force มาแล้ว ยอมข้ามด่านที่ปกติจะปฏิเสธ
   CLIForce: boolean = False;
@@ -645,6 +663,13 @@ var
   LastProgramCRC: cardinal = 0;
 implementation
 
+//หน่วยหน้าจอที่แยกออกไปแล้ว อยู่ใน uses ของ implementation ไม่ใช่ของ
+//interface เพราะ labtoolsui ก็ uses main กลับมาเหมือนกัน วงกลมระหว่างสอง
+//implementation เป็นเรื่องที่ Pascal ยอม และเป็นตะเข็บที่ทำให้ย้าย UI ออก
+//จาก main.pas ได้ทีละหน้าต่างโดยไม่ต้องรื้อทั้งไฟล์พร้อมกัน
+uses
+  labtoolsui;
+
 
 var
   TimeCounter: TDateTime;
@@ -709,9 +734,6 @@ var
   UIProxy: TUIProxy;
   ActiveNORCancellation: TCancellationToken = nil;
 
-  //กันการเรียกซ้อน เพราะเมนูไม่เหมือนปุ่มบนแถบเครื่องมือ
-  //มันยังคลิกได้อยู่ตอนที่ thread หลักกำลังปั๊ม message
-  OperationRunning: boolean = False;
 
   //สถานะหน้าจอที่อ่านเก็บไว้บน thread หลักก่อนเริ่มงาน
   //thread เบื้องหลังต้องอ่านจากตรงนี้ ห้ามอ่านจาก control โดยตรง
@@ -4786,8 +4808,8 @@ begin
   Result := True;
 end;
 
-procedure LockControl; forward;
-procedure UnlockControl; forward;
+
+
 function VoltageWarningOK: boolean; forward;
 
 procedure RunChipCapacityTest;
@@ -9705,6 +9727,27 @@ begin
              'no menu, script or command line can reach them')
   else
     LogPrint('read-only safe mode is OFF: this chip can be changed again');
+end;
+
+
+//---------------------------------------------------------------- Lab Tools
+//
+//หน้าต่างจริงอยู่ใน labtoolsui ที่นี่เหลือแค่การรับคลิก ซึ่งคือสิ่งที่หน่วย
+//ของฟอร์มควรทำ: รู้ว่าผู้ใช้กดอะไร แล้วส่งต่อ
+
+procedure TMainForm.MenuI2CScannerClick(Sender: TObject);
+begin
+  ShowI2CScanner;
+end;
+
+procedure TMainForm.MenuSPIConsoleClick(Sender: TObject);
+begin
+  ShowSPIConsole;
+end;
+
+procedure TMainForm.MenuUARTTerminalClick(Sender: TObject);
+begin
+  ShowUARTTerminal;
 end;
 
 //หาความเร็วที่สายชุดนี้รับไหว แล้วติ๊กเมนูให้ตามนั้น

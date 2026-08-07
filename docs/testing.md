@@ -35,6 +35,7 @@ adds it to the builds.
 - `clocktune_tests`
 - `clicontract_tests`
 - `safemode_tests`
+- `labtools_tests`
 - `norgeometrybuild_tests`
 - `norengine_tests`
 - `eepromengine_tests`
@@ -57,6 +58,7 @@ adds it to the builds.
 | NOR and EEPROM operations | Differential planning, preserved neighbor bytes, read-twice trust, cancellation boundaries, fail-at-every-call matrices, and randomized final-image invariants |
 | SPI NAND | Geometry, bad-block planning, ECC verdicts, protection, status failures, cancellation, and virtual-device execution |
 | Chip health | Capacity/counterfeit tests restore the original data; protocol packet layouts remain byte-exact |
+| Lab tools | The I2C reserved ranges are never probed, the 7-bit to bus-byte shift is exact, a typed hex command with any malformed token is refused whole rather than partially sent, and control bytes never reach a memo raw |
 | Erase geometry | Boot-block regions tile the chip exactly, the smallest *aligned* erase type wins, a type that does not divide its region is refused, a declared-but-ambiguous sector map is never replaced with a guessed uniform one, and a missing dedicated 4-byte opcode fails the build instead of silently erasing at a wrapped address |
 | Read-only safe mode | Every action that can change a chip is refused while the latch is on, including status-register writes; no read is ever refused; an unclassified action defaults to destructive; and the refusal names both the operation and where the switch is |
 | Machine-facing contract | Exit codes and JSON key names stay pinned across releases, every engine error maps to an action an automated caller can take, no two outcomes share a number, and an unmeasurable value serialises as null rather than zero |

@@ -3,6 +3,63 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.34.0.0 — Lab Tools
+
+A new top-level **Lab Tools** menu, deliberately separate from the flash
+programmer surface. The main window has one job; folding a bus scanner and a
+serial terminal into it would clutter the screen that most needs to stay clear
+without gaining anything.
+
+- **I²C bus scanner.** Probes `0x08`–`0x77` with a bare address byte and
+  reports what acknowledges, flagging `0x50`–`0x57` as typical 24-series
+  EEPROM addresses without deciding for you.
+
+  It never touches the I²C reserved ranges, and that is not fastidiousness.
+  `0000 xxx` includes the general call address, which *every* device on the
+  bus obeys, and `1111 xxx` is the 10-bit addressing escape. A "scan" that
+  includes them is issuing commands rather than asking questions.
+
+  When nothing answers it says what to check, including that pull-ups sized
+  for 3.3 V rise too slowly at 1.8 V and produce intermittent detection rather
+  than clean silence.
+
+- **SPI console.** Type command bytes, optionally read N back, see a canonical
+  hex dump. It accepts `9F`, `9f`, `0x9F` and `9Fh`.
+
+  A malformed token refuses the **whole line** rather than being skipped. A
+  console that silently drops a token sends a command the operator never read
+  on screen, and on a flash chip the difference between `20` and `60` is one
+  sector versus the entire part. Three hex digits are refused too — that is
+  almost always a missing space, and guessing where it belongs sends something
+  else.
+
+  The window says plainly that it bypasses every guard in the program, and
+  that `9F` reads an ID while `C7` erases the chip. The one guard it cannot
+  bypass is read-only safe mode, because that latch is on the opcodes
+  themselves rather than on the buttons.
+
+- **UART terminal.** Talks straight to a COM port through the same `synaser`
+  the Arduino, Bus Pirate and serprog backends use, so it works with anything
+  plugged in rather than only with a programmer. Receive is polled on a timer
+  rather than a reader thread — a terminal does not need the synchronisation
+  machinery a thread would drag in.
+
+- The decidable parts — the address policy, the hex parser, the dump
+  formatting — live in a `labtools` core unit with 57 assertions. The dialogs
+  above them only move bytes and paint text.
+
+- The windows themselves live in a new `labtoolsui` unit, not in `main.pas`.
+  Adding 450 lines of dialog code to the file this project is trying to break
+  apart would have been the wrong direction, so the three handlers left behind
+  in the form are three lines each.
+
+  `labtoolsui`'s implementation uses `main`, and `main`'s implementation uses
+  `labtoolsui`. That circularity is legal because it is implementation to
+  implementation, and it is the seam that lets UI leave `main.pas` one window
+  at a time rather than in a flag-day rewrite. `LockControl`, `UnlockControl`
+  and `OperationRunning` moved to `main`'s interface so the extracted window
+  shares the real ones instead of growing a second, divergent copy.
+
 ## 4.33.0.0 — the erase geometry becomes testable, and FT232H gets characterised
 
 - **`BuildCurrentNORGeometry` moved out of `main.pas`** into a new

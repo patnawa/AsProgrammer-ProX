@@ -57,9 +57,10 @@ Nothing here is inferred upward. A chip whose voltage cannot be established is a
 <tr><td><b>🤖 Machine interface</b></td><td>Versioned JSON output and 14 distinct exit codes, so a script never has to parse a log line</td></tr>
 <tr><td><b>🏭 Production mode</b></td><td>HMAC-authenticated jobs, canonical chip profiles, durable signed evidence, and anti-replay state</td></tr>
 <tr><td><b>🔬 Diagnostics</b></td><td>Chip doctor, true-capacity/counterfeit test, surface scan, SFDP decode, and a connection doctor</td></tr>
+<tr><td><b>🧪 Lab Tools</b></td><td>I²C bus scanner, SPI console and UART terminal — kept in their own menu, out of the way of the flash programmer</td></tr>
 </table>
 
-Every rule above lives in a hardware-free core unit and is covered by the test suite — **23 suites, no hardware required**. See [`docs/testing.md`](docs/testing.md).
+Every rule above lives in a hardware-free core unit and is covered by the test suite — **24 suites, no hardware required**. See [`docs/testing.md`](docs/testing.md).
 
 ---
 
@@ -267,6 +268,20 @@ Exit codes distinguish the cases where your next action differs:
 | `4` programmer lost | `5` no chip answered | `6` chip mismatch | `7` voltage refused |
 | `8` connection unstable | `9` chip locked | `10` file size mismatch | `11` verify failed |
 | `12` file error | `13` cancelled | | |
+
+## Lab Tools
+
+> **Lab Tools** — `I2C bus scanner` · `SPI console` · `UART terminal`
+
+Bench instruments, kept in their own menu so the flash programmer's screen stays as simple as its job.
+
+| Tool | What it does |
+|---|---|
+| **I²C bus scanner** | Probes `0x08`–`0x77` and reports what acknowledges. It never touches the reserved ranges: `0000 xxx` contains the general call address that *every* device on the bus obeys, so a scan that includes it is issuing commands rather than asking questions |
+| **SPI console** | Raw command bytes in, hex dump out. A malformed token refuses the whole line rather than being skipped — on a flash chip the difference between `20` and `60` is one sector versus the entire part |
+| **UART terminal** | Straight to a COM port, not through the programmer, so it works with anything plugged in |
+
+The SPI console bypasses every guard in the program and says so. The one it cannot bypass is read-only safe mode, because that latch sits on the opcodes rather than on the buttons.
 
 ## Hardware
 

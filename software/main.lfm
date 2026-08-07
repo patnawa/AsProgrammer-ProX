@@ -1418,6 +1418,21 @@ object MainForm: TMainForm
       Caption = 'List FREE COM Ports'
       OnClick = ListcomportsMenuItemClick
     end
+	object MenuLabTools: TMenuItem
+      Caption = 'Lab Tools'
+      object MenuI2CScanner: TMenuItem
+        Caption = 'I2C bus scanner...'
+        OnClick = MenuI2CScannerClick
+      end
+      object MenuSPIConsole: TMenuItem
+        Caption = 'SPI console...'
+        OnClick = MenuSPIConsoleClick
+      end
+      object MenuUARTTerminal: TMenuItem
+        Caption = 'UART terminal...'
+        OnClick = MenuUARTTerminalClick
+      end
+    end
 	object CreditsMenuItem: TMenuItem
       Caption = 'Version'
       object MenuAbout: TMenuItem

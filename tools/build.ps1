@@ -187,6 +187,12 @@ $clockDir = Join-Path $env:TEMP "aspx-tests-clock-tune"
 Run-Suite "clocktune_tests" $clockDir @(
   "$root\tests\clocktune_tests.lpr", "$root\software\clocktune.pas")
 
+# The decidable parts of the bench tools: which I2C addresses may be probed,
+# and how a typed SPI command is parsed before it is sent.
+$labDir = Join-Path $env:TEMP "aspx-tests-lab-tools"
+Run-Suite "labtools_tests" $labDir @(
+  "$root\tests\labtools_tests.lpr", "$root\software\labtools.pas")
+
 # The arithmetic that decides which blocks an erase may touch. Lifted out of
 # main.pas so it can be exercised at all; a wrong block list erases data that
 # was never part of the job and reports success.
