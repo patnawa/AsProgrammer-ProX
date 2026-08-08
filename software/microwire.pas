@@ -5,7 +5,7 @@ unit microwire;
 interface
 
 uses
-  Classes, SysUtils, utilfunc;
+  Classes, SysUtils, utilfunc, safemode;
 
 const
   MW_MIN_ADDR_BITS = 2;
@@ -110,6 +110,9 @@ var
   writebuff: array[0..3] of byte;
   Sent, DataBits: integer;
 begin
+  //แลตช์โหมดอ่านอย่างเดียวต้องปิดที่ตัวคำสั่งแบบเดียวกับ spi25 ไม่ใช่แค่ปุ่ม
+  //คืน -1 เหมือนส่งไม่สำเร็จ ผู้เรียกทุกคนตรวจค่านี้อยู่แล้ว
+  if SafeModeBlocks(gaWrite) then Exit(-1);
   if (bufflen < 0) or (bufflen > Length(buffer)) then Exit(-1);
   if bufflen = 0 then Exit(0);
   //BitsWrite ของชั้นฮาร์ดแวร์เป็น byte ห้ามปล่อยให้คูณแล้ววนกลับ
@@ -129,6 +132,7 @@ function UsbAspMW_ChipErase(AddrBitLen: byte): integer;
 var
   writebuff: array[0..3] of byte;
 begin
+  if SafeModeBlocks(gaErase) then Exit(-1);
   if not BuildMWControl(2, AddrBitLen, writebuff) then Exit(-1); //ERAL
   Result := AsProgrammer.Programmer.MWWrite(1, AddrBitLen + 3, writebuff);
   if Result <> AddrBitLen + 3 then Result := -1;
@@ -138,6 +142,8 @@ function UsbAspMW_Ewen(AddrBitLen: byte): integer;
 var
   writebuff: array[0..3] of byte;
 begin
+  //EWEN คือประตูของทุกการเขียน/ลบ ปิดที่นี่ด้วยเพื่อกันสคริปต์เรียกตรง
+  if SafeModeBlocks(gaUnlock) then Exit(-1);
   if not BuildMWControl(3, AddrBitLen, writebuff) then Exit(-1); //EWEN
   Result := AsProgrammer.Programmer.MWWrite(1, AddrBitLen + 3, writebuff);
   if Result <> AddrBitLen + 3 then Result := -1;

@@ -130,6 +130,14 @@ constructor TSPINANDDevice.Create(HW: TBaseHardware;
 begin
   inherited Create;
   FHW := HW;
+  //ทุกคำสั่ง array (13h/10h/D8h) ส่ง row address ได้แค่ 3 ไบต์ ถ้า geometry
+  //มี row เกิน 2^24 ค่าจะ wrap ไปโดนเพจอื่นเงียบ ๆ แล้ว verify ก็อ่านเพจ
+  //ที่ wrap เหมือนกันจนผ่านทั้งที่เพจจริงไม่ถูกแตะ จึงต้องปฏิเสธตั้งแต่สร้าง
+  if (Geometry.BlockCount > 0) and (Geometry.PagesPerBlock > 0) and
+     (QWord(Geometry.BlockCount) * QWord(Geometry.PagesPerBlock) >
+      QWord(1) shl 24) then
+    raise Exception.Create('SPI NAND geometry exceeds the 24-bit row ' +
+      'address these commands can carry');
   FGeometry := Geometry;
   FConfig := Config;
 end;

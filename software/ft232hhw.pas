@@ -102,6 +102,7 @@ end;
 destructor TFT232HHardware.Destroy;
 begin
   DevClose;
+  inherited Destroy;
 end;
 
 function TFT232HHardware.GetLastError: string;

@@ -34,6 +34,8 @@ TBuzzpiratHardware = class(TBaseHardware)
 private
   FDevOpened: boolean;
   FStrError: string;
+  FDllHandle: THandle;
+  FActiveI2C: boolean; //ช่องที่ init จริง จะได้ปิดเฉพาะช่องนั้น
 
   BhlClearLog: TBhlClearLog;
   BhlResetOnce: TBhlResetOnce;
@@ -101,6 +103,12 @@ end;
 destructor TBuzzpiratHardware.Destroy;
 begin
   DevClose;
+  if FDllHandle <> 0 then
+  begin
+    FreeLibrary(FDllHandle);
+    FDllHandle := 0;
+  end;
+  inherited Destroy;
 end;
 
 function TBuzzpiratHardware.GetLastError: string;
@@ -138,7 +146,10 @@ begin
     Exit(false);
   end;
 
-  Handle := LoadLibrary('buzzpirathlp.dll');
+  //โหลดครั้งเดียวต่ออินสแตนซ์ DevOpen ถูกเรียกซ้ำทุกครั้งที่สลับโปรแกรมเมอร์
+  //ถ้า LoadLibrary ใหม่ทุกรอบ refcount ของโมดูลจะรั่วไปเรื่อย ๆ
+  if FDllHandle = 0 then FDllHandle := LoadLibrary('buzzpirathlp.dll');
+  Handle := FDllHandle;
   if Handle <> 0 then
   begin
     BhlClearLog          := TBhlClearLog(GetProcAddress(Handle, 'bhl_asprog_clear_log'));
@@ -257,6 +268,8 @@ begin
       Exit(false);
     end;
 
+    FActiveI2C := true;
+
     if just_i2c_scanner = 1 then
     begin
       memaux := BhlI2CGetMemaux();
@@ -340,6 +353,7 @@ begin
       Exit(false);
     end;
 
+    FActiveI2C := false;
     FDevOpened := true;
     Exit(true);
   end;
@@ -354,8 +368,7 @@ begin
   begin
     if MainForm.MenuBuzzpiratResetEach.Checked then
     begin
-         BhlI2CClose();
-         BhlSPIClose();
+      if FActiveI2C then BhlI2CClose() else BhlSPIClose();
     end;
   end;
 

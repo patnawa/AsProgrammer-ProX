@@ -5,7 +5,7 @@ unit spi95;
 interface
 
 uses
-  Classes, SysUtils, spi25, BaseHW;
+  Classes, SysUtils, spi25, BaseHW, safemode;
 
 const
   SPI95_MAX_3BYTE_SIZE = 16777216;
@@ -148,6 +148,8 @@ var
   buff: array[0..3] of byte;
   Sent: integer;
 begin
+  //แลตช์โหมดอ่านอย่างเดียว ปิดที่ตัวคำสั่งแบบเดียวกับ spi25
+  if SafeModeBlocks(gaWrite) then Exit(-1);
   if (bufflen < 0) or (bufflen > Length(buffer)) then Exit(-1);
   if bufflen = 0 then Exit(0);
   if not SPI95AddressRangeValid(ChipSize, Addr, bufflen) then Exit(-1);
@@ -211,6 +213,7 @@ function UsbAsp95_WriteSR(var sreg: byte): integer;
 var
   buff: array[0..1] of byte;
 begin
+  if SafeModeBlocks(gaWriteStatusRegister) then Exit(-1);
   Buff[0] := $01;
   Buff[1] := sreg;
   result := SPIWrite(1, 2, buff);

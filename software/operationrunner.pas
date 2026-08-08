@@ -217,8 +217,12 @@ begin
     else if (Len > QWord(High(SizeInt))) or (Len > High(cardinal)) then
       KeepFirstFailure(Failure, oeInvalidRequest,
         'requested range is too large for this process', ddNotOpened)
-    else if (Address > Request.Chip.Capacity) or
-            (Len > Request.Chip.Capacity - Address) then
+    else if (Request.Chip.Capacity > 0) and
+            ((Address > Request.Chip.Capacity) or
+             (Len > Request.Chip.Capacity - Address)) then
+      // Capacity 0 means "unspecified" everywhere else in this stack (the
+      // NOR engine and Execute both skip the bound then); treating it as a
+      // hard zero here failed every non-empty read with a misleading message.
       KeepFirstFailure(Failure, oeInvalidRequest,
         'requested range runs past the declared chip capacity', ddNotOpened);
 

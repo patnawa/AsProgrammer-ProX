@@ -6468,8 +6468,9 @@ procedure RefreshJobFile;
 var
   ErrMsg: string;
 begin
-  FillChar(CurrentJob, SizeOf(CurrentJob), 0);
-  CurrentJob.ChipName := '';
+  //ห้าม FillChar ทับ record ที่มี string ที่จัดการเอง: มันเหยียบ pointer
+  //โดยไม่ลด refcount ทำให้ ChipName เก่ารั่วทุกครั้งที่โหลดใหม่
+  CurrentJob := Default(TJobFile);
   CurrentJobLoadError := '';
 
   if ProdSettings.JobFile = '' then Exit;
@@ -6679,6 +6680,8 @@ end;
 //ชิปตัวนี้เคยเขียนผ่านไปแล้วหรือยัง
 //คืน False เมื่อเคยแล้วและผู้ใช้ไม่ยืนยันให้เขียนซ้ำ
 function DuplicateChipGuardOK(const UID: string): boolean;
+var
+  LogReadFailed: boolean;
 begin
   Result := True;
   if StrictProductionMode then Exit;
@@ -6690,7 +6693,18 @@ begin
     Exit(False);
   end;
 
-  if not ProdLogHasPassedUID(ProdSettings.ProdLogFile, UID) then Exit;
+  if not ProdLogHasPassedUID(ProdSettings.ProdLogFile, UID, LogReadFailed) then
+  begin
+    //บันทึกที่มีอยู่แต่อ่านไม่ได้ (ถูกล็อก/เสีย) ต้องปิดประตู ไม่ใช่ถือว่า
+    //"ไม่เคยเจอ" แล้วปล่อยชิปซ้ำผ่าน ด่านอื่นทุกด่านในไฟล์นี้ก็ปิดแบบเดียวกัน
+    if LogReadFailed then
+    begin
+      OpFail('the production log exists but could not be read, so the ' +
+             'duplicate-UID check cannot vouch for this chip');
+      Exit(False);
+    end;
+    Exit;
+  end;
 
   LogPrint(STR_PROD_UID_SEEN + UID);
 
@@ -8165,7 +8179,9 @@ function EraseFlashKB(chipsize: longword; pagesize: word): integer;
 var
   i: integer;
   busy: boolean;
+  BusyStarted: QWord;
 begin
+  Result := 0;
   ProgressReset(chipsize div pagesize);
 
   UsbAspMulti_EnableEDI();
@@ -8174,10 +8190,18 @@ begin
   for i:= 0 to (chipsize div pagesize)-1 do
   begin
     UsbAspMulti_ErasePage(i * pagesize);
-    //busy
+    //busy มีเพดานเวลาแบบเดียวกับตอนเขียน: ชิปหายต้องจบงาน ไม่ใช่วนตลอดกาล
+    BusyStarted := GetTickCount64;
     repeat
       if UserCancel then Exit;
       busy := UsbAspMulti_Busy();
+      if busy and (GetTickCount64 - BusyStarted >= 30000) then
+      begin
+        OpFail('KB flash stayed busy for more than 30 seconds',
+               longword(i) * pagesize);
+        Exit(-1);
+      end;
+      if busy then Sleep(1);
     until busy = false;
 
     ProgressStep(1);
@@ -8608,7 +8632,9 @@ var
     if UserCancel then Break;
   end;
 
-  if BytesRead <> ChipSize then
+  //อ่านตั้งแต่ StartAddress ถึงท้ายชิป จำนวนที่คาดคือ ChipSize - StartAddress
+  //ไม่ใช่ ChipSize เต็ม (ReadFlash25/ReadFlashI2C เทียบแบบเดียวกัน)
+  if BytesRead <> ChipSize - StartAddress then
     begin
       LogPrint(STR_WRONG_BYTES_READ);
       OpFail('the number of bytes read does not match the size asked for');
@@ -10928,7 +10954,10 @@ try
     end;
     TimeCounter := Time();
 
-    RomF.Position := 0;
+    //ต้อง Clear ก่อน: SaveToStream ไม่ตัดท้ายสตรีม ถ้าเคยอ่านชิปใหญ่กว่า
+    //บัฟเฟอร์ปัจจุบันไว้ใน RomF จะเหลือหางเก่าค้าง แล้ว CRC/ซีเรียล/verify
+    //จะคิดจากขนาดที่ผิด
+    RomF.Clear;
     MPHexEditorEx.SaveToStream(RomF);
     RomF.Position := 0;
 
@@ -10948,7 +10977,7 @@ try
     begin
       LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
       TimeCounter := Time();
-      RomF.Position :=0;
+      RomF.Clear;
       MPHexEditorEx.SaveToStream(RomF);
       RomF.Position :=0;
       if ComboSPICMD.ItemIndex <> SPI_CMD_KB then
@@ -10966,6 +10995,14 @@ try
   //I2C
   if RadioI2C.Checked then
   begin
+    //ตัวแลตช์จริงอยู่ที่ i2c.pas แล้ว ตรงนี้มีไว้บอกคนว่าทำไมถึงถูกปฏิเสธ
+    if SafeModeBlocks(gaWrite) then
+    begin
+      LogPrint(SafeModeRefusal(gaWrite));
+      NoteCLIOutcome(coChipLocked);
+      OpFail('read-only safe mode is on');
+      Exit;
+    end;
     if ( (ComboAddrType.ItemIndex < 0) or (not IsNumber(ComboPageSize.Text)) ) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
@@ -11005,7 +11042,7 @@ try
     if RunScriptFromFile(CurrentICParam.Script, 'write') then Exit;
     TimeCounter := Time();
 
-    RomF.Position := 0;
+    RomF.Clear; //กันหางเก่าค้าง (SaveToStream ไม่ตัดท้ายสตรีม)
     MPHexEditorEx.SaveToStream(RomF);
     RomF.Position := 0;
     if not ApplySerialToStream(RomF) then Exit;
@@ -11034,6 +11071,14 @@ try
   //Microwire
   if RadioMW.Checked then
   begin
+    //ตัวแลตช์จริงอยู่ที่ microwire.pas แล้ว ตรงนี้มีไว้บอกคนว่าทำไม
+    if SafeModeBlocks(gaWrite) then
+    begin
+      LogPrint(SafeModeRefusal(gaWrite));
+      NoteCLIOutcome(coChipLocked);
+      OpFail('read-only safe mode is on');
+      Exit;
+    end;
     if (not IsNumber(ComboMWBitLen.Text)) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
@@ -11054,7 +11099,7 @@ try
     if RunScriptFromFile(CurrentICParam.Script, 'write') then Exit;
     TimeCounter := Time();
 
-    RomF.Position := 0;
+    RomF.Clear; //กันหางเก่าค้าง (SaveToStream ไม่ตัดท้ายสตรีม)
     MPHexEditorEx.SaveToStream(RomF);
     RomF.Position := 0;
     if not ApplySerialToStream(RomF) then Exit;
@@ -11066,7 +11111,9 @@ try
     begin
       TimeCounter := Time();
       RomF.Position := 0;
-      VerifyFlashMW(RomF, StrToInt(ComboMWBitLen.Text), 0, StrToInt(ComboChipSize.Text));
+      //ตรวจเท่าที่เขียนจริง ไม่ใช่เต็มชิป: บัฟเฟอร์สั้นกว่าชิปจะทำให้
+      //ReadBuffer วิ่งเลยท้ายสตรีมแล้วล้มด้วย EReadError ทั้งที่เขียนสำเร็จ
+      VerifyFlashMW(RomF, StrToInt(ComboMWBitLen.Text), 0, MPHexEditorEx.DataSize);
     end;
 
   end;
@@ -13531,9 +13578,17 @@ end;
 
 procedure TMainForm.SpeedButton1Click(Sender: TObject);
 begin
-  if ComboBox_chip_scriptrun.Items.Capacity < 1 then Exit;;
+  //Count ไม่ใช่ Capacity: Capacity คือเนื้อที่ที่จองไว้ คอมโบที่ถูก Clear แล้วยังผ่านได้
+  if ComboBox_chip_scriptrun.Items.Count < 1 then Exit;
+  if Trim(ComboBox_chip_scriptrun.Text) = '' then Exit;
   if not OpenDevice() then exit;
-  if RunScriptFromFile(CurrentICParam.Script, ComboBox_chip_scriptrun.Text) then Exit;
+  try
+    RunScriptFromFile(CurrentICParam.Script, ComboBox_chip_scriptrun.Text);
+  finally
+    //ปุ่มนี้เป็นเจ้าของการเปิดอุปกรณ์ ต้องปิดเองทุกทางออก ไม่งั้น handle ค้าง
+    //จนกว่างานอื่นจะมาเปิดใหม่ (CH341/FT232H จะเปิดซ้ำไม่ได้)
+    AsProgrammer.Programmer.DevClose;
+  end;
 end;
 
 procedure TMainForm.StartAddressEditChange(Sender: TObject);
@@ -13874,6 +13929,8 @@ begin
   ChipListFile.Free;
   ChipListFile2.Free;
   ChipListFile3.Free;
+  ChipListFile4.Free;
+  ChipListFile5.Free;
   SettingsFile.Free;
   ScriptEngine.Free;
 end;
@@ -14239,7 +14296,18 @@ try
   //I2C
   if RadioI2C.Checked then
   begin
-  if ( (ComboAddrType.ItemIndex < 0) or (not IsNumber(ComboPageSize.Text)) ) then
+  //ตัวแลตช์จริงอยู่ที่ i2c.pas แล้ว ตรงนี้มีไว้บอกคนว่าทำไมถึงถูกปฏิเสธ
+  if SafeModeBlocks(gaErase) then
+    begin
+      LogPrint(SafeModeRefusal(gaErase));
+      NoteCLIOutcome(coChipLocked);
+      OpFail('read-only safe mode is on');
+      Exit;
+    end;
+  //ต้องกันขนาดชิปที่ไม่ใช่ตัวเลขตรงนี้ด้วย: StrToInt ระเบิดนอก RunOperation
+  //แล้ว finally จะพิมพ์ result: OK ทั้งที่ไม่ได้ลบอะไรเลย
+  if ( (ComboAddrType.ItemIndex < 0) or (not IsNumber(ComboPageSize.Text)) or
+       (not IsNumber(ComboChipSize.Text)) ) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
       OpFail('the chip size, the page size or the range is not usable');
@@ -14274,6 +14342,14 @@ try
   //Microwire
   if RadioMW.Checked then
   begin
+    //ตัวแลตช์จริงอยู่ที่ microwire.pas แล้ว ตรงนี้มีไว้บอกคนว่าทำไม
+    if SafeModeBlocks(gaErase) then
+    begin
+      LogPrint(SafeModeRefusal(gaErase));
+      NoteCLIOutcome(coChipLocked);
+      OpFail('read-only safe mode is on');
+      Exit;
+    end;
     if (not IsNumber(ComboMWBitLen.Text)) then
     begin
       LogPrint(STR_CHECK_SETTINGS);
@@ -16387,7 +16463,8 @@ begin
       begin
         OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('arduino_baudrate').NodeValue);
 
-        Arduino_BaudRate := StrToInt(OptVal);
+        //ค่าเสียใน settings.xml ต้องไม่ทำให้โปรแกรมเปิดไม่ขึ้น (นี่รันใน FormCreate)
+        Arduino_BaudRate := StrToIntDef(OptVal, 1000000);
       end;
 
     end;

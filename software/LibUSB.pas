@@ -461,7 +461,14 @@ initialization
 
 finalization
   {$ifdef windows}
-  if Lib <> 0 then FreeLibrary(Lib);
+  if Lib <> 0 then
+  begin
+    //ผูกกลับไปที่ stub ก่อนถอน DLL: อ็อบเจ็กต์ฮาร์ดแวร์อาจถูกทำลายหลัง
+    //finalization ของยูนิตนี้ (ลำดับ finalization ไม่การันตี) แบบเดียวกับ ch341dll
+    FreeLibrary(Lib);
+    Lib := 0;
+    LUBindAll;
+  end;
   {$endif}
 
 end.

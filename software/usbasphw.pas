@@ -88,6 +88,7 @@ end;
 destructor TUsbAspHardware.Destroy;
 begin
   DevClose;
+  inherited Destroy;
 end;
 
 function TUsbAspHardware.GetLastError: string;
@@ -121,12 +122,22 @@ begin
   //1 = รองรับบางส่วน
   //2 = รองรับเต็มรูปแบบ
 
-  USBSendControlMessage(FDevHandle, USB2PC, USBASP_FUNC_GETCAPABILITIES, 1, 0, 4, buff);
+  FillChar(buff, SizeOf(buff), 0);
+  //ถามความสามารถไม่สำเร็จ = ปิดการเชื่อมต่อ ห้ามตัดสินจากบัฟเฟอร์ที่ไม่ได้เขียน
+  if USBSendControlMessage(FDevHandle, USB2PC, USBASP_FUNC_GETCAPABILITIES, 1, 0, 4, buff) <> 4 then
+  begin
+    FStrError := STR_CONNECTION_ERROR + FHardwareName + '(capabilities query failed)';
+    USB_Close(FDevHandle);
+    FDevHandle := nil;
+    Exit(false);
+  end;
   //if buff[3] = 11 then result := 1;
   //if buff[3] = 1 then result := 2;
   if buff[3] = 0 then
   begin
     FStrError := STR_NO_EEPROM_SUPPORT;
+    USB_Close(FDevHandle);
+    FDevHandle := nil;
     Exit(false);
   end;
 
@@ -211,6 +222,7 @@ var
 begin
   if not FDevOpened then Exit(-1);
 
+  Result := 0;
   StopAfterWrite := 1;
 
   if WBufferLen > 0 then

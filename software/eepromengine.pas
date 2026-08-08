@@ -566,7 +566,18 @@ begin
           SetPending(Pending, oeInvalidRequest,
             'no EEPROM device adapter was supplied', ddNotOpened)
         else if not ValidateEEPROMPlan(Plan, ChipSize, Err) then
-          SetPending(Pending, oeInvalidPlan, Err, ddNotOpened);
+          SetPending(Pending, oeInvalidPlan, Err, ddNotOpened)
+        else if ((Request.Target.Length <> 0) or
+                 (Request.Target.Address <> 0)) and
+                ((Request.Target.Address <> Plan.RequestedAddress) or
+                 (Request.Target.Length <> Plan.RequestedLength)) then
+          // Same invariant the NOR twin enforces: events, outcome and
+          // evidence are published under the request's identity, so a plan
+          // built for a different range must be refused, not executed.  An
+          // all-zero target means the caller declared none (the same "zero
+          // is unspecified" convention Capacity uses).
+          SetPending(Pending, oeInvalidRequest,
+            'request range does not match the immutable plan', ddNotOpened);
 
         if Pending.Code = oeNone then
         begin

@@ -27,26 +27,29 @@ var
   i: integer;
   ScriptText: TStrings;
 begin
+  //คืนลิสต์เสมอ (ว่างถ้าไม่พบไฟล์) ผู้เรียกเป็นเจ้าของและต้อง Free เอง
+  Result:= TStringList.Create;
   if not FileExists(ScriptsPath+ScriptFile) then Exit;
 
-  Result:= TStringList.Create;
   ScriptText:= TStringList.Create;
+  try
+    ScriptText.LoadFromFile(ScriptsPath+ScriptFile);
 
-  ScriptText.LoadFromFile(ScriptsPath+ScriptFile);
-
-  for i:= 0 to ScriptText.Count-1 do
-  begin
-    st := Trim(Upcase(ScriptText.Strings[i]));
-    if Copy(st, 1, 2) = '{$' then
+    for i:= 0 to ScriptText.Count-1 do
     begin
-      SectionName := Trim(Copy(st, 3, pos('}', st)-3));
-      if SectionName <> '' then
+      st := Trim(Upcase(ScriptText.Strings[i]));
+      if Copy(st, 1, 2) = '{$' then
       begin
-        Result.Add(SectionName);
+        SectionName := Trim(Copy(st, 3, pos('}', st)-3));
+        if SectionName <> '' then
+        begin
+          Result.Add(SectionName);
+        end;
       end;
     end;
+  finally
+    ScriptText.Free;
   end;
-
 end;
 
 {คืนข้อความของเซกชันที่เลือก
@@ -66,7 +69,9 @@ begin
 
     if s then
     begin
-      if Trim(Copy(st, 1, 2)) = '{$' then break;
+      //ต้อง Trim ก่อนตัดสองตัวแรก ไม่งั้นหัวข้อเซกชันที่ย่อหน้าไว้จะไม่จบเซกชันก่อนหน้า
+      //แล้วโค้ดของเซกชันถัดไป (เช่น ERASE) จะถูกรันต่อท้ายเซกชันนี้
+      if Copy(Trim(st), 1, 2) = '{$' then break;
       ScriptText.Append(st);
     end
     else

@@ -5,7 +5,7 @@ unit spi45;
 interface
 
 uses
-  Classes, SysUtils, utilfunc, spi25, BaseHW;
+  Classes, SysUtils, utilfunc, spi25, BaseHW, safemode;
 
 function UsbAsp45_Busy(): boolean;
 
@@ -207,6 +207,8 @@ function UsbAsp45_ChipErase(): integer;
 var
   buff: array[0..3] of byte;
 begin
+  //แลตช์โหมดอ่านอย่างเดียว ปิดที่ตัวคำสั่งแบบเดียวกับ spi25
+  if SafeModeBlocks(gaErase) then Exit(-1);
   buff[0]:= $C7;
   buff[1]:= $94;
   buff[2]:= $80;
@@ -219,6 +221,7 @@ function UsbAsp45_DisableSP(): integer;
 var
   buff: array[0..3] of byte;
 begin
+  if SafeModeBlocks(gaUnlock) then Exit(-1);
   Buff[0] := $3D;
   Buff[1] := $2A;
   Buff[2] := $7F;
@@ -268,6 +271,8 @@ var
   addr: array[0..2] of byte;
   Sent: integer;
 begin
+  //แลตช์โหมดอ่านอย่างเดียว ปิดที่ตัวคำสั่งแบบเดียวกับ spi25
+  if SafeModeBlocks(gaWrite) then Exit(-1);
   if (bufflen < 0) or (bufflen > Length(buffer)) then Exit(-1);
   //82h (Main Memory Page Program Through Buffer 1) may erase/program bytes
   //outside a short payload. Refuse partial updates rather than destroy data.

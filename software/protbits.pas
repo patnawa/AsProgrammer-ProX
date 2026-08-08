@@ -507,6 +507,13 @@ begin
     Area := ChipSize
   else
     Area := Unit_ shl (P.BP - 1);
+
+  //ตาราง Winbond (BP สามบิต) โหมดเซกเตอร์หยุดที่ 32K: BP=100/101/110 ล้วน
+  //ล็อก 32K เท่ากัน ไม่ใช่ 64K/128K ตามสูตรยกกำลัง ถ้าไม่หนีบ แถบ 32K ที่
+  //ล็อกจริง (ตอน CMP=1) จะถูกรายงานว่าเขียนได้ แล้วชิปทิ้งงานเขียนเงียบ ๆ
+  if P.SEC and (P.BPBits <> 4) and (Area > 32 * 1024) then
+    Area := 32 * 1024;
+
   if Area > ChipSize then Area := ChipSize;
 
   if P.TB then

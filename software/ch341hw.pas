@@ -75,6 +75,7 @@ end;
 destructor TCH341Hardware.Destroy;
 begin
   DevClose;
+  inherited Destroy;
 end;
 
 function TCH341Hardware.GetLastError: string;
@@ -409,15 +410,22 @@ end;
 
 function TCH341Hardware.MWIsBusy: boolean;
 var
-  port: byte;
+  status: LongWord; //CH341GetStatus เขียนเต็ม 32 บิต ห้ามใช้ตัวแปรแคบกว่านี้
+  ok: boolean;
 begin
+  if not FDevOpened then Exit(true);
+
   CH341Set_D5_D0(FDevHandle, %00101001, 0);
   CH341Set_D5_D0(FDevHandle, %00101001, 1); //cs ขึ้น
 
-  CH341GetStatus(FDevHandle, @port);
-  result := not IsBitSet(port, 7);
+  status := 0;
+  ok := CH341GetStatus(FDevHandle, @status);
 
   CH341Set_D5_D0(FDevHandle, %00101001, 0);
+
+  //อ่านสถานะไม่ได้ = ตอบว่ายังยุ่ง ให้ WaitNotBusyMW หมดเวลาแทนที่จะเขียนทับชิปที่ยังโปรแกรมอยู่
+  if not ok then Exit(true);
+  result := not IsBitSet(status, 7);
 end;
 
 end.

@@ -191,6 +191,7 @@ var
   Node, ChipNode: TDOMNode;
   j, i: integer;
   cs: string;
+  ScriptSections: TStrings;
 begin
   Result := False;
 
@@ -316,7 +317,12 @@ begin
                if ChipNode.Attributes.GetNamedItem('script') <> nil then
                begin
                  Main.CurrentICParam.Script:= UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('script').NodeValue);
-                 MainForm.ComboBox_chip_scriptrun.Items := scriptsfunc.GetScriptSectionsFromFile(Main.CurrentICParam.Script);
+                 ScriptSections := scriptsfunc.GetScriptSectionsFromFile(Main.CurrentICParam.Script);
+                 try
+                   MainForm.ComboBox_chip_scriptrun.Items := ScriptSections;
+                 finally
+                   ScriptSections.Free;
+                 end;
                  MainForm.ComboBox_chip_scriptrun.ItemIndex := 0;
                end
                else

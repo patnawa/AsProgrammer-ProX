@@ -5,7 +5,7 @@ unit i2c;
 interface
 
 uses
-  Classes, SysUtils, DateUtils, utilfunc;
+  Classes, SysUtils, DateUtils, utilfunc, safemode;
 
 const
 
@@ -336,6 +336,9 @@ var
   i, Chunk, Sent, Total: integer;
   CurAddr: longword;
 begin
+  //แลตช์โหมดอ่านอย่างเดียวต้องปิดที่ตัวคำสั่งแบบเดียวกับ spi25 ไม่ใช่แค่ปุ่ม
+  //คืน -1 เหมือนส่งไม่สำเร็จ ผู้เรียกทุกคนตรวจค่านี้อยู่แล้ว
+  if SafeModeBlocks(gaWrite) then Exit(-1);
   if (bufflen < 0) or (bufflen > Length(buffer)) then Exit(-1);
   if bufflen = 0 then Exit(0);
   if not I2CAddressRangeValid(AddrType, Address, bufflen) then Exit(-1);

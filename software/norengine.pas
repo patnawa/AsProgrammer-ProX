@@ -562,14 +562,25 @@ begin
                 end;
 
                 State.EndCriticalCommand;
+                // CommandFinished feeds the write journal's "unit physically
+                // done" marks.  A failed transport with an idle chip is
+                // equally consistent with "the opcode never started", so a
+                // failed command must never be recorded as completed work —
+                // that is the exact direction the journal forbids.  (The
+                // EEPROM twin already publishes only after confirmed
+                // success.)
+                if Pending.Code <> oeNone then Break;
                 State.CommandFinished(
                   NORPlanStepKindName(Plan.Steps[StepIndex].Kind),
                   Plan.Steps[StepIndex].Address,
                   Plan.Steps[StepIndex].Length);
-                if Pending.Code <> oeNone then Break;
                 if State.CancellationPending then
                 begin
+                  // The command drained to idle, so its bytes are real work;
+                  // count them before honouring the cancellation.
                   CancelAfterDrain := True;
+                  Inc(DoneBytes, Plan.Steps[StepIndex].Length);
+                  State.ReportProgress(DoneBytes, TotalBytes);
                   Break;
                 end;
               end;

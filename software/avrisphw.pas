@@ -107,6 +107,7 @@ end;
 destructor TAvrispHardware.Destroy;
 begin
   DevClose;
+  inherited Destroy;
 end;
 
 function TAvrispHardware.GetLastError: string;
@@ -277,6 +278,7 @@ var
 begin
   if not FDevOpened then Exit(-1);
 
+  Result := 0;
   StopAfterWrite := 1;
 
   if WBufferLen > 0 then
@@ -425,9 +427,10 @@ var
 begin
   if not FDevOpened then Exit(-1);
 
-  SetLength(buff, 2+HEADER_SIZE);
-
   bytes := ByteNum(BitsWrite);
+  if Length(buffer) < bytes then Exit(-1); //กันอ่านเกินท้ายบัฟเฟอร์ของผู้เรียก
+
+  SetLength(buff, bytes+HEADER_SIZE);
 
   buff[0] := CMD_MW_WRITE;
   buff[1] := bytes;
@@ -435,7 +438,7 @@ begin
   buff[3] := CS;
   buff[4] := BitsWrite;
 
-  Move(buffer, buff[HEADER_SIZE], 2);
+  Move(buffer[0], buff[HEADER_SIZE], bytes);
 
   result := usb_bulk_write(FDevHandle, OUT_EP, buff[0], bytes+HEADER_SIZE, STREAM_TIMEOUT_MS)-HEADER_SIZE;
   if result = bytes then result := BitsWrite;
@@ -446,13 +449,14 @@ function TAvrispHardware.MWIsBusy: boolean;
 var
   buf: byte;
 begin
+  if not FDevOpened then Exit(true);
+
   buf := CMD_MW_BUSY;
-  result := False;
+  //ถามสถานะไม่สำเร็จ = ตอบว่ายังยุ่ง ให้ timeout ชั้นบนจัดการ ดีกว่าเขียนทับชิปที่ยังโปรแกรมอยู่
+  if usb_bulk_write(FDevHandle, OUT_EP, buf, 1, STREAM_TIMEOUT_MS) <> 1 then Exit(true);
+  if usb_bulk_read(FDevHandle, IN_EP, buf, 1, STREAM_TIMEOUT_MS) <> 1 then Exit(true);
 
-  usb_bulk_write(FDevHandle, OUT_EP, buf, 1, STREAM_TIMEOUT_MS);
-  usb_bulk_read(FDevHandle, IN_EP, buf, 1, STREAM_TIMEOUT_MS);
-
-  if buf = 1 then result := True;
+  result := buf = 1;
 end;
 
 end.

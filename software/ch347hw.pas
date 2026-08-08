@@ -85,6 +85,7 @@ end;
 destructor TCH347Hardware.Destroy;
 begin
   DevClose;
+  inherited Destroy;
 end;
 
 function TCH347Hardware.GetLastError: string;
@@ -488,7 +489,8 @@ var
   mLength: Cardinal;
   mBuffer: array[0..mCH347_PACKET_LENGTH-1] of Byte;
 begin
-  if not FDevOpened then Exit;
+  //USB ล้มเหลว = ไม่มีข้อมูล ตอบ $FF (บัสว่าง) ห้ามตอบขยะจากสแตก
+  if not FDevOpened then Exit($FF);
 
   mBuffer[0] := mCH341A_CMD_I2C_STREAM;
   mBuffer[1] := mCH341A_CMD_I2C_STM_IN;
@@ -496,10 +498,11 @@ begin
   mBuffer[2] := mCH341A_CMD_I2C_STM_END;
 
   mLength := 3;
-  CH347WriteData(FDevHandle, @mBuffer, @mLength);
+  if not CH347WriteData(FDevHandle, @mBuffer, @mLength) then Exit($FF);
 
   mLength:= mCH347_PACKET_LENGTH;
-  CH347ReadData(FDevHandle, @mBuffer, @mLength);
+  if not CH347ReadData(FDevHandle, @mBuffer, @mLength) then Exit($FF);
+  if mLength < 1 then Exit($FF);
 
   result := mBuffer[0];
 end;
@@ -509,19 +512,21 @@ var
   mLength: Cardinal;
   mBuffer: array[0..mCH347_PACKET_LENGTH-1] of Byte;
 begin
-  if not FDevOpened then Exit;
+  //USB ล้มเหลว = ไม่ถือว่าได้ ACK ห้ามตอบขยะจากสแตกเป็น ACK
+  if not FDevOpened then Exit(false);
 
   mBuffer[0] := mCH341A_CMD_I2C_STREAM;
   mBuffer[1] := mCH341A_CMD_I2C_STM_OUT or 1;
   mBuffer[2] := data;
   mBuffer[3] := mCH341A_CMD_I2C_STM_END;
   mLength := 4;
-  CH347WriteData(FDevHandle, @mBuffer, @mLength);
+  if not CH347WriteData(FDevHandle, @mBuffer, @mLength) then Exit(false);
 
   mLength:= mCH347_PACKET_LENGTH;
-  CH347ReadData(FDevHandle, @mBuffer, @mLength);
+  if not CH347ReadData(FDevHandle, @mBuffer, @mLength) then Exit(false);
+  if mLength < 1 then Exit(false);
 
-  result := boolean(mBuffer[0]);
+  result := mBuffer[0] <> 0;
 end;
 
 //MICROWIRE_____________________________________________________________________

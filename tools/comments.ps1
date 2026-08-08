@@ -1,11 +1,14 @@
 # Extracts or replaces source comments, for translating them in bulk.
 #
-#   tools\comments.ps1 -Mode dump  -Files main.pas,spi25.pas   > comments.tsv
+#   tools\comments.ps1 -Mode dump  -Files main.pas,spi25.pas -Out comments.tsv
 #   tools\comments.ps1 -Mode apply -Map translated.tsv
 #
 # dump  writes  file <TAB> line <TAB> comment text
 # apply reads the same columns back and rewrites the comment text in place,
 # leaving the code before the comment untouched.
+#
+# Use -Out rather than `>`: under Windows PowerShell 5.1 redirection writes
+# UTF-16, which apply's UTF-8 reader then fails to split and silently no-ops.
 #
 # Only // comments outside string literals and { } blocks that are not
 # compiler directives ({$...}) are touched.
@@ -13,7 +16,8 @@
 param(
   [ValidateSet('dump','apply')] [string]$Mode = 'dump',
   [string[]]$Files,
-  [string]$Map
+  [string]$Map,
+  [string]$Out
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,7 +39,7 @@ function Find-CommentStart([string]$line) {
 }
 
 if ($Mode -eq 'dump') {
-  foreach ($f in $Files) {
+  $outLines = foreach ($f in $Files) {
     $path = Join-Path $root $f
     if (-not (Test-Path $path)) { continue }
     $lines = [System.IO.File]::ReadAllLines($path, $utf8)
@@ -47,18 +51,30 @@ if ($Mode -eq 'dump') {
       "{0}`t{1}`t{2}" -f $f, ($n + 1), $text
     }
   }
+  if ($Out) {
+    [System.IO.File]::WriteAllLines($Out, [string[]]$outLines, $utf8)
+  } else {
+    $outLines
+  }
   exit 0
 }
 
 # apply
 $rows = [System.IO.File]::ReadAllLines($Map, $utf8)
 $byFile = @{}
+$parsed = 0
 foreach ($r in $rows) {
   if ($r.Trim() -eq '') { continue }
   $p = $r -split "`t", 3
   if ($p.Count -lt 3) { continue }
   if (-not $byFile.ContainsKey($p[0])) { $byFile[$p[0]] = @{} }
   $byFile[$p[0]][[int]$p[1]] = $p[2]
+  $parsed++
+}
+if ($parsed -eq 0) {
+  # A TSV with zero usable rows is an input problem (usually UTF-16 from `>`),
+  # never a valid no-op; failing loudly beats "replaced nothing" silence.
+  throw "no usable rows in $Map (is it tab-separated UTF-8? dump with -Out, not >)"
 }
 
 foreach ($f in $byFile.Keys) {

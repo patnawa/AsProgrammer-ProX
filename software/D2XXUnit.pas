@@ -635,13 +635,16 @@ function Read_USB_Device_Buffer( Read_Count : Integer ) : Integer;
 // at the time of the request + the read timeout value.
 Var Read_Result : Integer;
 Begin
-
-if (read_count = 1) then
-  begin
-  read_result := read_count;
-  end;
+Read_Result := 0;
 FT_IO_Status := FT_Read(FT_Handle,@FT_In_Buffer,Read_Count,@Read_Result);
-If FT_IO_Status <> FT_OK then FT_Error_Report('FT_Read',FT_IO_Status);
+If FT_IO_Status <> FT_OK then
+  Begin
+  FT_Error_Report('FT_Read',FT_IO_Status);
+  // A failed read must never look like a full one: callers treat the return
+  // value as "bytes now valid in FT_In_Buffer", and stale buffer contents
+  // would otherwise be consumed as a live ACK/busy answer.
+  Read_Result := 0;
+  End;
 Result := Read_Result;
 End;
 

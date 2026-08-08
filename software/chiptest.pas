@@ -665,8 +665,12 @@ begin
     Exit;
   end;
 
-  if Got15 and (Length(ID15) >= 1) and (not Silent(ID15[0])) and
-     (ID15[0] <> ID9F[0]) then
+  //15h เป็น opcode อ่าน ID เฉพาะ Atmel AT25F รุ่นเก่า (ผู้ผลิต 1Fh) เท่านั้น
+  //บน Winbond/GigaDevice 15h คือ Read Status Register-3 และบน Macronix คือ
+  //RDCR (sregedit/protbits ก็ใช้แบบนั้น) ชิปแท้ที่ SR3/CR ไม่เป็นศูนย์จะตอบ
+  //ค่า register กลับมา ถ้าเอาไปเทียบเป็น manufacturer ID จะกล่าวหาชิปแท้ว่าปลอม
+  if (ID9F[0] = $1F) and Got15 and (Length(ID15) >= 1) and
+     (not Silent(ID15[0])) and (ID15[0] <> ID9F[0]) then
   begin
     Result := False;
     Detail := Format('9Fh says manufacturer %.2x but 15h says %.2x',

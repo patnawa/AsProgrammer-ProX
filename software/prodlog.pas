@@ -54,7 +54,11 @@ function AppendProdLog(const FileName: string; const Rec: TProdRecord): boolean;
 
 //เคยมีบรรทัดที่ UID นี้ผ่านไปแล้วหรือไม่
 //ไฟล์ที่ไม่มีอยู่ถือว่ายังไม่เคย ไม่ใช่ความผิดพลาด
-function ProdLogHasPassedUID(const FileName, UID: string): boolean;
+function ProdLogHasPassedUID(const FileName, UID: string): boolean; overload;
+//แบบที่แยก "อ่านไฟล์ไม่ได้" ออกจาก "ไม่เคยผ่าน": ไฟล์ที่มีอยู่แต่โหลดไม่ขึ้น
+//(ถูกล็อก/เสีย) ต้องให้ผู้เรียกปิดประตูเอง ไม่ใช่เงียบเหมือนไม่เคยเจอ
+function ProdLogHasPassedUID(const FileName, UID: string;
+  out ReadFailed: boolean): boolean; overload;
 
 //จำนวนบรรทัดที่ผ่านและไม่ผ่าน ใช้สรุปตอนจบชุดการผลิต
 procedure ProdLogCount(const FileName: string; out Passed, Failed: integer);
@@ -191,13 +195,22 @@ begin
   end;
 end;
 
-function ProdLogHasPassedUID(const FileName, UID: string): boolean;
+function ProdLogHasPassedUID(const FileName, UID: string): boolean; overload;
+var
+  ReadFailed: boolean;
+begin
+  Result := ProdLogHasPassedUID(FileName, UID, ReadFailed);
+end;
+
+function ProdLogHasPassedUID(const FileName, UID: string;
+  out ReadFailed: boolean): boolean; overload;
 var
   L: TStringList;
   i: integer;
   Want: string;
 begin
   Result := False;
+  ReadFailed := False;
 
   //ชิปที่ไม่มีเลขประจำตัวก็ตรวจซ้ำไม่ได้ ไม่ใช่เรื่องผิดปกติ
   Want := UpperCase(Trim(UID));
@@ -209,6 +222,7 @@ begin
     try
       L.LoadFromFile(FileName);
     except
+      ReadFailed := True;
       Exit;
     end;
 

@@ -97,6 +97,7 @@ destructor TArduinoHardware.Destroy;
 begin
   DevClose;
   FSerial.Free;
+  inherited Destroy;
 end;
 
 function TArduinoHardware.GetLastError: string;

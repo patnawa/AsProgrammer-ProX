@@ -3,6 +3,70 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.38.0.0 — a whole-project bug hunt: safe mode covers every bus, and failures stop impersonating success
+
+A systematic audit of every subsystem (engines, drivers, bus protocols,
+production gating, UI) fixed twenty-odd defects. The themes:
+
+- **Read-only Safe Mode now really covers every path.** The latch lived
+  only in the 25-series command layer; the I2C, MicroWire, 95-series,
+  45-series and KB9012 write/erase primitives had no gate at all, so with
+  Safe Mode on, pressing Write with a 24Cxx or 93Cxx selected simply wrote
+  the chip — the exact thing the mode promises cannot happen. Every
+  destructive primitive on every bus now refuses at the command layer, and
+  the Write/Erase buttons explain the refusal the way the SPI path always
+  did.
+
+- **A failed transfer can no longer be recorded as finished work.**
+  The NOR engine published "command finished" — the event the write
+  journal turns into a durable *this unit is physically done* mark — even
+  when the erase/program transfer had failed and the chip merely drained
+  to idle. A journal that claims un-done work is the one direction the
+  recovery design forbids; the mark is now published only after confirmed
+  success, matching the EEPROM engine.
+
+- **Silent-failure paths in the drivers now fail loudly or fail busy.**
+  The CH341 MicroWire busy poll wrote a 32-bit status into a 1-byte stack
+  variable (stack corruption on every poll) and trusted garbage when the
+  USB call failed; the CH347 I2C byte primitives fabricated ACKs out of an
+  uninitialized buffer when the transfer failed; the FT232H read helper
+  returned "1 byte received" for a failed 1-byte read, handing stale
+  buffer contents to I2C-ack and busy checks; the USBasp capability probe
+  judged an uninitialized byte. All of these now treat an unanswered
+  question as "busy" or "failed", never as an acknowledgement.
+
+- **The legacy write paths no longer measure the wrong buffer.** The
+  SPI-95/45/KB, I2C and MicroWire writes reused the global stream without
+  truncating it, so writing a smaller image after a larger read left a
+  stale tail: the production-log CRC was computed over bytes that were
+  never written, a serial number could be "applied" (and its counter
+  consumed) at an address beyond the real image, and the I2C verify
+  checked the inflated range. The stream is now cleared before each use,
+  and the MicroWire verify checks the bytes that were written instead of
+  the full chip size.
+
+- **Gates that could be talked past now hold.** The duplicate-UID check
+  treated an unreadable production log as "never seen this chip" and let
+  the unit through; it now refuses until the log can be read. The Chip
+  Doctor stopped accusing genuine Winbond/Macronix parts of being fake
+  when opcode 15h answered with a status/config register (15h is only an
+  ID opcode on legacy Atmel parts). The Winbond sector-protection table
+  now caps SEC=1 areas at 32 KB, so a protected band is never reported
+  writable under CMP=1.
+
+- **Hangs and crashes on unhappy paths.** The KB9012 status poll looped
+  forever when no chip answered (parking the 30-second per-page deadline
+  outside the loop that hung); it now times out, and the erase busy-wait
+  gained the same deadline the write path had. Selecting a scripted chip
+  with the app launched from the wrong working directory dereferenced an
+  uninitialized list (access violation during chip selection); reading a
+  95-series EEPROM from a non-zero start address always reported failure
+  and threw the data away; a corrupt `arduino_baudrate` in settings.xml
+  aborted startup; libusb procedure pointers dangled after unit
+  finalization; and a handful of leaks (script-section lists, chip-list
+  XML documents, the Buzzpirat helper DLL reference, a job-file string)
+  are closed.
+
 ## 4.37.3.0 — the clock panel now follows a finished tune
 
 - **The bus-clock box no longer shows the old clock after a tune.**
