@@ -982,6 +982,10 @@ msgstr "The chip id changed between reads (%s then %s). The connection is not re
 msgid "Connection stable: the id read back the same %d times"
 msgstr "Connection stable: the id read back the same %d times"
 
+#: msgstr.str_contact_busy
+msgid "The id reads all %.2x but the status register answers %.2xh with the busy flag set: the chip is alive and still finishing an earlier erase or write. Waiting for it to finish instead of resetting it"
+msgstr "The id reads all %.2x but the status register answers %.2xh with the busy flag set: the chip is alive and still finishing an earlier erase or write. Waiting for it to finish instead of resetting it"
+
 #: msgstr.str_blank_after_erase
 msgid "Checking the erase actually took..."
 msgstr "Checking the erase actually took..."

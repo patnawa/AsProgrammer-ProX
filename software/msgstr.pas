@@ -380,6 +380,12 @@ resourcestring
   STR_JOB_FAILED         = 'Job file rejected the buffer: ';
   STR_JOB_OK             = 'Job file check passed';
 
+  //--- ชิปที่เงียบเพราะกำลังทำงานอยู่ ไม่ใช่เพราะซ็อกเก็ตว่าง ---
+  STR_CONTACT_BUSY       = 'The id reads all %.2x but the status register answers '
+                         + '%.2xh with the busy flag set: the chip is alive and '
+                         + 'still finishing an earlier erase or write. Waiting for '
+                         + 'it to finish instead of resetting it';
+
 implementation
 
 end.

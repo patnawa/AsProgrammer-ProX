@@ -3,6 +3,62 @@
 All notable changes to Chipwright are recorded here. The version in the
 first entry must match `software/appver.pas`; CI enforces that invariant.
 
+## 4.37.3.0 — the clock panel now follows a finished tune
+
+- **The bus-clock box no longer shows the old clock after a tune.**
+
+  Auto tune applies its result by ticking the frequency menu item, and the
+  panel combo box reads its selection from that same menu — but ticking a
+  menu item from code does not fire the menu's OnClick, and nothing told
+  the panel to re-read. So after a tune the combo sitting right next to
+  the Tune button kept displaying whatever clock was set before (reported
+  from a CH347T stuck showing 7.5 MHz). The tuned clock *was* in effect —
+  every operation reads the menu, not the combo — but a panel that
+  contradicts the log's "auto tune: using 30 MHz" one line away reads as
+  a tune that did nothing. The tune now refreshes the panel the same way
+  a manual combo change always did.
+
+## 4.37.2.0 — a chip busy erasing is not an empty socket
+
+- **The contact gate now tells a busy chip apart from a missing one.**
+
+  A 25-series chip that is executing an erase or write ignores the JEDEC
+  `9Fh` identity command entirely — it reads back all `FF`, exactly like an
+  empty socket — but it still answers the `05h` status register with the
+  busy bit set. The contact-stability gate judged only by the ID, so a
+  retry during a chip erase (which takes minutes on large parts) was
+  reported as *"No chip is answering... what an empty socket looks like"*,
+  sending the operator to re-seat a clip that was fine. The message even
+  claimed the status register read back FF when nothing had read it.
+
+  Worse, the mute-chip recovery then fired a QPI exit and a soft reset at
+  the part — and a reset landing mid-erase cuts the operation short.
+
+  When the ID is mute, the gate now reads the status register first. If it
+  answers with busy set (and is not the floating-bus `FF`), the gate says
+  so, waits for the operation to drain under the existing chip-erase
+  timeout with cancel support, and only then resumes the stability passes.
+  The reset is never sent at a chip that is provably mid-operation. A bus
+  where both ID and status read `FF` still gets the empty-socket verdict —
+  and now that verdict's wording is true.
+
+## 4.37.1.0 — a preflight that passes with a note now counts as passed
+
+- **Erase and write no longer refuse chips whose supply voltage is unknown.**
+
+  When the catalog did not know a chip's Vcc, `BenchPreflightOK` printed
+  `preflight note: the chip supply voltage is unknown` and returned OK — by
+  design, since refusing there would lock out most of the catalog. But it
+  returned OK **without recording `sePreflightPassed`** in the session state
+  machine, unlike the normal success path. Arming then demanded that fact
+  and refused with `erase cannot be armed: electrical preflight has not
+  passed` — a message contradicting the note printed two lines above it.
+
+  Seen in the field on an EF4017 (Winbond W25Q64): connection stable 8/8,
+  ID matched, and erase still failed "out of order". The unknown-voltage
+  path now records the pass exactly as the checked path does, under the
+  same guard (only once a chip has actually answered).
+
 ## 4.37.0.0 — the three things that have to be right before a chip answers
 
 A chip stays silent for five reasons — empty socket, dead part, bad clip,

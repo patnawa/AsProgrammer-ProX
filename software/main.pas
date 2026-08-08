@@ -3204,7 +3204,8 @@ var
   ID: MEMORY_ID;
   Ref, Cur: string;
   i: integer;
-  Recovered: boolean;
+  Recovered, WaitedForBusy: boolean;
+  sreg: byte;
 begin
   Result := True;
   if not MainForm.MenuCheckContact.Checked then Exit;
@@ -3214,12 +3215,31 @@ begin
   LogPrint(STR_CONTACT_CHECKING);
   Ref := '';
   Recovered := False;
+  WaitedForBusy := False;
 
   i := 1;
   while i <= PASSES do
   begin
     FillChar(ID, SizeOf(ID), 0);
     UsbAsp25_ReadID(ID);
+
+    //ชิปที่กำลังลบหรือเขียนอยู่ข้างในไม่ตอบ 9Fh เลย อ่านได้ FF ล้วน
+    //เหมือนซ็อกเก็ตว่างทุกประการ แต่ยังตอบ 05h พร้อมบิต busy ติดอยู่
+    //ต้องแยกกรณีนี้ก่อนถึงทางกู้ข้างล่าง เพราะการยิงรีเซ็ตใส่ชิปที่กำลังลบ
+    //คือการตัดงานกลางคัน และก่อนคำตัดสินว่าไม่มีชิป เพราะชิปยังมีชีวิตอยู่
+    //(ลบทั้งชิปใช้เวลาเป็นนาที การลองซ้ำระหว่างนั้นจะเจอหน้าตาแบบนี้พอดี)
+    if (not WaitedForBusy) and (ID.ID9FH[0] = ID.ID9FH[1]) and
+       (ID.ID9FH[1] = ID.ID9FH[2]) and
+       ((ID.ID9FH[0] = $00) or (ID.ID9FH[0] = $FF)) and
+       UsbAsp25_BusyEx(sreg) and (sreg <> $FF) then
+    begin
+      LogPrint(Format(STR_CONTACT_BUSY, [ID.ID9FH[0], sreg]));
+      if not WaitNotBusy25(BUSY_TIMEOUT_CHIP) then Exit(False);
+      WaitedForBusy := True;
+      Ref := '';
+      i := 1;
+      Continue;
+    end;
 
     //ชิปที่ตอบ 00 หรือ FF ล้วนอาจแค่ค้างอยู่ในโหมดที่คุยด้วยแบบนี้ไม่ได้
     //ลองกู้หนึ่งครั้งแล้วเริ่มนับใหม่ ดีกว่ารายงานว่าไม่มีชิป
@@ -4348,6 +4368,11 @@ begin
     //การปฏิเสธตรงนี้จะทำให้ชิปส่วนใหญ่ในแค็ตตาล็อกใช้งานไม่ได้เลย
     LogPrint('preflight note: the chip supply voltage is unknown, so the ' +
              'rail could not be checked against it');
+    //ผ่านแบบมีหมายเหตุก็คือผ่าน ต้องบันทึกลงลำดับขั้นเหมือนทางปกติข้างล่าง
+    //ไม่งั้น MayArm จะปฏิเสธงานลบ/เขียนด้วยข้อความ "preflight has not passed"
+    //ทั้งที่ด่านนี้เพิ่งตอบว่าไม่ขัดข้อง
+    if Session.Holds(sfChipDetected) then
+      NoteSession(sePreflightPassed);
     Exit;
   end;
 
@@ -4610,6 +4635,11 @@ begin
   MenuCount := SPISpeedMenuLadder(Items);
   for i := 0 to MenuCount - 1 do
     Items[i].Checked := Items[i].Tag = Tag;
+
+  //การติ๊กเมนูด้วยโค้ดไม่ยิง OnClick กล่องคล็อกบนแผงซ้ายจึงไม่รู้ว่าเมนู
+  //ขยับไปแล้ว และจะโชว์ค่าเก่าค้างอยู่ข้าง ๆ ปุ่ม Tune ที่เพิ่งกดไป
+  //หน้าจอที่เถียงกับล็อกของตัวเองทำให้คนสรุปว่าการจูนไม่ทำงาน
+  RefreshBusClockPanel;
 
   LogPrint(Format('auto tune: using %s (stable to %s)',
     [ClockText(Tune.ChosenHz), ClockText(Tune.HighestStableHz)]));
